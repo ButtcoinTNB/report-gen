@@ -106,3 +106,65 @@ async def serve_report_file(report_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error serving file: {str(e)}")
+
+
+@router.post("/cleanup/{report_id}")
+async def cleanup_report_files(report_id: str):
+    """
+    Clean up all temporary files associated with a report after it has been successfully
+    downloaded. This ensures that uploaded files don't persist in storage.
+    
+    Args:
+        report_id: The ID of the report to clean up files for
+        
+    Returns:
+        A status message indicating success or failure
+    """
+    # Define paths for report files
+    report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+    
+    try:
+        if os.path.exists(report_dir) and os.path.isdir(report_dir):
+            # Get list of files before deletion for logging
+            files_to_delete = os.listdir(report_dir)
+            
+            # Remove all files in the directory
+            for filename in files_to_delete:
+                file_path = os.path.join(report_dir, filename)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    print(f"Deleted file: {file_path}")
+                    
+            # Remove the directory itself
+            os.rmdir(report_dir)
+            print(f"Deleted directory: {report_dir}")
+            
+            # Update database status if using Supabase
+            try:
+                from supabase import create_client, Client
+                
+                # Initialize Supabase client
+                supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+                
+                # Mark report as cleaned up in database
+                supabase.table("reports").update({"files_cleaned": True}).eq("id", report_id).execute()
+                print(f"Updated database for report {report_id}: files_cleaned=True")
+                
+            except Exception as e:
+                print(f"Error updating database status: {str(e)}")
+            
+            return {
+                "status": "success",
+                "message": f"Successfully cleaned up {len(files_to_delete)} files for report {report_id}"
+            }
+        else:
+            return {
+                "status": "warning",
+                "message": f"Report directory not found: {report_dir}"
+            }
+    except Exception as e:
+        print(f"Error cleaning up report files: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Failed to clean up report files: {str(e)}"
+        }

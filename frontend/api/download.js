@@ -14,6 +14,15 @@ export async function downloadPDF(reportId) {
     link.setAttribute("download", `report_${reportId}.pdf`);
     document.body.appendChild(link);
     link.click();
+    
+    // After successful download, clean up server files
+    try {
+      await cleanupReportFiles(reportId);
+      console.log("Cleanup completed for report files");
+    } catch (cleanupError) {
+      console.warn("Failed to clean up report files:", cleanupError);
+      // Don't throw the error as the download was still successful
+    }
 
     return true;
   } catch (error) {
@@ -29,6 +38,17 @@ export async function downloadReport(reportId) {
     return response.data;
   } catch (error) {
     console.error("Error getting download URL:", error);
+    throw error;
+  }
+}
+
+// Function to clean up report files after download
+export async function cleanupReportFiles(reportId) {
+  try {
+    const response = await axios.post(`${config.endpoints.download}/cleanup/${reportId}`);
+    return response.data;
+  } catch (error) {
+    console.error("Error cleaning up report files:", error);
     throw error;
   }
 } 
