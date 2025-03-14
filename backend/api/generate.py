@@ -143,19 +143,14 @@ async def generate_report(text: dict):
     print(f"Using {reports_used} reference reports for generation (total {len(context)} chars)")
 
     prompt = (
-        "You're an expert insurance report writer. Use the following reference "
-        "reports to generate a new insurance claim report based on the case "
-        "notes provided by the users. Do not retain information from the "
-        "reference reports, only use them to understand the same format, tone of "
-        "voice and style.\n\n"
-        f"Reference Reports:\n{context}\n\n"
-        f"New Case Notes:\n{text['content']}\n\n"
-        "Generate a structured report in the same format, style and tone of "
-        "voice as the reference reports. Only use the information from the "
-        "case notes provided by the users to generate the report, not the "
-        "information from the reference reports, as you'll only need them to "
-        "copy the format and tone of voice and style.\n\n"
-        "Make sure to include common sections in insurance reports such as:\n"
+        "You're an expert insurance report writer. Follow these important instructions:\n\n"
+        "1. REFERENCE REPORTS: I'm providing reference reports ONLY to show you the correct FORMAT, "
+        "STRUCTURE, STYLE, and TONE OF VOICE. DO NOT memorize or use any factual content from these references.\n\n"
+        "2. CASE NOTES: Generate a new report using ONLY the information from the user's case notes.\n\n"
+        "3. LANGUAGE: Generate the report in the SAME LANGUAGE as the case notes (either Italian or English).\n\n"
+        f"REFERENCE REPORTS (for format/style only):\n{context}\n\n"
+        f"CASE NOTES (use this content for your report):\n{text['content']}\n\n"
+        "Generate a structured insurance claim report that includes common sections such as:\n"
         "- CLAIM SUMMARY\n"
         "- CLAIMANT INFORMATION\n"
         "- INCIDENT DETAILS\n"
@@ -163,7 +158,9 @@ async def generate_report(text: dict):
         "- DAMAGES/INJURIES\n"
         "- INVESTIGATION FINDINGS\n"
         "- LIABILITY ASSESSMENT\n"
-        "- SETTLEMENT RECOMMENDATION"
+        "- SETTLEMENT RECOMMENDATION\n\n"
+        "Important: Match the professional tone, formatting, and style of the reference reports, "
+        "but ONLY use facts from the case notes."
     )
 
     response = requests.post(
@@ -231,11 +228,24 @@ async def generate_report_from_id(data: Dict[str, Any]):
         
         # Call the OpenRouter API
         prompt = (
-            "You're an expert insurance report writer. Generate a structured insurance claim report "
-            "based on the following case documents. Include sections for Claim Summary, Incident Details, "
-            "Assessment, and Recommended Action.\n\n"
-            f"Case Documents:\n{file_contents}\n\n"
-            "Format the report professionally and include all relevant details from the documents."
+            "You're an expert insurance report writer. Follow these important instructions:\n\n"
+            "1. REFERENCE REPORTS: I'm providing reference reports ONLY to show you the correct FORMAT, "
+            "STRUCTURE, STYLE, and TONE OF VOICE. DO NOT memorize or use any factual content from these references.\n\n"
+            "2. USER DOCUMENTS: Generate a new report using ONLY the information from the user's case documents.\n\n"
+            "3. LANGUAGE: Generate the report in the SAME LANGUAGE as the case documents (either Italian or English).\n\n"
+            f"REFERENCE REPORTS (for format/style only):\n{context}\n\n"
+            f"CASE DOCUMENTS (use this content for your report):\n{file_contents}\n\n"
+            "Generate a structured insurance claim report that includes common sections such as:\n"
+            "- CLAIM SUMMARY\n"
+            "- CLAIMANT INFORMATION\n"
+            "- INCIDENT DETAILS\n"
+            "- COVERAGE ANALYSIS\n"
+            "- DAMAGES/INJURIES\n"
+            "- INVESTIGATION FINDINGS\n"
+            "- LIABILITY ASSESSMENT\n"
+            "- SETTLEMENT RECOMMENDATION\n\n"
+            "Important: Match the professional tone, formatting, and style of the reference reports, "
+            "but ONLY use facts from the case documents."
         )
         
         response = requests.post(
