@@ -13,10 +13,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Get allowed origins - split by comma if it's a list
+frontend_urls = settings.FRONTEND_URL.split(',') if ',' in settings.FRONTEND_URL else [settings.FRONTEND_URL]
+
+# Add Vercel domain explicitly
+allowed_origins = frontend_urls + [
+    "https://report-gen-liard.vercel.app",
+    "https://report-gen.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL],  # Use the frontend URL from settings
+    allow_origins=allowed_origins,  # Allow multiple origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
