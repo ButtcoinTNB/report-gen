@@ -1,4 +1,5 @@
 import axios from "axios";
+import { config } from "../config.js";
 
 /**
  * Generate a report from uploaded documents
@@ -7,8 +8,8 @@ export async function generateReport(reportId) {
   try {
     console.log("Calling generate API with report ID:", reportId);
     
-    // Use the correct endpoint path
-    const response = await axios.post("http://localhost:8000/api/generate/from-id", {
+    // Use the configured API URL from config instead of hardcoded localhost
+    const response = await axios.post(`${config.endpoints.generate}/from-id`, {
       report_id: reportId
     });
     
