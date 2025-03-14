@@ -1,6 +1,7 @@
 'use client';
 import './globals.css';
 import React from 'react';
+import Head from 'next/head';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 
@@ -29,10 +30,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
+      <Head>
         <title>Insurance Report Generator</title>
         <meta name="description" content="Generate insurance reports with AI" />
-      </head>
+      </Head>
       <body>
         <ThemeProvider theme={theme}>
           <CssBaseline />

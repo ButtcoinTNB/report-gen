@@ -6,13 +6,11 @@ import {
   Paper, 
   CircularProgress,
   Alert,
-  AlertTitle,
   Grid,
   List,
   ListItem,
   ListItemText,
-  ListItemIcon,
-  Chip
+  ListItemIcon
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';

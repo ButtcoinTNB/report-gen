@@ -132,7 +132,7 @@ const EditPage = () => {
     
     try {
       // Call the API client function to finalize the report
-      const finalizedReport = await finalizeReport({
+      await finalizeReport({
         report_id: report.id,
         template_id: 1  // Always use template ID 1
       });
@@ -225,7 +225,7 @@ const EditPage = () => {
         
         <TextField
           label="Instructions for AI"
-          placeholder="E.g., 'Add more details to the damages section' or 'Make the tone more formal'"
+          placeholder="E.g., &apos;Add more details to the damages section&apos; or &apos;Make the tone more formal&apos;"
           value={aiInstructions}
           onChange={(e) => setAiInstructions(e.target.value)}
           fullWidth

@@ -19,7 +19,6 @@ import { finalizeReport, downloadReport } from '../api/report';
 export default function Home() {
   const [activeStep, setActiveStep] = useState(0);
   const [reportId, setReportId] = useState(null);
-  const [generatedText, setGeneratedText] = useState('');
   const [editedText, setEditedText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -42,7 +41,6 @@ export default function Home() {
       
       if (result && result.content) {
         console.log('Setting report content:', result.content.substring(0, 100) + '...');
-        setGeneratedText(result.content);
         setEditedText(result.content);
         setActiveStep(1); // Move to edit step automatically
       } else {
@@ -208,7 +206,6 @@ export default function Home() {
                 onClick={() => {
                   setActiveStep(0);
                   setReportId(null);
-                  setGeneratedText('');
                   setEditedText('');
                   setDownloadUrl(null);
                 }}

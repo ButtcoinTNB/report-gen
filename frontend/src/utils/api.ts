@@ -40,7 +40,7 @@ async function fetchWithErrorHandling(url: string, options: RequestInit = {}) {
  */
 export async function uploadFiles(files: File[]) {
   const formData = new FormData();
-  files.forEach((file, index) => {
+  files.forEach((file) => {
     formData.append(`files`, file);
   });
   
@@ -49,7 +49,7 @@ export async function uploadFiles(files: File[]) {
   
   return fetchWithErrorHandling(`${API_BASE_URL}/api/upload/documents`, {
     method: 'POST',
-    body: formData,
+    body: formData
   });
 }
 
@@ -72,16 +72,22 @@ export async function uploadDocument(file: File, reportId?: number, docType: str
   });
 }
 
+interface GenerateReportData {
+  report_id: number;
+  prompt?: string;
+  options?: Record<string, unknown>;
+}
+
 /**
  * Generate report content using uploaded files
  */
-export async function generateReport(data: any) {
-  return fetchWithErrorHandling(`${API_BASE_URL}/api/generate/generate/`, {
+export async function generateReport(data: GenerateReportData) {
+  return fetchWithErrorHandling(`${API_BASE_URL}/api/generate/report`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json'
     },
-    body: JSON.stringify(data),
+    body: JSON.stringify(data)
   });
 }
 
@@ -100,16 +106,22 @@ export async function previewReport(content: string) {
   });
 }
 
+interface FinalizeReportData {
+  report_id: number;
+  template_id: number;
+  content?: string;
+}
+
 /**
  * Finalize the report
  */
-export async function finalizeReport(data: any) {
+export async function finalizeReport(data: FinalizeReportData) {
   return fetchWithErrorHandling(`${API_BASE_URL}/api/format/final`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/json'
     },
-    body: JSON.stringify(data),
+    body: JSON.stringify(data)
   });
 }
 
