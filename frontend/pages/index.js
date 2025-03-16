@@ -11,6 +11,7 @@ import {
   TextField,
   CircularProgress
 } from '@mui/material';
+import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import Navbar from '../components/Navbar';
 import FileUpload from '../components/FileUpload';
 import { generateReport } from '../api/generate.js';
@@ -56,7 +57,7 @@ export default function Home() {
   };
 
   // Handler for finalizing and downloading the report
-  const handleDownloadReport = async () => {
+  const handleFinalizeReport = async () => {
     if (!reportId) {
       alert('Nessun ID di report trovato. Per favore carica i documenti e genera un report prima.');
       return;
@@ -117,128 +118,192 @@ export default function Home() {
     }
   };
 
-  // Render different components based on the active step
-  const renderStepContent = () => {
-    switch (activeStep) {
-      case 0:
-        // Upload step
-        return (
-          <>
-            <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
-              Carica i tuoi documenti
-            </Typography>
-            <Typography paragraph align="center" sx={{ mb: 4 }}>
-              Carica tutti i documenti relativi al tuo claim. L'AI genererà un report con il formato corretto.
-            </Typography>
-            <FileUpload onUploadSuccess={handleUploadSuccess} />
-            {isGenerating && (
-              <Box sx={{ textAlign: 'center', mt: 4 }}>
-                <CircularProgress />
-                <Typography variant="body1" sx={{ mt: 2 }}>
-                  Analizziamo i tuoi documenti e generiamo il report...
-                </Typography>
-              </Box>
-            )}
-          </>
-        );
-      case 1:
-        // Edit report step
-        return (
-          <>
-            <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
-              Revisiona e modifica il report
-            </Typography>
-            <Typography paragraph align="center" sx={{ mb: 4 }}>
-              Questo è il report generato dall'AI basato sui tuoi documenti. Puoi modificarlo prima di scaricarlo.
-            </Typography>
-            <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-              <TextField
-                fullWidth
-                multiline
-                minRows={15}
-                maxRows={30}
-                value={editedText}
-                onChange={(e) => setEditedText(e.target.value)}
-                variant="outlined"
-                sx={{ mb: 3, fontFamily: 'Georgia, serif' }}
-              />
-              <Button
-                variant="contained"
-                color="primary"
-                size="large"
-                onClick={handleDownloadReport}
-                disabled={isDownloading || !editedText.trim()}
-                fullWidth
-                startIcon={isDownloading ? <CircularProgress size={20} color="inherit" /> : null}
-              >
-                {isDownloading ? 'Processing...' : 'Download PDF Report'}
-              </Button>
-            </Paper>
-          </>
-        );
-      case 2:
-        // Download complete step
-        return (
-          <>
-            <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
-              Il tuo report è pronto
-            </Typography>
-            <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
-              <Typography variant="h6" gutterBottom>
-                Successo! Il tuo report è stato formattato e pronto per il download.
-              </Typography>
-              <Typography paragraph sx={{ mb: 4 }}>
-                Il tuo PDF mantiene lo stesso formato e stile dei nostri template standard, con le informazioni specifiche del tuo caso.
-              </Typography>
-              {downloadUrl && (
-                <Button 
-                  variant="contained" 
-                  color="primary"
-                  href={downloadUrl}
-                  target="_blank"
-                  sx={{ mt: 2 }}
-                >
-                  Scarica di nuovo
-                </Button>
-              )}
-              <Button 
-                variant="outlined"
-                onClick={() => {
-                  setActiveStep(0);
-                  setReportId(null);
-                  setEditedText('');
-                  setDownloadUrl(null);
-                }}
-                sx={{ mt: 2, ml: 2 }}
-              >
-                Crea un nuovo report
-              </Button>
-            </Paper>
-          </>
-        );
-      default:
-        return null;
+  // Handler for downloading the finalized PDF
+  const handleDownloadPDF = async () => {
+    try {
+      setIsDownloading(true);
+      await downloadReport(reportId);
+      setIsDownloading(false);
+    } catch (error) {
+      console.error("Error downloading report:", error);
+      setIsDownloading(false);
+      alert("There was an error downloading your report. Please try again.");
     }
   };
 
   return (
-    <>
+    <div>
       <Navbar />
-      <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
-        <Typography variant="h4" gutterBottom align="center" sx={{ mb: 4 }}>
-          Scrittore Automatico di Perizie
-        </Typography>
-
-        <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 5 }}>
+        <Box 
+          sx={{ 
+            textAlign: 'center', 
+            mb: 5,
+            maxWidth: 800,
+            mx: 'auto'
+          }}
+        >
+          <Typography 
+            variant="h2" 
+            component="h1" 
+            sx={{ 
+              fontWeight: 600, 
+              mb: 2,
+              fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' } 
+            }}
+          >
+            Insurance Report Generator
+          </Typography>
+          <Typography 
+            variant="h5" 
+            color="text.secondary" 
+            sx={{ 
+              mb: 3,
+              fontWeight: 400,
+              fontSize: { xs: '1rem', sm: '1.25rem' } 
+            }}
+          >
+            Upload your case documents and our AI will generate a formatted report for you
+          </Typography>
+        </Box>
+        
+        <Stepper 
+          activeStep={activeStep} 
+          alternativeLabel 
+          sx={{ 
+            mb: 5,
+            '& .MuiStepLabel-root .Mui-completed': {
+              color: 'success.main', 
+            },
+            '& .MuiStepLabel-root .Mui-active': {
+              color: 'primary.main', 
+            } 
+          }}
+        >
           {steps.map((label) => (
             <Step key={label}>
               <StepLabel>{label}</StepLabel>
             </Step>
           ))}
         </Stepper>
-
-        {renderStepContent()}
+        
+        {activeStep === 0 && (
+          <FileUpload onUploadSuccess={handleUploadSuccess} />
+        )}
+        
+        {activeStep === 1 && (
+          <Paper 
+            sx={{ 
+              p: 4, 
+              mb: 4, 
+              borderRadius: 3,
+              background: 'linear-gradient(145deg, rgba(255,255,255,1) 0%, rgba(249,249,252,1) 100%)'
+            }}
+          >
+            <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
+              Edit Report
+            </Typography>
+            <Typography variant="body1" sx={{ mb: 3, color: 'text.secondary' }}>
+              Review and edit the AI-generated report below before finalizing.
+            </Typography>
+            <TextField
+              fullWidth
+              multiline
+              rows={14}
+              variant="outlined"
+              value={editedText}
+              onChange={(e) => setEditedText(e.target.value)}
+              InputProps={{
+                sx: {
+                  fontFamily: 'SF Mono, Menlo, Monaco, Consolas, monospace',
+                  fontSize: '0.9rem',
+                  lineHeight: 1.6,
+                  borderRadius: 2
+                }
+              }}
+              sx={{ mb: 3 }}
+            />
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={handleFinalizeReport}
+              disabled={isGenerating}
+              sx={{ 
+                py: 1.5,
+                px: 4,
+                position: 'relative'
+              }}
+            >
+              {isGenerating ? (
+                <>
+                  <CircularProgress 
+                    size={24} 
+                    color="inherit" 
+                    sx={{ 
+                      position: 'absolute',
+                      left: 'calc(50% - 12px)'
+                    }} 
+                  />
+                  <span style={{ opacity: 0 }}>Finalizing...</span>
+                </>
+              ) : "Finalize Report"}
+            </Button>
+          </Paper>
+        )}
+        
+        {activeStep === 2 && (
+          <Paper 
+            sx={{ 
+              p: 4, 
+              mb: 4, 
+              borderRadius: 3,
+              background: 'linear-gradient(145deg, rgba(255,255,255,1) 0%, rgba(249,249,252,1) 100%)'
+            }}
+          >
+            <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
+              Download Report
+            </Typography>
+            <Typography variant="body1" sx={{ mb: 4, color: 'text.secondary' }}>
+              Your report has been successfully generated and is ready for download.
+            </Typography>
+            
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+              <Button
+                variant="contained"
+                color="primary"
+                size="large"
+                onClick={handleDownloadPDF}
+                disabled={isDownloading}
+                startIcon={<CloudDownloadIcon />}
+                sx={{ 
+                  py: 1.5,
+                  px: 4,
+                  position: 'relative'
+                }}
+              >
+                {isDownloading ? (
+                  <>
+                    <CircularProgress 
+                      size={24} 
+                      color="inherit" 
+                      sx={{ 
+                        position: 'absolute',
+                        left: 'calc(50% - 12px)'
+                      }} 
+                    />
+                    <span style={{ opacity: 0 }}>Downloading...</span>
+                  </>
+                ) : "Download PDF"}
+              </Button>
+            </Box>
+            
+            <Typography variant="body2" align="center" color="text.secondary">
+              Report ID: {reportId}
+            </Typography>
+          </Paper>
+        )}
       </Container>
-    </>
+    </div>
   );
 } 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   Box, 
   Button, 
@@ -10,12 +10,18 @@ import {
   List,
   ListItem,
   ListItemText,
-  ListItemIcon
+  ListItemIcon,
+  IconButton,
+  Chip
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import DeleteIcon from '@mui/icons-material/Delete';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import ImageIcon from '@mui/icons-material/Image';
+import DescriptionIcon from '@mui/icons-material/Description';
 import { uploadFile } from '../api/upload';
+import { useDropzone } from 'react-dropzone';
 
 interface FileUploadProps {
   onUploadSuccess: (reportId: number) => void;
@@ -28,14 +34,46 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
   // Using a default template ID of 1, no dropdown needed
   const templateId = 1;
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files.length > 0) {
-      // Convert FileList to array and append to existing files
-      const newFiles = Array.from(event.target.files);
-      setFiles(prevFiles => [...prevFiles, ...newFiles]);
-      setError(null);
+  // Get icon based on file type
+  const getFileIcon = (file: File) => {
+    const type = file.type.split('/')[0];
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (extension === 'pdf' || file.type === 'application/pdf') {
+      return <PictureAsPdfIcon color="error" />;
+    } else if (type === 'image') {
+      return <ImageIcon color="primary" />;
+    } else {
+      return <DescriptionIcon color="action" />;
     }
   };
+
+  // Get file size in readable format
+  const getFileSize = (size: number) => {
+    if (size < 1024) {
+      return `${size} bytes`;
+    } else if (size < 1024 * 1024) {
+      return `${(size / 1024).toFixed(1)} KB`;
+    } else {
+      return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    }
+  };
+  
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    setFiles(prevFiles => [...prevFiles, ...acceptedFiles]);
+    setError(null);
+  }, []);
+  
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
+    onDrop,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'image/*': ['.png', '.jpg', '.jpeg'],
+      'text/plain': ['.txt'],
+      'application/msword': ['.doc'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
+    }
+  });
 
   const handleRemoveFile = (index: number) => {
     setFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
@@ -43,9 +81,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
+    
     if (files.length === 0) {
-      setError('Please select at least one file to upload.');
+      setError("Please select at least one file to upload.");
       return;
     }
 
@@ -53,120 +91,155 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
     setError(null);
 
     try {
-      // Call the API to upload the files
-      const response = await uploadFile(files, templateId);
-      console.log('Upload response received:', response);
+      // Create FormData object
+      const formData = new FormData();
+      files.forEach(file => {
+        formData.append('files', file);
+      });
+      formData.append('template_id', templateId.toString());
+
+      const response = await uploadFile(formData);
+      console.log("Upload response:", response);
       
-      // Handle successful upload
+      // Check for success
       if (response && response.report_id) {
-        console.log('Report ID received:', response.report_id);
+        console.log("Upload success with report ID:", response.report_id);
         onUploadSuccess(response.report_id);
       } else {
-        console.error('Missing report_id in response:', response);
-        throw new Error('Invalid response from server: missing report_id');
+        setError("No report ID received from the server.");
       }
     } catch (err) {
-      console.error('Error uploading files:', err);
-      setError('Failed to upload files. Please try again.');
+      console.error("Error uploading files:", err);
+      setError("Failed to upload files. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-      <form onSubmit={handleSubmit}>
-        <Typography variant="h5" gutterBottom>
-          Upload Case Documents
+    <Paper sx={{ 
+      p: 4, 
+      mb: 4,
+      borderRadius: 3,
+      background: 'linear-gradient(145deg, rgba(255,255,255,1) 0%, rgba(249,249,252,1) 100%)'
+    }}>
+      <Box component="form" onSubmit={handleSubmit} noValidate>
+        <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
+          Upload Documents
         </Typography>
         
-        <Grid container spacing={3}>
-          <Grid item xs={12}>
-            <Box 
-              sx={{ 
-                border: '2px dashed #ccc', 
-                borderRadius: 2, 
-                p: 3, 
-                textAlign: 'center',
-                cursor: 'pointer',
-                '&:hover': { borderColor: '#1976d2' } 
-              }}
-              onClick={() => document.getElementById('file-upload')?.click()}
-            >
-              <input
-                type="file"
-                id="file-upload"
-                style={{ display: 'none' }}
-                onChange={handleFileChange}
-                accept=".pdf,.doc,.docx,.txt"
-                multiple // Allow multiple file selection
-              />
-              <CloudUploadIcon sx={{ fontSize: 60, color: '#1976d2', mb: 2 }} />
-              <Typography variant="h6" gutterBottom>
-                Drag & Drop or Click to Upload
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Supported formats: PDF, Word, Text
-              </Typography>
-              <Typography variant="body2" color="primary" sx={{ mt: 1 }}>
-                You can select multiple files
-              </Typography>
-            </Box>
-          </Grid>
-          
-          {files.length > 0 && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle1" gutterBottom>
-                Selected Files ({files.length})
-              </Typography>
-              <List>
+        <Box
+          {...getRootProps()}
+          sx={{
+            border: '1px dashed',
+            borderColor: isDragActive ? 'primary.main' : 'grey.300',
+            borderRadius: 2,
+            p: 3,
+            textAlign: 'center',
+            cursor: 'pointer',
+            mb: 3,
+            backgroundColor: isDragActive ? 'rgba(0, 113, 227, 0.05)' : 'transparent',
+            transition: 'all 0.2s ease-in-out',
+            '&:hover': {
+              borderColor: 'primary.main',
+              backgroundColor: 'rgba(0, 113, 227, 0.05)'
+            }
+          }}
+        >
+          <input {...getInputProps()} />
+          <CloudUploadIcon fontSize="large" color="primary" sx={{ mb: 2, fontSize: 45 }} />
+          <Typography variant="h6" gutterBottom>
+            {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            or click to browse your device
+          </Typography>
+          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
+            Supports PDF, DOC, DOCX, TXT, and image files
+          </Typography>
+        </Box>
+        
+        {files.length > 0 && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              Selected Files ({files.length})
+            </Typography>
+            <Paper variant="outlined" sx={{ maxHeight: 240, overflow: 'auto', borderRadius: 2 }}>
+              <List dense disablePadding>
                 {files.map((file, index) => (
-                  <ListItem 
+                  <ListItem
                     key={index}
                     secondaryAction={
-                      <Button 
-                        onClick={() => handleRemoveFile(index)}
-                        color="error"
-                        size="small"
-                        startIcon={<DeleteIcon />}
-                      >
-                        Remove
-                      </Button>
+                      <IconButton edge="end" aria-label="delete" onClick={() => handleRemoveFile(index)} size="small">
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
                     }
+                    sx={{ 
+                      borderBottom: index < files.length - 1 ? '1px solid' : 'none',
+                      borderColor: 'divider',
+                      py: 1
+                    }}
                   >
-                    <ListItemIcon>
-                      <InsertDriveFileIcon />
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      {getFileIcon(file)}
                     </ListItemIcon>
                     <ListItemText 
                       primary={file.name} 
-                      secondary={`${(file.size / 1024).toFixed(2)} KB`} 
+                      secondary={getFileSize(file.size)}
+                      primaryTypographyProps={{ 
+                        variant: 'body2', 
+                        sx: { 
+                          fontWeight: 500,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        } 
+                      }}
+                      secondaryTypographyProps={{ 
+                        variant: 'caption'
+                      }}
                     />
                   </ListItem>
                 ))}
               </List>
-            </Grid>
-          )}
-          
-          <Grid item xs={12}>
-            <Button
-              variant="contained"
-              size="large"
-              type="submit"
-              disabled={loading || files.length === 0}
-              startIcon={loading ? <CircularProgress size={20} color="inherit" /> : null}
-              fullWidth
-            >
-              {loading ? 'Uploading...' : `Upload ${files.length} Document${files.length !== 1 ? 's' : ''}`}
-            </Button>
-          </Grid>
-          
-          {error && (
-            <Grid item xs={12}>
-              <Alert severity="error">{error}</Alert>
-            </Grid>
-          )}
-        </Grid>
-      </form>
+            </Paper>
+          </Box>
+        )}
+        
+        {error && (
+          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
+            {error}
+          </Alert>
+        )}
+        
+        <Button
+          type="submit"
+          variant="contained"
+          color="primary"
+          size="large"
+          fullWidth
+          disabled={loading || files.length === 0}
+          sx={{ 
+            py: 1.5,
+            position: 'relative',
+            fontWeight: 500
+          }}
+        >
+          {loading ? (
+            <>
+              <CircularProgress 
+                size={24} 
+                color="inherit" 
+                sx={{ 
+                  position: 'absolute',
+                  left: 'calc(50% - 12px)'
+                }} 
+              />
+              <span style={{ opacity: 0 }}>Processing...</span>
+            </>
+          ) : files.length > 0 ? 'Upload and Generate Report' : 'Select Files to Upload'}
+        </Button>
+      </Box>
     </Paper>
   );
 };
