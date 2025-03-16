@@ -7,7 +7,7 @@ from config import settings
 router = APIRouter()
 
 
-def fetch_report_path_from_supabase(report_id: int):
+def fetch_report_path_from_supabase(report_id: str):
     """
     Retrieves the finalized report file path from Supabase.
     """
@@ -31,7 +31,7 @@ def fetch_report_path_from_supabase(report_id: int):
 
 
 @router.get("/{report_id}", response_model=dict)
-async def download_report(report_id: int):
+async def download_report(report_id: str):
     """
     Download a finalized report by ID.
     
@@ -90,7 +90,7 @@ async def download_report(report_id: int):
 
 
 @router.get("/file/{report_id}")
-async def serve_report_file(report_id: int):
+async def serve_report_file(report_id: str):
     """Serve the actual report file"""
     try:
         file_path = fetch_report_path_from_supabase(report_id)

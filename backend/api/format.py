@@ -13,7 +13,7 @@ from supabase import create_client, Client
 router = APIRouter()
 
 
-def fetch_report_from_supabase(report_id: int):
+def fetch_report_from_supabase(report_id: str):
     """
     Fetch the report content from Supabase using the report_id.
     """
@@ -32,7 +32,7 @@ def fetch_report_from_supabase(report_id: int):
         raise HTTPException(status_code=500, detail=f"Error fetching report: {str(e)}")
 
 
-def update_report_file_path(report_id: int, pdf_path: str):
+def update_report_file_path(report_id: str, pdf_path: str):
     """
     Updates the finalized report's file path in Supabase.
     """
