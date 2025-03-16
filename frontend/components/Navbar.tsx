@@ -7,7 +7,7 @@ const Navbar: React.FC = () => {
     <AppBar position="static" sx={{ backgroundColor: '#1976d2' }}>
       <Toolbar>
         <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-          Insurance Report Generator
+          Scrittore Automatico di Perizie
         </Typography>
         <Box>
           <Link href="/" passHref>

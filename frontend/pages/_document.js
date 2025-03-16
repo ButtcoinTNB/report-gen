@@ -5,7 +5,7 @@ export default function Document() {
     <Html lang="en">
       <Head>
         <meta charSet="utf-8" />
-        <meta name="description" content="Insurance Report Generator - Create formatted reports from case documents" />
+        <meta name="description" content="Scrittore Automatico di Perizie - Create formatted reports from case documents" />
         <link rel="icon" href="/favicon.ico" />
         <link
           rel="stylesheet"

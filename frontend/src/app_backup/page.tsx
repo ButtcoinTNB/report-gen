@@ -42,7 +42,7 @@ export default function Home() {
       <Navbar />
       <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
         <Typography variant="h4" gutterBottom align="center" sx={{ mb: 4 }}>
-          Insurance Report Generator
+          Scrittore Automatico di Perizie
         </Typography>
 
         <Stepper activeStep={activeStep} sx={{ mb: 4 }}>

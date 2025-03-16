@@ -58,7 +58,7 @@ export default function Home() {
   // Handler for finalizing and downloading the report
   const handleDownloadReport = async () => {
     if (!reportId) {
-      alert('No report ID found. Please upload documents and generate a report first.');
+      alert('Nessun ID di report trovato. Per favore carica i documenti e genera un report prima.');
       return;
     }
     
@@ -125,17 +125,17 @@ export default function Home() {
         return (
           <>
             <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
-              Upload your case documents
+              Carica i tuoi documenti
             </Typography>
             <Typography paragraph align="center" sx={{ mb: 4 }}>
-              Please upload all relevant files for your insurance case. Our AI will analyze them and generate a properly formatted report.
+              Carica tutti i documenti relativi al tuo claim. L'AI genererà un report con il formato corretto.
             </Typography>
             <FileUpload onUploadSuccess={handleUploadSuccess} />
             {isGenerating && (
               <Box sx={{ textAlign: 'center', mt: 4 }}>
                 <CircularProgress />
                 <Typography variant="body1" sx={{ mt: 2 }}>
-                  Analyzing your documents and generating report...
+                  Analizziamo i tuoi documenti e generiamo il report...
                 </Typography>
               </Box>
             )}
@@ -146,10 +146,10 @@ export default function Home() {
         return (
           <>
             <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
-              Review and Edit Report
+              Revisiona e modifica il report
             </Typography>
             <Typography paragraph align="center" sx={{ mb: 4 }}>
-              This is the AI-generated report based on your documents. You can edit it before downloading.
+              Questo è il report generato dall'AI basato sui tuoi documenti. Puoi modificarlo prima di scaricarlo.
             </Typography>
             <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
               <TextField
@@ -181,14 +181,14 @@ export default function Home() {
         return (
           <>
             <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
-              Your Report is Ready
+              Il tuo report è pronto
             </Typography>
             <Paper elevation={3} sx={{ p: 4, textAlign: 'center' }}>
               <Typography variant="h6" gutterBottom>
-                Success! Your report has been formatted and is ready.
+                Successo! Il tuo report è stato formattato e pronto per il download.
               </Typography>
               <Typography paragraph sx={{ mb: 4 }}>
-                Your PDF maintains the same formatting and style as our standard templates, with your specific case information.
+                Il tuo PDF mantiene lo stesso formato e stile dei nostri template standard, con le informazioni specifiche del tuo caso.
               </Typography>
               {downloadUrl && (
                 <Button 
@@ -198,7 +198,7 @@ export default function Home() {
                   target="_blank"
                   sx={{ mt: 2 }}
                 >
-                  Download Again
+                  Scarica di nuovo
                 </Button>
               )}
               <Button 
@@ -211,7 +211,7 @@ export default function Home() {
                 }}
                 sx={{ mt: 2, ml: 2 }}
               >
-                Create New Report
+                Crea un nuovo report
               </Button>
             </Paper>
           </>
@@ -226,7 +226,7 @@ export default function Home() {
       <Navbar />
       <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
         <Typography variant="h4" gutterBottom align="center" sx={{ mb: 4 }}>
-          Insurance Report Generator
+          Scrittore Automatico di Perizie
         </Typography>
 
         <Stepper activeStep={activeStep} sx={{ mb: 4 }}>

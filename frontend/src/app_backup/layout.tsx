@@ -31,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <Head>
-        <title>Insurance Report Generator</title>
+        <title>Scrittore Automatico di Perizie</title>
         <meta name="description" content="Generate insurance reports with AI" />
       </Head>
       <body>

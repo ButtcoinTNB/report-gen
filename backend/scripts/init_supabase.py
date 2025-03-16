@@ -1,5 +1,5 @@
 """
-Initialize Supabase tables for the insurance report generator.
+Initialize Supabase tables for the Scrittore Automatico di Perizie.
 
 This script creates the necessary tables in Supabase:
 1. reference_reports - For storing reference PDF templates
@@ -72,7 +72,7 @@ def create_table_if_not_exists(supabase: Client, table_name: str, definition: di
 
 
 def main():
-    print("Initializing Supabase for the insurance report generator...")
+    print("Initializing Supabase for the Scrittore Automatico di Perizie...")
     
     try:
         # Initialize Supabase client

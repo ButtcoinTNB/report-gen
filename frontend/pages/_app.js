@@ -26,7 +26,7 @@ export default function App({ Component, pageProps }) {
   return (
     <>
       <Head>
-        <title>Insurance Report Generator</title>
+        <title>Scrittore Automatico di Perizie</title>
         <meta name="description" content="Generate insurance reports with AI" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>

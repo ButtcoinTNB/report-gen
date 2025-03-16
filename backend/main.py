@@ -8,7 +8,7 @@ from api import upload, generate, format, edit, download
 from config import settings
 
 app = FastAPI(
-    title="Insurance Report Generator",
+    title="Scrittore Automatico di Perizie",
     description="API for generating structured insurance claim reports",
     version="0.1.0",
 )
@@ -43,7 +43,7 @@ app.include_router(download.router, prefix="/api/download", tags=["Download"])
 
 @app.get("/", tags=["Root"])
 async def root():
-    return {"message": "Welcome to the Insurance Report Generator API"}
+    return {"message": "Welcome to the Scrittore Automatico di Perizie API"}
 
 
 if __name__ == "__main__":
