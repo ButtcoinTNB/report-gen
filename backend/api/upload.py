@@ -147,114 +147,141 @@ async def upload_documents(
     """
     Upload case-specific documents to generate a report
     """
-    uploaded_files = []
-    
-    # Generate a unique report ID
-    report_id = str(uuid.uuid4())
-    
-    # Create a directory for this report's files
-    report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
-    os.makedirs(report_dir, exist_ok=True)
-
-    # Initialize Supabase client
-    supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-    supabase_urls = []
-
-    for file in files:
-        # Check file type
-        if not file.filename.lower().endswith(
-            (".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png")
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="Only PDF, Word, text files and images are accepted",
-            )
-
-        # Check file size
-        if file.size > settings.MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds the {settings.MAX_UPLOAD_SIZE} bytes limit",
-            )
-
-        # Create unique filename
-        ext = os.path.splitext(file.filename)[1]
-        safe_filename = secure_filename(file.filename)
-        filename = f"{uuid.uuid4()}{ext}"
-        file_path = os.path.join(report_dir, filename)
-        
-        # Save original filename mapping for reference
-        original_filename = file.filename
-
-        # Save file locally
-        try:
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-                
-            # Try to upload to Supabase Storage
-            try:
-                storage_path = f"reports/{report_id}/{filename}"
-                
-                with open(file_path, "rb") as f:
-                    file_data = f.read()
-                    
-                response = supabase.storage.from_("reports").upload(
-                    path=storage_path,
-                    file=file_data,
-                    file_options={"content-type": f"application/{ext.replace('.', '')}" if ext != '.png' else "image/png"}
-                )
-                
-                # Get public URL
-                public_url = supabase.storage.from_("reports").get_public_url(storage_path)
-                supabase_urls.append(public_url)
-                
-            except Exception as e:
-                print(f"Error uploading to Supabase (continuing with local file): {str(e)}")
-                public_url = None
-                
-            # Add file information to uploaded_files list
-            uploaded_files.append(
-                {
-                    "filename": original_filename,
-                    "path": file_path,
-                    "type": ext.lower().replace(".", ""),
-                    "storage_path": storage_path if 'storage_path' in locals() else None,
-                    "public_url": public_url
-                }
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=500, detail=f"Error saving file: {str(e)}"
-            )
-        finally:
-            file.file.close()
-
-    # Store report metadata in local JSON file
-    metadata_path = os.path.join(report_dir, "metadata.json")
-    metadata = {
-        "report_id": report_id,
-        "template_id": template_id,
-        "files": uploaded_files,
-        "created_at": datetime.datetime.now().isoformat(),
-        "status": "uploaded"
-    }
-    
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f, indent=2)
-    
-    # Store metadata in Supabase database
     try:
-        response = supabase.table("reports").insert(metadata).execute()
-        print("Saved report metadata to Supabase:", response)
+        print(f"Upload documents request received: {len(files)} files, template_id={template_id}")
+        
+        uploaded_files = []
+        
+        # Generate a unique report ID
+        report_id = str(uuid.uuid4())
+        print(f"Generated report ID: {report_id}")
+        
+        # Create a directory for this report's files
+        report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+        os.makedirs(report_dir, exist_ok=True)
+        print(f"Created report directory: {report_dir}")
+
+        # Initialize Supabase client
+        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        supabase_urls = []
+
+        for file in files:
+            try:
+                print(f"Processing file: {file.filename}, size: {file.size}, content_type: {file.content_type}")
+                
+                # Check file type
+                if not file.filename.lower().endswith(
+                    (".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png")
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Only PDF, Word, text files and images are accepted",
+                    )
+
+                # Check file size
+                if file.size > settings.MAX_UPLOAD_SIZE:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File size exceeds the {settings.MAX_UPLOAD_SIZE} bytes limit",
+                    )
+
+                # Create unique filename
+                ext = os.path.splitext(file.filename)[1]
+                safe_filename = secure_filename(file.filename)
+                filename = f"{uuid.uuid4()}{ext}"
+                file_path = os.path.join(report_dir, filename)
+                
+                # Save original filename mapping for reference
+                original_filename = file.filename
+
+                # Save file locally
+                print(f"Saving file to: {file_path}")
+                file_content = await file.read()  # Read the file content
+                
+                with open(file_path, "wb") as buffer:
+                    buffer.write(file_content)  # Write the content to the file
+                
+                # Reset the file cursor for potential future read operations
+                await file.seek(0)
+                    
+                # Try to upload to Supabase Storage
+                try:
+                    storage_path = f"reports/{report_id}/{filename}"
+                    
+                    with open(file_path, "rb") as f:
+                        file_data = f.read()
+                        
+                    print(f"Uploading to Supabase: {storage_path}")
+                    response = supabase.storage.from_("reports").upload(
+                        path=storage_path,
+                        file=file_data,
+                        file_options={"content-type": f"application/{ext.replace('.', '')}" if ext != '.png' else "image/png"}
+                    )
+                    
+                    # Get public URL
+                    public_url = supabase.storage.from_("reports").get_public_url(storage_path)
+                    supabase_urls.append(public_url)
+                    print(f"Uploaded to Supabase, public URL: {public_url}")
+                    
+                except Exception as e:
+                    print(f"Error uploading to Supabase (continuing with local file): {str(e)}")
+                    public_url = None
+                    storage_path = None
+                    
+                # Add file information to uploaded_files list
+                uploaded_files.append(
+                    {
+                        "filename": original_filename,
+                        "path": file_path,
+                        "type": ext.lower().replace(".", ""),
+                        "storage_path": storage_path if 'storage_path' in locals() else None,
+                        "public_url": public_url
+                    }
+                )
+            except Exception as file_error:
+                print(f"Error processing file {file.filename}: {str(file_error)}")
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Error processing file {file.filename}: {str(file_error)}"
+                )
+            finally:
+                # Ensure the file is closed
+                await file.close()
+
+        # Store report metadata in local JSON file
+        metadata_path = os.path.join(report_dir, "metadata.json")
+        metadata = {
+            "report_id": report_id,
+            "template_id": template_id,
+            "files": uploaded_files,
+            "created_at": datetime.datetime.now().isoformat(),
+            "status": "uploaded"
+        }
+        
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        
+        print(f"Saved metadata to: {metadata_path}")
+        
+        # Store metadata in Supabase database
+        try:
+            print("Saving metadata to Supabase database")
+            response = supabase.table("reports").insert(metadata).execute()
+            print("Saved report metadata to Supabase:", response)
+        except Exception as e:
+            print(f"Error saving report metadata to Supabase (continuing with local file): {str(e)}")
+        
+        return {
+            "message": f"Successfully uploaded {len(uploaded_files)} files",
+            "files": uploaded_files,
+            "report_id": report_id,
+            "supabase_urls": supabase_urls if supabase_urls else None
+        }
     except Exception as e:
-        print(f"Error saving report metadata to Supabase (continuing with local file): {str(e)}")
-    
-    return {
-        "message": f"Successfully uploaded {len(uploaded_files)} files",
-        "files": uploaded_files,
-        "report_id": report_id,
-        "supabase_urls": supabase_urls if supabase_urls else None
-    }
+        print(f"Error in upload_documents: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 @router.post("/document", response_model=dict)

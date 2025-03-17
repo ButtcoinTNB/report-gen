@@ -7,6 +7,11 @@ import os
 from api import upload, generate, format, edit, download
 from config import settings
 
+# Ensure required directories exist
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs("generated_reports", exist_ok=True)
+print(f"Ensured directories exist: {settings.UPLOAD_DIR}, generated_reports")
+
 app = FastAPI(
     title="Scrittore Automatico di Perizie",
     description="API for generating structured insurance claim reports",
@@ -20,17 +25,21 @@ frontend_urls = settings.FRONTEND_URL.split(',') if ',' in settings.FRONTEND_URL
 allowed_origins = frontend_urls + [
     "https://report-gen-liard.vercel.app",
     "https://report-gen.vercel.app",
+    "https://report-gen-5wtl.onrender.com",  # Add Render domain
     "http://localhost:3000",
     "http://127.0.0.1:3000"
 ]
 
+print(f"CORS allowed origins: {allowed_origins}")
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,  # Allow multiple origins
+    allow_origins=["*"],  # Allow all origins for debugging
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Include OPTIONS for preflight
     allow_headers=["*"],
+    max_age=86400,  # Cache preflight request for 24 hours
 )
 
 # Include API routes
