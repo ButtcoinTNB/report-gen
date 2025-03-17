@@ -13,7 +13,10 @@ import {
   ListItemIcon,
   IconButton,
   Chip,
-  LinearProgress
+  LinearProgress,
+  Card,
+  CardContent,
+  Divider
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
@@ -21,7 +24,10 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
+import SummarizeIcon from '@mui/icons-material/Summarize';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { uploadFile } from '../api/upload';
+import { getSummary } from '../api/generate';
 import { useDropzone } from 'react-dropzone';
 
 interface FileUploadProps {
@@ -30,7 +36,21 @@ interface FileUploadProps {
 
 interface UploadResponse {
   report_id: number;
+  db_id?: number;
   [key: string]: any;
+}
+
+interface SummaryData {
+  summary: string;
+  keyFacts: string[];
+  error: boolean;
+  errorMessage?: string;
+}
+
+interface ProgressUpdate {
+  step: number;
+  message: string;
+  progress: number;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
@@ -41,6 +61,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
   const [sizeWarning, setSizeWarning] = useState<string | null>(null);
   // Using a default template ID of 1, no dropdown needed
   const templateId = 1;
+  
+  // States for AI summary
+  const [uploadedReportId, setUploadedReportId] = useState<number | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false); 
+  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+  const [summaryProgress, setSummaryProgress] = useState(0);
+  const [summaryStep, setSummaryStep] = useState(0);
   
   // Maximum allowed size in bytes (100MB)
   const MAX_TOTAL_SIZE = 100 * 1024 * 1024;
@@ -64,6 +91,42 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       }
     }
   }, [files]);
+
+  // Effect to get summary when uploadedReportId changes
+  useEffect(() => {
+    if (uploadedReportId) {
+      fetchSummary(uploadedReportId);
+    }
+  }, [uploadedReportId]);
+  
+  // Get summary from API
+  const fetchSummary = async (reportId: number) => {
+    setSummaryLoading(true);
+    setSummaryProgress(0);
+    setSummaryStep(0);
+    
+    try {
+      const result = await getSummary(reportId, (progressUpdate: ProgressUpdate) => {
+        if (progressUpdate.progress) {
+          setSummaryProgress(progressUpdate.progress);
+        }
+        if (progressUpdate.step !== undefined) {
+          setSummaryStep(progressUpdate.step);
+        }
+      });
+      
+      setSummaryData(result as SummaryData);
+    } catch (err) {
+      console.error("Error fetching summary:", err);
+      setSummaryData({
+        summary: "Error fetching summary. Please proceed to generate the full report.",
+        keyFacts: [],
+        error: true
+      });
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
 
   // Get icon based on file type
   const getFileIcon = (file: File) => {
@@ -93,6 +156,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(prevFiles => [...prevFiles, ...acceptedFiles]);
     setError(null);
+    
+    // Reset summary data when new files are added
+    setUploadedReportId(null);
+    setSummaryData(null);
   }, []);
   
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
@@ -108,6 +175,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
 
   const handleRemoveFile = (index: number) => {
     setFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
+    
+    // Reset summary data when files are removed
+    setUploadedReportId(null);
+    setSummaryData(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,6 +197,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
 
     setLoading(true);
     setError(null);
+    
+    // Reset summary data
+    setSummaryData(null);
+    setUploadedReportId(null);
 
     try {
       // Pass the files array directly to the uploadFile function
@@ -136,7 +211,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       // Check for success
       if (response && response.report_id) {
         console.log("Upload success with report ID:", response.report_id);
-        onUploadSuccess(response.report_id);
+        
+        // Set the uploaded report ID to trigger summary fetch
+        setUploadedReportId(response.report_id);
+        
+        // Don't call onUploadSuccess yet - we'll wait for user to continue after summary
       } else {
         setError("No report ID received from the server.");
       }
@@ -145,6 +224,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       setError(err instanceof Error ? err.message : "Failed to upload files. Please try again.");
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Handle continue after summary
+  const handleContinue = () => {
+    if (uploadedReportId) {
+      onUploadSuccess(uploadedReportId);
     }
   };
   
@@ -163,38 +249,42 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
           Upload Documents
         </Typography>
         
-        <Box
-          {...getRootProps()}
-          sx={{
-            border: '1px dashed',
-            borderColor: isDragActive ? 'primary.main' : 'grey.300',
-            borderRadius: 2,
-            p: 3,
-            textAlign: 'center',
-            cursor: 'pointer',
-            mb: 3,
-            backgroundColor: isDragActive ? 'rgba(0, 113, 227, 0.05)' : 'transparent',
-            transition: 'all 0.2s ease-in-out',
-            '&:hover': {
-              borderColor: 'primary.main',
-              backgroundColor: 'rgba(0, 113, 227, 0.05)'
-            }
-          }}
-        >
-          <input {...getInputProps()} />
-          <CloudUploadIcon fontSize="large" color="primary" sx={{ mb: 2, fontSize: 45 }} />
-          <Typography variant="h6" gutterBottom>
-            {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
-          </Typography>
-          <Typography variant="body2" color="textSecondary">
-            or click to browse your device
-          </Typography>
-          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
-            Supports PDF, DOC, DOCX, TXT, and image files
-          </Typography>
-        </Box>
+        {!uploadedReportId && (
+          <>
+            <Box
+              {...getRootProps()}
+              sx={{
+                border: '1px dashed',
+                borderColor: isDragActive ? 'primary.main' : 'grey.300',
+                borderRadius: 2,
+                p: 3,
+                textAlign: 'center',
+                cursor: 'pointer',
+                mb: 3,
+                backgroundColor: isDragActive ? 'rgba(0, 113, 227, 0.05)' : 'transparent',
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': {
+                  borderColor: 'primary.main',
+                  backgroundColor: 'rgba(0, 113, 227, 0.05)'
+                }
+              }}
+            >
+              <input {...getInputProps()} />
+              <CloudUploadIcon fontSize="large" color="primary" sx={{ mb: 2, fontSize: 45 }} />
+              <Typography variant="h6" gutterBottom>
+                {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                or click to browse your device
+              </Typography>
+              <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
+                Supports PDF, DOC, DOCX, TXT, and image files
+              </Typography>
+            </Box>
+          </>
+        )}
         
-        {files.length > 0 && (
+        {files.length > 0 && !uploadedReportId && (
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
               <Typography variant="h6">
@@ -263,39 +353,146 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
           </Box>
         )}
         
+        {/* AI Summary Section */}
+        {uploadedReportId && (
+          <Box sx={{ mb: 3 }}>
+            <Paper 
+              elevation={0} 
+              sx={{ 
+                p: 3, 
+                borderRadius: 2, 
+                bgcolor: 'rgba(0, 113, 227, 0.05)', 
+                border: '1px solid rgba(0, 113, 227, 0.2)',
+                mb: 3
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                <SummarizeIcon color="primary" sx={{ mr: 1 }} />
+                <Typography variant="h6" color="primary.main" fontWeight={500}>
+                  AI Case Analysis
+                </Typography>
+              </Box>
+              
+              {summaryLoading && (
+                <Box sx={{ mb: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                      {summaryStep === 0 ? "Analyzing documents 🔍" : "Analysis complete ✅"}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {summaryProgress}%
+                    </Typography>
+                  </Box>
+                  <LinearProgress 
+                    variant="determinate" 
+                    value={summaryProgress} 
+                    sx={{ height: 8, borderRadius: 4 }}
+                  />
+                </Box>
+              )}
+              
+              {summaryData && (
+                <>
+                  <Typography variant="body1" sx={{ mb: 2, fontWeight: 500 }}>
+                    {summaryData.summary}
+                  </Typography>
+                  
+                  {summaryData.keyFacts.length > 0 && (
+                    <>
+                      <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2, mb: 1 }}>
+                        Key Findings:
+                      </Typography>
+                      <Box sx={{ mb: 2 }}>
+                        {summaryData.keyFacts.map((fact, index) => (
+                          <Chip
+                            key={index}
+                            label={fact}
+                            variant="outlined"
+                            size="small"
+                            icon={<AutoAwesomeIcon fontSize="small" />}
+                            sx={{ 
+                              mr: 1, 
+                              mb: 1,
+                              bgcolor: 'background.paper'
+                            }}
+                          />
+                        ))}
+                      </Box>
+                    </>
+                  )}
+                </>
+              )}
+              
+              <Divider sx={{ my: 2 }} />
+              
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                AI has analyzed your documents and extracted key insights. You can now proceed to generate the full report.
+              </Typography>
+              
+              <Button
+                variant="contained"
+                color="primary"
+                size="large"
+                onClick={handleContinue}
+                fullWidth
+                disabled={summaryLoading}
+                sx={{ mt: 1 }}
+              >
+                Continue to Generate Full Report
+              </Button>
+            </Paper>
+            
+            <Button
+              variant="outlined"
+              color="secondary"
+              size="small"
+              onClick={() => {
+                setFiles([]);
+                setUploadedReportId(null);
+                setSummaryData(null);
+              }}
+              sx={{ mt: 1 }}
+            >
+              Upload Different Files
+            </Button>
+          </Box>
+        )}
+        
         {error && (
           <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
             {error}
           </Alert>
         )}
         
-        <Button
-          type="submit"
-          variant="contained"
-          color="primary"
-          size="large"
-          fullWidth
-          disabled={loading || files.length === 0}
-          sx={{ 
-            py: 1.5,
-            position: 'relative',
-            fontWeight: 500
-          }}
-        >
-          {loading ? (
-            <>
-              <CircularProgress 
-                size={24} 
-                color="inherit" 
-                sx={{ 
-                  position: 'absolute',
-                  left: 'calc(50% - 12px)'
-                }} 
-              />
-              <span style={{ opacity: 0 }}>Processing...</span>
-            </>
-          ) : files.length > 0 ? 'Upload and Generate Report' : 'Select Files to Upload'}
-        </Button>
+        {!uploadedReportId && (
+          <Button
+            type="submit"
+            variant="contained"
+            color="primary"
+            size="large"
+            fullWidth
+            disabled={loading || files.length === 0 || totalSize > MAX_TOTAL_SIZE}
+            sx={{ 
+              py: 1.5,
+              position: 'relative',
+              fontWeight: 500
+            }}
+          >
+            {loading ? (
+              <>
+                <CircularProgress 
+                  size={24} 
+                  color="inherit" 
+                  sx={{ 
+                    position: 'absolute',
+                    left: 'calc(50% - 12px)'
+                  }} 
+                />
+                <span style={{ opacity: 0 }}>Processing...</span>
+              </>
+            ) : files.length > 0 ? 'Upload Documents' : 'Select Files to Upload'}
+          </Button>
+        )}
       </Box>
     </Paper>
   );

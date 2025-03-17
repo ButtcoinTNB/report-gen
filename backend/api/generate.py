@@ -5,6 +5,8 @@ import json
 from config import settings
 from typing import Dict, Any, List
 from services.pdf_extractor import extract_text_from_files, extract_text_from_file
+from services.ai_service import generate_case_summary
+from utils.id_mapper import ensure_id_is_int
 
 router = APIRouter(tags=["AI Processing"])
 
@@ -290,3 +292,51 @@ async def generate_report_from_id(data: Dict[str, Any]):
 async def simple_test(data: Dict[str, Any]):
     """A very simple test endpoint to check routing"""
     return {"message": "Simple test endpoint works!", "received": data}
+
+
+@router.post("/summarize")
+async def summarize_documents(data: Dict[str, Any]):
+    """
+    Generate a brief summary of uploaded documents
+    
+    Args:
+        data: A dictionary containing report_id
+        
+    Returns:
+        Brief summary and key facts
+    """
+    report_id = data.get("report_id")
+    
+    if not report_id:
+        raise HTTPException(status_code=400, detail="report_id is required")
+    
+    print(f"Received summary request for ID: {report_id}")
+    
+    try:
+        # If report_id is a UUID, the files will be in a directory named with the UUID
+        report_files = get_report_files(report_id)
+        
+        if not report_files:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No files found for report ID: {report_id}"
+            )
+        
+        # Extract file paths
+        file_paths = [file["path"] for file in report_files]
+        
+        # Generate the summary
+        summary_result = await generate_case_summary(file_paths)
+        
+        print(f"Generated summary: {summary_result['summary']}")
+        print(f"Key facts identified: {len(summary_result['key_facts'])}")
+        
+        return summary_result
+        
+    except Exception as e:
+        print(f"Error generating summary: {str(e)}")
+        return {
+            "summary": f"Error generating summary: {str(e)}. Please try again.",
+            "key_facts": [],
+            "error": str(e)
+        }

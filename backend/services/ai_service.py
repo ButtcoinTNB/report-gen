@@ -4,6 +4,7 @@ import os
 import asyncio
 from config import settings
 from utils.error_handler import handle_exception, logger, retry_operation
+import re
 
 
 async def call_openrouter_api(
@@ -101,6 +102,110 @@ async def call_openrouter_api(
         Exception("All API call attempts failed with no specific error"),
         "OpenRouter API call"
     )
+
+
+async def generate_case_summary(document_paths: List[str]) -> Dict[str, str]:
+    """
+    Generate a very brief summary of case documents highlighting key findings.
+    
+    Args:
+        document_paths: List of paths to the uploaded documents
+        
+    Returns:
+        Dictionary with summary and key_facts
+    """
+    try:
+        document_content = []
+        
+        # Extract text from documents
+        for path in document_paths:
+            try:
+                with open(path, "r") as file:
+                    try:
+                        document_content.append(file.read())
+                    except UnicodeDecodeError:
+                        # If not a text file, add placeholder
+                        document_content.append(f"[Non-text file: {os.path.basename(path)}]")
+            except FileNotFoundError:
+                logger.warning(f"Document not found: {path}")
+            except Exception as e:
+                logger.warning(f"Error reading document {path}: {str(e)}")
+        
+        if not document_content:
+            return {
+                "summary": "No readable content found in the provided documents.",
+                "key_facts": []
+            }
+        
+        # Combine all document content
+        combined_content = "\n\n".join(document_content)
+        
+        # Create prompt for a very brief summary
+        prompt = (
+            "You are an insurance claims analyzer. Create an extremely brief summary (1-2 sentences) "
+            "and extract key facts from the following documents. Focus on claim amount, property damage, "
+            "injuries, policy details, and incident date if present.\n\n"
+            f"DOCUMENT CONTENT:\n{combined_content}\n\n"
+            "Provide your response in this format:\n"
+            "SUMMARY: [A 1-2 sentence summary of the claim/incident]\n"
+            "KEY_FACTS: [2-4 key points in bullet format with amounts, dates, and specifics]"
+        )
+        
+        # Prepare messages for API call
+        messages = [
+            {
+                "role": "system", 
+                "content": "You are an insurance claims analyzer. Provide extremely concise summaries and key facts only."
+            },
+            {"role": "user", "content": prompt}
+        ]
+        
+        # Call OpenRouter API with shorter timeout for better UX
+        result = await call_openrouter_api(messages, timeout=15.0)
+        
+        # Extract the generated text
+        if (
+            result
+            and "choices" in result
+            and len(result["choices"]) > 0
+            and "message" in result["choices"][0]
+            and "content" in result["choices"][0]["message"]
+        ):
+            response_text = result["choices"][0]["message"]["content"]
+            
+            # Extract summary and key facts
+            summary_match = re.search(r'SUMMARY:\s*(.+?)(?:\n|$)', response_text, re.DOTALL)
+            summary = summary_match.group(1).strip() if summary_match else "Summary not available"
+            
+            # Extract key facts as a list
+            key_facts_section = re.search(r'KEY_FACTS:\s*(.+?)(?:\n\n|$)', response_text, re.DOTALL)
+            key_facts_text = key_facts_section.group(1).strip() if key_facts_section else ""
+            
+            # Convert bullet points to list items
+            key_facts = []
+            for line in key_facts_text.split('\n'):
+                # Remove bullet point markers and clean up
+                cleaned_line = re.sub(r'^[\s•\-\*]+', '', line).strip()
+                if cleaned_line:
+                    key_facts.append(cleaned_line)
+            
+            return {
+                "summary": summary,
+                "key_facts": key_facts
+            }
+        else:
+            logger.error(f"Unexpected API response format: {result}")
+            return {
+                "summary": "Unable to generate summary from documents.",
+                "key_facts": []
+            }
+                
+    except Exception as e:
+        logger.error(f"Error in generate_case_summary: {str(e)}")
+        return {
+            "summary": "Unable to generate case summary. An error occurred.",
+            "key_facts": []
+        }
 
 
 async def generate_report_text(
@@ -247,8 +352,11 @@ async def refine_report_text(current_text: str, instructions: str) -> str:
         else:
             logger.error(f"Unexpected API response format: {result}")
             return current_text  # Return original text on error
-    
+                
     except Exception as e:
-        # Log the error but return the original text to avoid losing user's work
         logger.error(f"Error in refine_report_text: {str(e)}")
-        return current_text
+        return (
+            f"{current_text}\n\n"
+            "NOTE: Unable to apply refinements. The AI service encountered an error. "
+            "Please try again later."
+        )
