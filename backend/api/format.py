@@ -10,6 +10,7 @@ from services.docx_formatter import format_report_as_docx
 import uuid
 import glob
 from supabase import create_client, Client
+from utils.id_mapper import ensure_id_is_int
 
 router = APIRouter()
 
@@ -25,16 +26,14 @@ def fetch_report_from_supabase(report_id):
         # Initialize Supabase client
         supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         
-        # Convert to integer if it's a numeric string
-        if isinstance(report_id, str) and report_id.isdigit():
-            try:
-                report_id = int(report_id)
-            except ValueError:
-                # Keep as string if conversion fails
-                pass
+        # Convert to integer using the utility function
+        try:
+            db_id = ensure_id_is_int(report_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid report ID format: {str(e)}")
                 
         # Query the reports table
-        response = supabase.table("reports").select("content").eq("id", report_id).execute()
+        response = supabase.table("reports").select("content").eq("id", db_id).execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail=f"Report not found in the database with ID: {report_id}")
@@ -56,17 +55,15 @@ def update_report_file_path(report_id, pdf_path: str):
         # Initialize Supabase client
         supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         
-        # Convert to integer if it's a numeric string
-        if isinstance(report_id, str) and report_id.isdigit():
-            try:
-                report_id = int(report_id)
-            except ValueError:
-                # Keep as string if conversion fails
-                pass
+        # Convert to integer using the utility function
+        try:
+            db_id = ensure_id_is_int(report_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid report ID format: {str(e)}")
         
         # Update the report with the file path
         data = {"formatted_file_path": pdf_path, "is_finalized": True}
-        response = supabase.table("reports").update(data).eq("id", report_id).execute()
+        response = supabase.table("reports").update(data).eq("id", db_id).execute()
         
         if not response.data:
             raise HTTPException(status_code=500, detail=f"Failed to update report in database with ID: {report_id}")
@@ -200,23 +197,10 @@ async def format_final(data: Dict = Body(...)):
 
     report_id = data["report_id"]
     
-    # Check if report_id is a UUID string and handle appropriately
-    # This is needed because the frontend may send UUID strings but the database expects integers
+    # Use the ID mapper utility to handle UUID/integer conversion
     try:
-        # If it's a UUID, try to find the corresponding numeric ID or handle UUID directly
-        if isinstance(report_id, str) and '-' in report_id:
-            # If your database now uses UUIDs as primary keys, keep as is
-            # If your database uses integers but API returns UUIDs, you might need
-            # to query the database to find the integer ID associated with this UUID
-            # For now we'll proceed with the UUID as is
-            pass
-        else:
-            # If it's already an integer or integer string without dashes
-            try:
-                report_id = int(report_id)
-            except ValueError:
-                pass  # Keep as string if conversion fails
-    except Exception as e:
+        db_id = ensure_id_is_int(report_id)
+    except ValueError as e:
         raise HTTPException(
             status_code=400, 
             detail=f"Invalid report_id format: {str(e)}"
@@ -233,11 +217,11 @@ async def format_final(data: Dict = Body(...)):
         reference_metadata = get_reference_metadata()
         
         # Add report-specific header
-        if f"Report #{report_id}" not in reference_metadata["headers"]:
-            reference_metadata["headers"].append(f"Report #{report_id}")
+        if f"Report #{db_id}" not in reference_metadata["headers"]:
+            reference_metadata["headers"].append(f"Report #{db_id}")
 
         # Generate final formatted PDF
-        pdf_filename = f"report_{report_id}.pdf"
+        pdf_filename = f"report_{db_id}.pdf"
         pdf_path = await format_report_as_pdf(
             report_content,
             reference_metadata,
@@ -291,6 +275,14 @@ async def format_docx(data: Dict = Body(...)):
         
         # If report_id is provided, fetch content from Supabase
         if report_id and not report_content:
+            # Use the ID mapper utility to handle UUID/integer conversion
+            try:
+                db_id = ensure_id_is_int(report_id)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Invalid report_id format: {str(e)}"
+                )
             report_content = fetch_report_from_supabase(report_id)
         
         if not report_content:

@@ -109,6 +109,23 @@ insurance-report-generator/
 │   └── .gitignore               # Ignore unnecessary files
 │   └── README.md                # Documentation
 │   └── docker-compose.yml       # (Optional) For running locally
+│── frontend/                   # Next.js frontend
+│   ├── api/                    # JavaScript API client functions
+│   ├── components/             # React components (TypeScript)
+│   │   ├── FileUpload.tsx      # File upload component
+│   │   ├── ReportPreview.tsx   # Report preview component
+│   │   ├── DownloadReport.tsx  # Report download component
+│   │   ├── Navbar.tsx          # Navigation component
+│   │   └── ReportGenerator.tsx # Report generation component
+│   ├── pages/                  # Next.js pages
+│   │   ├── index.js            # Home page
+│   │   └── edit.tsx            # Report editing page
+│   ├── utils/                  # Utility functions
+│   │   └── errorHandler.js     # Standardized error handling
+│   ├── public/                 # Static assets
+│   ├── styles/                 # CSS styling
+│   ├── .env.local              # Environment variables (local)
+│   └── README.md               # Frontend documentation
 ```
 
 ## Deployment
