@@ -384,3 +384,29 @@ async def upload_template_docx(file: UploadFile = File(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Template upload failed: {str(e)}")
+
+
+@router.post("/test-single", status_code=201)
+async def test_single_upload(
+    file: UploadFile = File(...),
+):
+    """
+    Super simple test endpoint for a single file upload.
+    Minimal processing, just checks if we can receive a file.
+    """
+    try:
+        # Just print basic file info
+        print(f"BASIC TEST: Received file {file.filename}, size: {file.size}")
+        
+        # Don't even read the file, just acknowledge receipt
+        return {
+            "success": True, 
+            "message": "File received", 
+            "filename": file.filename,
+            "size": file.size
+        }
+    except Exception as e:
+        print(f"Error in basic test: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}

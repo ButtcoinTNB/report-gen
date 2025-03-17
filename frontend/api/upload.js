@@ -4,8 +4,22 @@ import { config } from "../config";
 export async function uploadFile(files, templateId = 1) {
   const formData = new FormData();
   
+  // Validate files parameter
+  if (!files) {
+    console.error("No files provided to uploadFile function");
+    throw new Error("No files were provided for upload");
+  }
+  
+  // Convert single file to array if needed
+  const filesArray = Array.isArray(files) ? files : [files];
+  
+  if (filesArray.length === 0) {
+    console.error("Empty files array provided to uploadFile function");
+    throw new Error("No files were provided for upload");
+  }
+  
   // Append each file with the same key 'files'
-  files.forEach((file) => {
+  filesArray.forEach((file) => {
     formData.append("files", file);
   });
   
@@ -13,8 +27,16 @@ export async function uploadFile(files, templateId = 1) {
   formData.append("template_id", templateId.toString());
   
   try {
-    console.log(`Uploading ${files.length} files to ${config.endpoints.upload}/documents with template ID ${templateId}`);
-    console.log("Files to upload:", files.map(f => `${f.name} (${f.size} bytes, ${f.type})`));
+    console.log(`Uploading ${filesArray.length} files to ${config.endpoints.upload}/documents with template ID ${templateId}`);
+    
+    // Safely log file details if available
+    try {
+      console.log("Files to upload:", filesArray.map(f => 
+        `${f.name || 'unnamed'} (${f.size || 'unknown'} bytes, ${f.type || 'unknown type'})`
+      ));
+    } catch (logError) {
+      console.warn("Could not log file details:", logError);
+    }
     
     const response = await axios.post(`${config.endpoints.upload}/documents`, formData, {
       headers: {
@@ -55,6 +77,40 @@ export async function uploadFile(files, templateId = 1) {
   }
 }
 
+// New function for single file uploads - simpler approach
+export async function uploadSingleFile(file, templateId = 1) {
+  if (!file) {
+    throw new Error("No file provided for upload");
+  }
+  
+  const formData = new FormData();
+  formData.append("files", file); // Note the key is still 'files' as required by backend
+  formData.append("template_id", templateId.toString());
+  
+  try {
+    console.log(`Uploading single file ${file.name} to ${config.endpoints.upload}/documents`);
+    
+    const response = await axios.post(`${config.endpoints.upload}/documents`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 60000
+    });
+    
+    return response.data;
+  } catch (error) {
+    console.error("Error during single file upload:", error);
+    
+    if (axios.isAxiosError(error) && error.response) {
+      throw new Error(`Server error (${error.response.status}): ${
+        error.response.data?.detail || 'Unknown error'
+      }`);
+    } else {
+      throw new Error("File upload failed: " + (error.message || "Unknown error"));
+    }
+  }
+}
+
 export async function uploadTemplate(file, name) {
   const formData = new FormData();
   formData.append("file", file);
@@ -86,5 +142,38 @@ export async function uploadTemplate(file, name) {
     }
     
     throw new Error(errorMessage);
+  }
+}
+
+export async function testFileUpload(file) {
+  if (!file) {
+    throw new Error("No file provided for test upload");
+  }
+  
+  const formData = new FormData();
+  formData.append("file", file);
+  
+  try {
+    console.log(`Testing file upload with ${file.name} (${file.size} bytes)`);
+    
+    const response = await axios.post(`${config.endpoints.upload}/test-single`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 30000
+    });
+    
+    console.log("Test upload response:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("Error during test upload:", error);
+    
+    if (axios.isAxiosError(error) && error.response) {
+      throw new Error(`Server error (${error.response.status}): ${
+        error.response.data?.detail || 'Unknown error'
+      }`);
+    } else {
+      throw new Error("Test upload failed: " + (error.message || "Unknown error"));
+    }
   }
 } 
