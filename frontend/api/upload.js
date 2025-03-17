@@ -151,29 +151,85 @@ export async function testFileUpload(file) {
   }
   
   const formData = new FormData();
-  formData.append("file", file);
+  formData.append("files", file);  // Change from "file" to "files" to match backend expectation
   
   try {
-    console.log(`Testing file upload with ${file.name} (${file.size} bytes)`);
+    console.log(`Testing file upload with ${file.name} (${file.size} bytes) to test-single endpoint`);
     
-    const response = await axios.post(`${config.endpoints.upload}/test-single`, formData, {
+    // First try the test-single endpoint
+    const testResponse = await axios.post(`${config.endpoints.upload}/test-single`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
       timeout: 30000
     });
     
-    console.log("Test upload response:", response.data);
-    return response.data;
+    console.log("Test single upload response:", testResponse.data);
+    
+    // Try the full documents endpoint with the same file
+    console.log("Now trying the main documents endpoint...");
+    formData.append("template_id", "1");  // Add template_id for the documents endpoint
+    
+    const mainResponse = await axios.post(`${config.endpoints.upload}/documents`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 30000
+    });
+    
+    console.log("Main documents endpoint response:", mainResponse.data);
+    
+    return {
+      testResponse: testResponse.data,
+      mainResponse: mainResponse.data
+    };
   } catch (error) {
     console.error("Error during test upload:", error);
     
     if (axios.isAxiosError(error) && error.response) {
+      console.error("Response data:", error.response.data);
+      console.error("Response status:", error.response.status);
       throw new Error(`Server error (${error.response.status}): ${
-        error.response.data?.detail || 'Unknown error'
+        JSON.stringify(error.response.data) || 'Unknown error'
       }`);
     } else {
       throw new Error("Test upload failed: " + (error.message || "Unknown error"));
+    }
+  }
+}
+
+export async function testDebugUpload(file) {
+  if (!file) {
+    throw new Error("No file provided for debug upload");
+  }
+  
+  const formData = new FormData();
+  formData.append("files", file);
+  formData.append("test_field", "test_value");
+  
+  try {
+    console.log(`Sending file ${file.name} (${file.size} bytes) to debug endpoint`);
+    
+    const response = await axios.post(`${config.endpoints.upload}/debug-upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 30000
+    });
+    
+    console.log("Debug upload response:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("Error during debug upload:", error);
+    
+    if (axios.isAxiosError(error) && error.response) {
+      console.error("Response data:", error.response.data);
+      console.error("Response status:", error.response.status);
+      throw new Error(`Debug error (${error.response.status}): ${
+        JSON.stringify(error.response.data) || 'Unknown error'
+      }`);
+    } else {
+      throw new Error("Debug upload failed: " + (error.message || "Unknown error"));
     }
   }
 } 

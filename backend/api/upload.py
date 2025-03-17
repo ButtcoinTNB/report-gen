@@ -388,25 +388,78 @@ async def upload_template_docx(file: UploadFile = File(...)):
 
 @router.post("/test-single", status_code=201)
 async def test_single_upload(
-    file: UploadFile = File(...),
+    files: UploadFile = File(...),
 ):
     """
     Super simple test endpoint for a single file upload.
     Minimal processing, just checks if we can receive a file.
+    Uses 'files' parameter name to match the main endpoint's expectation.
     """
     try:
         # Just print basic file info
-        print(f"BASIC TEST: Received file {file.filename}, size: {file.size}")
+        print(f"BASIC TEST: Received file {files.filename}, size: {files.size}")
         
         # Don't even read the file, just acknowledge receipt
         return {
             "success": True, 
             "message": "File received", 
-            "filename": file.filename,
-            "size": file.size
+            "filename": files.filename,
+            "size": files.size
         }
     except Exception as e:
         print(f"Error in basic test: {str(e)}")
         import traceback
         traceback.print_exc()
         return {"success": False, "error": str(e)}
+
+
+@router.post("/debug-upload")
+async def debug_upload(request: Request):
+    """
+    Special endpoint to debug file upload issues.
+    Prints detailed information about the incoming request.
+    """
+    try:
+        print("-------- DEBUG REQUEST INFO --------")
+        print(f"Request method: {request.method}")
+        print(f"Headers: {request.headers}")
+        
+        # Try to get content type and length
+        content_type = request.headers.get("content-type", "unknown")
+        content_length = request.headers.get("content-length", "unknown")
+        print(f"Content-Type: {content_type}")
+        print(f"Content-Length: {content_length}")
+        
+        # Try to parse body as form data
+        form = None
+        try:
+            form = await request.form()
+            print("Form data items:")
+            for key, value in form.items():
+                print(f"  - Key: {key}, Type: {type(value)}, Class: {value.__class__.__name__}")
+                if hasattr(value, "filename"):
+                    print(f"     Filename: {value.filename}, Size: {value.size if hasattr(value, 'size') else 'unknown'}")
+        except Exception as form_error:
+            print(f"Error parsing form: {str(form_error)}")
+        
+        # Read raw body if form parsing fails
+        if not form:
+            try:
+                body = await request.body()
+                print(f"Raw body length: {len(body)} bytes")
+                print(f"First 100 bytes of body: {body[:100]}")
+            except Exception as body_error:
+                print(f"Error reading body: {str(body_error)}")
+        
+        return {
+            "message": "Request debug information logged",
+            "content_type": content_type,
+            "content_length": content_length,
+            "form_keys": [key for key in form.keys()] if form else []
+        }
+        
+    except Exception as e:
+        print(f"Error in debug endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}

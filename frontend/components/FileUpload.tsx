@@ -91,14 +91,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
     setError(null);
 
     try {
-      // Create FormData object
-      const formData = new FormData();
-      files.forEach(file => {
-        formData.append('files', file);
-      });
-      formData.append('template_id', templateId.toString());
-
-      const response = await uploadFile(formData);
+      // Pass the files array directly to the uploadFile function
+      // instead of manually creating a FormData object
+      const response = await uploadFile(files, templateId);
       console.log("Upload response:", response);
       
       // Check for success
