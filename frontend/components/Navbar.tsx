@@ -22,7 +22,7 @@ const Navbar: React.FC = () => {
               fontSize: { xs: '1.1rem', sm: '1.3rem' }
             }}
           >
-            Insurance Report Generator
+            Generatore di Perizie
           </Typography>
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Link href="/" passHref>

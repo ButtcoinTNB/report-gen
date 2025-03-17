@@ -152,7 +152,7 @@ export default function Home() {
               fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' } 
             }}
           >
-            Insurance Report Generator
+            Generatore di Perizie
           </Typography>
           <Typography 
             variant="h5" 
@@ -163,7 +163,7 @@ export default function Home() {
               fontSize: { xs: '1rem', sm: '1.25rem' } 
             }}
           >
-            Upload your case documents and our AI will generate a formatted report for you
+            Carica i tuoi documenti e l'AI genererà un report formattato per te
           </Typography>
         </Box>
         
@@ -204,7 +204,7 @@ export default function Home() {
               Edit Report
             </Typography>
             <Typography variant="body1" sx={{ mb: 3, color: 'text.secondary' }}>
-              Review and edit the AI-generated report below before finalizing.
+              Revisiona e modifica il report generato dall'AI prima di finalizzarlo.
             </Typography>
             <TextField
               fullWidth
@@ -265,7 +265,7 @@ export default function Home() {
               Download Report
             </Typography>
             <Typography variant="body1" sx={{ mb: 4, color: 'text.secondary' }}>
-              Your report has been successfully generated and is ready for download.
+              Il tuo report è stato generato con successo e pronto per il download.
             </Typography>
             
             <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
