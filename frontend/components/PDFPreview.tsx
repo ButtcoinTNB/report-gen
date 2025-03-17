@@ -16,6 +16,13 @@ import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { fetchPDFPreview } from '../api/download';
 
+// Define the interface for the API response
+interface PDFPreviewResult {
+  success: boolean;
+  previewUrl: string;
+  previewId?: string;
+}
+
 interface PDFPreviewProps {
   reportId: number | null;
   onClose: () => void;
@@ -42,7 +49,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ reportId, onClose }) => {
     setError(null);
     
     try {
-      const result = await fetchPDFPreview(reportId as number);
+      const result = await fetchPDFPreview(reportId as number) as PDFPreviewResult;
       if (result && result.previewUrl) {
         setPdfUrl(result.previewUrl);
       } else {
