@@ -89,7 +89,7 @@ export default function Home() {
       }
       
       // Short delay to ensure the file is saved
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds
       
       // Then download it
       console.log('Downloading report with ID:', reportId);
@@ -135,12 +135,20 @@ export default function Home() {
   const handleDownloadPDF = async () => {
     try {
       setIsDownloading(true);
-      await downloadReport(reportId);
-      setIsDownloading(false);
+      const result = await downloadReport(reportId);
+      
+      if (result && result.data && result.data.download_url) {
+        const downloadUrl = result.data.download_url;
+        window.open(downloadUrl, '_blank');
+      } else {
+        throw new Error('Failed to get download URL');
+      }
     } catch (error) {
       console.error("Error downloading report:", error);
+      setError(error instanceof Error ? error.message : 'There was an error downloading your report. Please try again.');
+      setShowError(true);
+    } finally {
       setIsDownloading(false);
-      alert("There was an error downloading your report. Please try again.");
     }
   };
 

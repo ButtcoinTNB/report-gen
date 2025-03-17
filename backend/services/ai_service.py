@@ -137,27 +137,28 @@ async def generate_case_summary(document_paths: List[str], ocr_context: str = ""
         ocr_instruction = ""
         if ocr_context:
             logger.info(f"Including OCR context in prompt: {ocr_context}")
-            ocr_instruction = f"\n5. OCR AWARENESS: {ocr_context}\n"
+            ocr_instruction = f"\n5. CONSAPEVOLEZZA OCR: {ocr_context}\n"
         
         # Create prompt for a very brief summary with strict instructions
         prompt = (
-            "You are an insurance claims analyzer. Your task is to create an extremely brief summary "
-            "(1-2 sentences) and extract key facts from the provided documents. Follow these strict rules:\n\n"
-            "1. FACTS ONLY: Use ONLY information explicitly stated in the documents.\n"
-            "2. NO INVENTION: Do not add any details not present in the documents.\n"
-            "3. KEY INFORMATION: Focus on claim amount, property damage, injuries, policy details, "
-            "and incident date if present in the documents.\n"
-            "4. IF MISSING: If any key information is not in the documents, note it as 'not provided' "
-            "rather than making assumptions."
+            "Sei un analista di sinistri assicurativi. Il tuo compito è creare un riassunto estremamente breve "
+            "(1-2 frasi) ed estrarre i fatti chiave dai documenti forniti. Segui queste regole rigorose:\n\n"
+            "1. SOLO FATTI: Utilizza SOLO informazioni esplicitamente dichiarate nei documenti.\n"
+            "2. NESSUNA INVENZIONE: Non aggiungere alcun dettaglio non presente nei documenti.\n"
+            "3. INFORMAZIONI CHIAVE: Concentrati su importo del sinistro, danni alla proprietà, lesioni, dettagli della polizza, "
+            "e data dell'incidente se presenti nei documenti.\n"
+            "4. SE MANCANTE: Se qualsiasi informazione chiave non è nei documenti, indicala come 'non fornita' "
+            "piuttosto che fare supposizioni."
             f"{ocr_instruction}\n"
-            f"DOCUMENT CONTENT:\n{extracted_content}\n\n"
-            "Provide your response in this format:\n"
-            "SUMMARY: [A 1-2 sentence factual summary based ONLY on the provided documents]\n"
-            "KEY_FACTS: [2-4 key points in bullet format with amounts, dates, and specifics ONLY from the documents]"
+            "5. LINGUA ITALIANA: Scrivi SEMPRE in italiano, indipendentemente dalla lingua dei documenti di input.\n\n"
+            f"CONTENUTO DEL DOCUMENTO:\n{extracted_content}\n\n"
+            "Fornisci la tua risposta in questo formato:\n"
+            "RIASSUNTO: [Un riassunto fattuale di 1-2 frasi basato SOLO sui documenti forniti]\n"
+            "FATTI_CHIAVE: [2-4 punti chiave in formato puntato con importi, date e specifiche SOLO dai documenti]"
         )
         
         # Prepare system message with OCR awareness if needed
-        system_content = "You are an insurance claims analyzer. Provide extremely concise, FACTUAL summaries and key facts only. Do not invent details not present in the documents."
+        system_content = "Sei un analista di sinistri assicurativi. Fornisci riassunti estremamente concisi e FATTUALI e fatti chiave. Non inventare dettagli non presenti nei documenti. Scrivi SEMPRE in italiano, indipendentemente dalla lingua dei documenti di input."
         if ocr_context:
             system_content += " " + ocr_context
         
@@ -184,11 +185,11 @@ async def generate_case_summary(document_paths: List[str], ocr_context: str = ""
             response_text = result["choices"][0]["message"]["content"]
             
             # Extract summary and key facts
-            summary_match = re.search(r'SUMMARY:\s*(.+?)(?:\n|$)', response_text, re.DOTALL)
-            summary = summary_match.group(1).strip() if summary_match else "Summary not available"
+            summary_match = re.search(r'RIASSUNTO:\s*(.+?)(?:\n|$)', response_text, re.DOTALL)
+            summary = summary_match.group(1).strip() if summary_match else "Riassunto non disponibile"
             
             # Extract key facts as a list
-            key_facts_section = re.search(r'KEY_FACTS:\s*(.+?)(?:\n\n|$)', response_text, re.DOTALL)
+            key_facts_section = re.search(r'FATTI_CHIAVE:\s*(.+?)(?:\n\n|$)', response_text, re.DOTALL)
             key_facts_text = key_facts_section.group(1).strip() if key_facts_section else ""
             
             # Convert bullet points to list items
@@ -208,7 +209,7 @@ async def generate_case_summary(document_paths: List[str], ocr_context: str = ""
         else:
             logger.error(f"Unexpected API response format: {result}")
             return {
-                "summary": "Unable to generate summary from documents.",
+                "summary": "Impossibile generare un riassunto dai documenti.",
                 "key_facts": []
             }
                 
@@ -217,7 +218,7 @@ async def generate_case_summary(document_paths: List[str], ocr_context: str = ""
         import traceback
         logger.error(traceback.format_exc())
         return {
-            "summary": "Unable to generate case summary. An error occurred.",
+            "summary": "Impossibile generare il riassunto del caso. Si è verificato un errore.",
             "key_facts": []
         }
 
@@ -236,122 +237,81 @@ async def generate_report_text(
         Generated report text
     """
     try:
-        document_content = []
+        # Extract text from input documents
+        from services.pdf_extractor import extract_text_from_files
+        document_text = extract_text_from_files(document_paths)
         
-        # Extract text from documents
-        for path in document_paths:
-            try:
-                with open(path, "r") as file:
-                    try:
-                        document_content.append(file.read())
-                    except UnicodeDecodeError:
-                        # If not a text file, add placeholder
-                        document_content.append(f"[Non-text file: {os.path.basename(path)}]")
-            except FileNotFoundError:
-                logger.warning(f"Document not found: {path}")
-            except Exception as e:
-                logger.warning(f"Error reading document {path}: {str(e)}")
-        
-        if not document_content:
-            return "Error: No readable content found in the provided documents."
-        
-        # Combine all document content
-        combined_content = "\n\n".join(document_content)
-        
-        # Get reference templates from backend
-        reference_content = ""
-        
-        # Define possible locations for reference reports
-        possible_dirs = [
-            os.path.join("backend", "reference_reports"),
-            "reference_reports",
-            os.path.join(settings.UPLOAD_DIR, "templates")
-        ]
-        
-        # Find reference PDFs to use as format templates
-        found_references = False
-        for dir_path in possible_dirs:
-            if os.path.exists(dir_path) and os.path.isdir(dir_path):
-                reference_files = [
-                    os.path.join(dir_path, f) 
-                    for f in os.listdir(dir_path) 
-                    if f.lower().endswith(".pdf") 
-                    or f.lower().endswith(".txt") 
-                    or f.lower().endswith(".docx")
-                ]
-                
-                if reference_files:
-                    logger.info(f"Found {len(reference_files)} reference files in {dir_path}")
-                    
-                    # Use the first reference file (or ideally, use one that matches template_id)
-                    try:
-                        for ref_file in reference_files[:2]:  # Use up to 2 references
-                            try:
-                                with open(ref_file, "r") as f:
-                                    file_content = f.read()
-                                    if file_content.strip():
-                                        reference_content += f"\n\n--- REFERENCE DOCUMENT: {os.path.basename(ref_file)} ---\n\n"
-                                        reference_content += file_content
-                                        found_references = True
-                            except UnicodeDecodeError:
-                                logger.warning(f"Cannot read binary file as reference: {ref_file}")
-                            except Exception as e:
-                                logger.warning(f"Error reading reference file {ref_file}: {str(e)}")
-                    except Exception as e:
-                        logger.error(f"Error processing reference files: {str(e)}")
-                
-                if found_references:
-                    break
+        if not document_text or len(document_text.strip()) < 10:
+            return "Nessun testo leggibile è stato estratto dai documenti forniti."
+            
+        logger.info(f"Extracted {len(document_text)} characters from uploaded documents")
+            
+        # Create a default format template with placeholders
+        format_template = """
+## RIEPILOGO SINISTRO
+[Format placeholder for claim summary]
 
-        # If no reference files were found, use a minimal structural outline
-        if not reference_content:
-            logger.warning("No reference templates found. Using minimal structure.")
-            reference_content = (
-                "INSURANCE REPORT STRUCTURE\n\n"
-                "CLAIM INFORMATION:\n- Claim Number\n- Date of Loss\n- Insured Name\n- Policy Number\n\n"
-                "CLAIM SUMMARY:\n[Brief description of what happened]\n\n"
-                "COVERAGE DETAILS:\n[Policy coverage relevant to this claim]\n\n"
-                "DAMAGE ASSESSMENT:\n[Details of the damages/injuries]\n\n"
-                "INVESTIGATION FINDINGS:\n[Facts discovered during investigation]\n\n"
-                "LIABILITY DETERMINATION:\n[Analysis of liability]\n\n"
-                "RECOMMENDATIONS:\n[Settlement or action recommendations]"
-            )
+## INFORMAZIONI SUL RICHIEDENTE
+[Format placeholder for claimant information]
+
+## DETTAGLI INCIDENTE
+[Format placeholder for incident details]
+
+## ANALISI COPERTURA
+[Format placeholder for coverage analysis]
+
+## DANNI/FERITE
+[Format placeholder for damages/injuries]
+
+## RISULTATI INVESTIGAZIONE
+[Format placeholder for investigation findings]
+
+## VALUTAZIONE RESPONSABILITÀ
+[Format placeholder for liability assessment]
+
+## RACCOMANDAZIONE RISARCIMENTO
+[Format placeholder for settlement recommendation]
+"""
         
-        # Create prompt with strict instructions about using reference only for format
-        prompt = (
-            "You're an expert insurance report writer. Follow these important instructions:\n\n"
-            "1. REFERENCE REPORTS: I'm providing reference reports ONLY to show you the correct FORMAT, "
-            "STRUCTURE, STYLE, and TONE OF VOICE. DO NOT memorize or use any factual content from these references.\n\n"
-            "2. CASE NOTES: Generate a new report using ONLY the information from the user's case notes.\n\n"
-            "3. LANGUAGE: Generate the report in the SAME LANGUAGE as the case notes (either Italian or English).\n\n"
-            f"REFERENCE REPORTS (for format/style only):\n{reference_content}\n\n"
-            f"CASE NOTES (use this content for your report):\n{combined_content}\n\n"
-            "Generate a structured insurance claim report that includes common sections such as:\n"
-            "- CLAIM SUMMARY\n"
-            "- CLAIMANT INFORMATION\n"
-            "- INCIDENT DETAILS\n"
-            "- COVERAGE ANALYSIS\n"
-            "- DAMAGES/INJURIES\n"
-            "- INVESTIGATION FINDINGS\n"
-            "- LIABILITY ASSESSMENT\n"
-            "- SETTLEMENT RECOMMENDATION\n\n"
-            "Important: Match the professional tone, formatting, and style of the reference reports, "
-            "but ONLY use facts from the case notes."
+        # Prepare the system message
+        system_message = (
+            "Sei un esperto redattore di relazioni assicurative. DEVI utilizzare SOLO fatti esplicitamente dichiarati nei documenti dell'utente. "
+            "Non inventare, presumere o allucinare ALCUNA informazione non esplicitamente fornita. Rimani strettamente fattuale. "
+            "NON utilizzare ALCUNA informazione dal modello di formato per il contenuto - serve SOLO per la struttura. "
+            "Scrivi SEMPRE in italiano, indipendentemente dalla lingua dei documenti di input."
         )
         
-        # Prepare messages for API call
+        # Prepare the prompt with strict instructions
+        prompt = (
+            "Sei un esperto redattore di relazioni assicurative incaricato di creare una relazione formale assicurativa.\n\n"
+            "ISTRUZIONI RIGOROSE - SEGUI CON PRECISIONE:\n"
+            "1. SOLO FORMATO: Utilizza il modello di formato per strutturare la tua relazione in modo professionale.\n"
+            "2. SOLO CONTENUTO UTENTE: Il contenuto della tua relazione DEVE provenire ESCLUSIVAMENTE dai documenti dell'utente.\n"
+            "3. NESSUNA INVENZIONE: Non aggiungere ALCUNA informazione non esplicitamente presente nei documenti dell'utente.\n"
+            "4. LINGUA ITALIANA: Scrivi la relazione SEMPRE in italiano, indipendentemente dalla lingua dei documenti dell'utente.\n"
+            "5. INFORMAZIONI MANCANTI: Se mancano informazioni chiave, indica 'Non fornito nei documenti' anziché inventarle.\n"
+            "6. NESSUNA CREATIVITÀ: Questo è un documento assicurativo fattuale - attieniti strettamente alle informazioni nei documenti dell'utente.\n"
+            f"MODELLO DI FORMATO (usa SOLO per la struttura):\n{format_template}\n\n"
+            f"DOCUMENTI DELL'UTENTE (UNICA FONTE PER IL CONTENUTO):\n{document_text}\n\n"
+            "Genera una relazione strutturata di sinistro assicurativo che segue il formato del modello ma "
+            "utilizza SOLO fatti dai documenti dell'utente. Includi sezioni appropriate in base alle informazioni disponibili.\n\n"
+            "FONDAMENTALE: NON inventare ALCUNA informazione. Utilizza solo fatti esplicitamente dichiarati nei documenti dell'utente."
+        )
+        
+        # Prepare the messages for the API
         messages = [
-            {
-                "role": "system", 
-                "content": "You are an expert insurance report writer. Use only factual information provided by the user. Do not invent or hallucinate any details."
-            },
+            {"role": "system", "content": system_message},
             {"role": "user", "content": prompt}
         ]
         
-        # Call OpenRouter API with retry logic
-        result = await call_openrouter_api(messages)
+        # Call the LLM API
+        result = await call_openrouter_api(
+            messages=messages,
+            max_retries=2,
+            timeout=60.0
+        )
         
-        # Extract the generated text
+        # Extract the response text
         if (
             result
             and "choices" in result
@@ -359,17 +319,18 @@ async def generate_report_text(
             and "message" in result["choices"][0]
             and "content" in result["choices"][0]["message"]
         ):
-            return result["choices"][0]["message"]["content"]
+            generated_text = result["choices"][0]["message"]["content"]
+            logger.info(f"Generated report with {len(generated_text)} characters")
+            return generated_text.strip()
         else:
             logger.error(f"Unexpected API response format: {result}")
-            return "Error: The AI service returned an unexpected response format."
-                
+            return "Errore: Impossibile generare il testo del report a causa di una risposta API imprevista."
+            
     except Exception as e:
         logger.error(f"Error in generate_report_text: {str(e)}")
-        return (
-            "Unable to generate report text. The AI service encountered an error. "
-            "Please try again later or contact support if the problem persists."
-        )
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"Errore nella generazione del report: {str(e)}"
 
 
 async def refine_report_text(current_text: str, instructions: str) -> str:
@@ -386,23 +347,24 @@ async def refine_report_text(current_text: str, instructions: str) -> str:
     try:
         # Create prompt with explicit instructions to avoid hallucination
         prompt = (
-            "You are an insurance report editor. Edit the provided insurance "
-            "report according to the user's instructions, following these strict rules:\n\n"
-            "1. PRESERVE FACTS: Do not remove or change factual information present in the original report.\n"
-            "2. NO NEW FACTS: Do not add any new factual information not present in the original report.\n"
-            "3. EDITS ONLY: Make only the changes explicitly requested in the instructions.\n"
-            "4. FORMATTING: You may improve formatting, clarity, and structure while preserving content.\n\n"
-            f"CURRENT REPORT:\n{current_text}\n\n"
-            f"INSTRUCTIONS:\n{instructions}\n\n"
-            "Provide the edited version of the report, making only the changes requested "
-            "while preserving all factual information. Do not invent new facts."
+            "Sei un redattore di relazioni assicurative. Modifica la relazione assicurativa "
+            "fornita secondo le istruzioni dell'utente, seguendo queste regole rigorose:\n\n"
+            "1. PRESERVA I FATTI: Non rimuovere o modificare informazioni fattuali presenti nella relazione originale.\n"
+            "2. NESSUN NUOVO FATTO: Non aggiungere nuove informazioni fattuali non presenti nella relazione originale.\n"
+            "3. SOLO MODIFICHE: Apporta solo le modifiche esplicitamente richieste nelle istruzioni.\n"
+            "4. FORMATTAZIONE: Puoi migliorare la formattazione, la chiarezza e la struttura mantenendo il contenuto.\n"
+            "5. LINGUA ITALIANA: Scrivi SEMPRE in italiano, indipendentemente dalla lingua dell'input.\n\n"
+            f"RELAZIONE ATTUALE:\n{current_text}\n\n"
+            f"ISTRUZIONI:\n{instructions}\n\n"
+            "Fornisci la versione modificata della relazione, apportando solo le modifiche richieste "
+            "preservando tutte le informazioni fattuali. Non inventare nuovi fatti."
         )
         
         # Prepare messages for API call
         messages = [
             {
                 "role": "system", 
-                "content": "You are an expert insurance report editor. Edit documents according to requested changes without adding any new factual information not present in the original. Do not hallucinate or invent details."
+                "content": "Sei un esperto redattore di relazioni assicurative. Modifica i documenti secondo le modifiche richieste senza aggiungere nuove informazioni fattuali non presenti nell'originale. Non allucinare o inventare dettagli. Scrivi SEMPRE in italiano, indipendentemente dalla lingua dell'input."
             },
             {"role": "user", "content": prompt}
         ]
@@ -427,8 +389,8 @@ async def refine_report_text(current_text: str, instructions: str) -> str:
         logger.error(f"Error in refine_report_text: {str(e)}")
         return (
             f"{current_text}\n\n"
-            "NOTE: Unable to apply refinements. The AI service encountered an error. "
-            "Please try again later."
+            "NOTA: Impossibile applicare le modifiche. Il servizio AI ha riscontrato un errore. "
+            "Si prega di riprovare più tardi."
         )
 
 
@@ -445,7 +407,7 @@ def generate_summary(text: str) -> str:
     """
     if not settings.OPENROUTER_API_KEY:
         logger.error("OPENROUTER_API_KEY is missing. Set it in your environment variables.")
-        return "Error: Missing API key for OpenRouter."
+        return "Errore: Chiave API mancante per OpenRouter."
 
     try:
         # Create a synchronous version of the OpenRouter API call for simplicity
@@ -461,8 +423,8 @@ def generate_summary(text: str) -> str:
                 json={
                     "model": settings.DEFAULT_MODEL,
                     "messages": [
-                        {"role": "system", "content": "You are an AI assistant that generates factual insurance reports. Only use information explicitly provided in the input text. Do not invent or hallucinate any details."},
-                        {"role": "user", "content": f"Summarize the following insurance case details with FACTS ONLY - do not add any information not present in the original text:\n\n{text}\n\nProvide a concise, factual summary using only information explicitly stated in the text. If important details are missing, note them as 'not specified' rather than inventing information. Ensure clarity, factual accuracy, and a professional tone."}
+                        {"role": "system", "content": "Sei un assistente AI che genera relazioni assicurative fattuali. Utilizza solo informazioni esplicitamente fornite nel testo di input. Non inventare o allucinare alcun dettaglio. Scrivi SEMPRE in italiano, indipendentemente dalla lingua dell'input."},
+                        {"role": "user", "content": f"Riassumi i seguenti dettagli del caso assicurativo utilizzando SOLO FATTI - non aggiungere alcuna informazione non presente nel testo originale:\n\n{text}\n\nFornisci un riassunto conciso e fattuale utilizzando solo informazioni esplicitamente dichiarate nel testo. Se importanti dettagli sono mancanti, annotali come 'non specificati' piuttosto che inventare informazioni. Assicura chiarezza, accuratezza fattuale e un tono professionale. Scrivi SEMPRE in italiano."}
                     ],
                     "temperature": 0.3,
                     "max_tokens": 300
@@ -477,15 +439,15 @@ def generate_summary(text: str) -> str:
                 summary = result["choices"][0]["message"]["content"].strip()
                 if not summary:
                     logger.warning("AI response was empty or invalid.")
-                    return "Error: AI did not generate a valid summary."
+                    return "Errore: L'AI non ha generato un riassunto valido."
                 return summary
             else:
                 logger.warning(f"Unexpected API response format: {result}")
-                return "Error: AI returned an unexpected response format."
+                return "Errore: L'AI ha restituito un formato di risposta imprevisto."
                 
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error from OpenRouter: {e.response.text}")
-        return f"Error: API request failed with status {e.response.status_code}."
+        return f"Errore: Richiesta API fallita con stato {e.response.status_code}."
     except Exception as e:
         logger.exception("Unexpected error in generate_summary function")
-        return f"Error: {str(e)}"
+        return f"Errore: {str(e)}"

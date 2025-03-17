@@ -3,13 +3,32 @@ import requests
 import os
 import json
 from config import settings
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from services.pdf_extractor import extract_text_from_files, extract_text_from_file
 from services.ai_service import generate_case_summary
 from utils.id_mapper import ensure_id_is_int
 import time
+import re
+from fastapi import BackgroundTasks, Depends
+from sqlalchemy.orm import Session
+from models.report import Report
+from models.file import File
+from models.user import User
+from utils.logger import logger
+from utils.auth import get_current_user
+from utils.db import get_db
+from pydantic import BaseModel
+from services.ai_service import call_openrouter_api, generate_report_text
+import uuid
 
 router = APIRouter(tags=["AI Processing"])
+
+
+class StructureReportRequest(BaseModel):
+    """Request model for generating a report from a specific structure"""
+    document_ids: List[int]
+    title: Optional[str] = None
+    structure: Optional[str] = None
 
 
 def fetch_reference_reports():
@@ -151,43 +170,71 @@ async def generate_report(text: dict):
         key=lambda r: len(r.get("extracted_text", "")),
     )
     
-    for report in sorted_reports:
+    # Extract format and structure WITHOUT content
+    report_sections = []
+    section_formats = {}
+    
+    for report in sorted_reports[:2]:  # Limit to 2 reference reports
         report_text = report.get("extracted_text", "")
-        # Skip empty reports
         if not report_text.strip():
             continue
             
-        # Check if adding this report would exceed our size limit
-        if len(context) + len(report_text) > max_report_chars:
-            # If we already have some context, stop adding more
-            if context:
-                break
-            # If this is the first report and it's too large, truncate it
-            report_text = report_text[:max_report_chars]
-        
-        # Add a separator if we already have content
-        if context:
-            context += "\n\n--- NEXT REFERENCE REPORT ---\n\n"
-        
-        context += report_text
-        reports_used += 1
+        # Extract just the section headers and layout structure
+        sections = re.findall(r'^([A-Z][A-Z\s]+)(?::|\n)', report_text, re.MULTILINE)
+        if sections:
+            report_sections.extend(sections)
     
-    print(f"Using {reports_used} reference reports for generation (total {len(context)} chars)")
+    # Remove duplicates and create a structured format template
+    report_sections = list(dict.fromkeys(report_sections))
+    
+    # Create a format template with placeholders instead of actual content
+    format_template = ""
+    for section in report_sections:
+        format_template += f"## {section}\n[Format placeholder for {section}]\n\n"
+    
+    if not format_template:
+        format_template = """
+## RIEPILOGO SINISTRO
+[Format placeholder for claim summary]
 
-    # Updated with stricter instructions matching /from-id endpoint format
+## INFORMAZIONI SUL RICHIEDENTE
+[Format placeholder for claimant information]
+
+## DETTAGLI INCIDENTE
+[Format placeholder for incident details]
+
+## ANALISI COPERTURA
+[Format placeholder for coverage analysis]
+
+## DANNI/FERITE
+[Format placeholder for damages/injuries]
+
+## RISULTATI INVESTIGAZIONE
+[Format placeholder for investigation findings]
+
+## VALUTAZIONE RESPONSABILITÀ
+[Format placeholder for liability assessment]
+
+## RACCOMANDAZIONE RISARCIMENTO 
+[Format placeholder for settlement recommendation]
+"""
+    
+    print(f"Created format template with {len(report_sections)} sections")
+
+    # Updated with stricter instructions and format-only reference
     prompt = (
-        "You are an expert insurance report writer tasked with creating a formal insurance report.\n\n"
-        "STRICT INSTRUCTIONS - FOLLOW PRECISELY:\n"
-        "1. FORMAT ONLY: Use reference reports ONLY for format, structure, style, and professional tone.\n"
-        "2. USER CONTENT ONLY: The content of your report MUST come EXCLUSIVELY from the user's case notes.\n"
-        "3. NO INVENTION: Do not add ANY information not explicitly present in the case notes.\n"
-        "4. MATCH LANGUAGE: Write the report in Italian by default, unless the case notes are clearly in English.\n"
-        "5. MISSING INFO: If key information is missing, state 'Non fornito nei documenti' rather than inventing it.\n"
-        "6. NO CREATIVITY: This is a factual insurance document - stick strictly to information in the case notes.\n\n"
-        f"REFERENCE FORMAT (use ONLY for structure/style/tone):\n{context}\n\n"
-        f"CASE NOTES (ONLY SOURCE FOR CONTENT):\n{text['content']}\n\n"
-        "Generate a structured insurance claim report that follows the format of the reference but "
-        "ONLY uses facts from the case notes. Include sections like:\n"
+        "Sei un esperto redattore di relazioni assicurative incaricato di creare una relazione formale assicurativa.\n\n"
+        "ISTRUZIONI RIGOROSE - SEGUI CON PRECISIONE:\n"
+        "1. SOLO FORMATO: Utilizza il modello di formato solo per strutturare la tua relazione in modo professionale.\n"
+        "2. SOLO CONTENUTO UTENTE: Il contenuto della tua relazione DEVE provenire ESCLUSIVAMENTE dalle note del caso dell'utente.\n"
+        "3. NESSUNA INVENZIONE: Non aggiungere ALCUNA informazione non esplicitamente presente nelle note del caso.\n"
+        "4. LINGUA ITALIANA: Scrivi la relazione SEMPRE in italiano, indipendentemente dalla lingua delle note del caso.\n"
+        "5. INFORMAZIONI MANCANTI: Se mancano informazioni chiave, indica 'Non fornito nei documenti' anziché inventarle.\n"
+        "6. NESSUNA CREATIVITÀ: Questo è un documento assicurativo fattuale - attieniti strettamente alle informazioni nelle note del caso.\n\n"
+        f"MODELLO DI FORMATO (usa SOLO per la struttura):\n{format_template}\n\n"
+        f"NOTE DEL CASO (UNICA FONTE PER IL CONTENUTO):\n{text['content']}\n\n"
+        "Genera una relazione strutturata di sinistro assicurativo che segue il formato del modello ma "
+        "utilizza SOLO fatti dalle note del caso. Includi sezioni appropriate come:\n"
         "- RIEPILOGO SINISTRO\n"
         "- INFORMAZIONI SUL RICHIEDENTE\n"
         "- DETTAGLI INCIDENTE\n"
@@ -196,7 +243,7 @@ async def generate_report(text: dict):
         "- RISULTATI INVESTIGAZIONE\n"
         "- VALUTAZIONE RESPONSABILITÀ\n"
         "- RACCOMANDAZIONE RISARCIMENTO\n\n"
-        "CRITICAL: Do NOT invent ANY information. Only use facts explicitly stated in the case notes."
+        "FONDAMENTALE: NON inventare ALCUNA informazione. Utilizza solo fatti esplicitamente dichiarati nelle note del caso."
     )
 
     # Updated to use messages array with system message like /from-id endpoint
@@ -207,7 +254,7 @@ async def generate_report(text: dict):
             "messages": [
                 {
                     "role": "system", 
-                    "content": "You are an expert insurance report writer. You MUST ONLY use facts explicitly stated in the user's case notes. Do not invent, assume, or hallucinate ANY information not explicitly provided. Remain strictly factual."
+                    "content": "Sei un esperto redattore di relazioni assicurative. DEVI utilizzare SOLO fatti esplicitamente dichiarati nelle note del caso dell'utente. Non inventare, presumere o allucinare ALCUNA informazione non esplicitamente fornita. Rimani strettamente fattuale. NON utilizzare ALCUNA informazione dal modello di formato per il contenuto - serve SOLO per la struttura. Scrivi SEMPRE in italiano, indipendentemente dalla lingua di input."
                 },
                 {"role": "user", "content": prompt}
             ],
@@ -352,42 +399,102 @@ async def generate_report_from_id(data: Dict[str, Any]):
         # Get reference reports to use as style templates
         reference_reports = fetch_reference_reports()
         
+        # Extract format-only template without reference content
+        report_sections = []
+        
         # Check if we have any reference reports
         if not reference_reports:
-            context = "Professional insurance claim report with sections for Summary, Details, Assessment, and Recommendations."
-            print("WARNING: No reference reports found, using minimal structure.")
+            format_template = """
+## RIEPILOGO SINISTRO
+[Format placeholder for claim summary]
+
+## INFORMAZIONI SUL RICHIEDENTE
+[Format placeholder for claimant information]
+
+## DETTAGLI INCIDENTE
+[Format placeholder for incident details]
+
+## ANALISI COPERTURA
+[Format placeholder for coverage analysis]
+
+## DANNI/FERITE
+[Format placeholder for damages/injuries]
+
+## RISULTATI INVESTIGAZIONE
+[Format placeholder for investigation findings]
+
+## VALUTAZIONE RESPONSABILITÀ
+[Format placeholder for liability assessment]
+
+## RACCOMANDAZIONE RISARCIMENTO
+[Format placeholder for settlement recommendation]
+"""
+            print("WARNING: No reference reports found, using default format template.")
         else:
             print(f"Using {len(reference_reports)} reference reports for formatting guidance.")
-            # Join the content of up to 2 reference reports to provide formatting guidance
-            context = "\n\n--- NEXT REFERENCE REPORT ---\n\n".join(
-                [r.get("extracted_text", "") for r in reference_reports[:2]]
-            )
-        
+            
+            # Extract section headers from reference reports
+            for report in reference_reports[:2]:  # Limit to 2 reference reports
+                report_text = report.get("extracted_text", "")
+                if report_text.strip():
+                    # Extract just the section headers and layout structure
+                    sections = re.findall(r'^([A-Z][A-Z\s/]+)(?::|\n)', report_text, re.MULTILINE)
+                    if sections:
+                        report_sections.extend(sections)
+                
+            # Remove duplicates
+            report_sections = list(dict.fromkeys(report_sections))
+            
+            # Create a template with placeholders
+            format_template = ""
+            for section in report_sections:
+                format_template += f"## {section}\n[Format placeholder for {section}]\n\n"
+                
+            # If we couldn't extract sections, use default template
+            if not format_template:
+                format_template = """
+## RIEPILOGO SINISTRO
+[Format placeholder for claim summary]
+
+## INFORMAZIONI SUL RICHIEDENTE
+[Format placeholder for claimant information]
+
+## DETTAGLI INCIDENTE
+[Format placeholder for incident details]
+
+## ANALISI COPERTURA
+[Format placeholder for coverage analysis]
+
+## DANNI/FERITE
+[Format placeholder for damages/injuries]
+
+## RISULTATI INVESTIGAZIONE
+[Format placeholder for investigation findings]
+
+## VALUTAZIONE RESPONSABILITÀ
+[Format placeholder for liability assessment]
+
+## RACCOMANDAZIONE RISARCIMENTO
+[Format placeholder for settlement recommendation]
+"""
+            
         # Call the OpenRouter API with strong instructions about using only user content
         prompt = (
-            "You are an expert insurance report writer tasked with creating a formal insurance report.\n\n"
-            "STRICT INSTRUCTIONS - FOLLOW PRECISELY:\n"
-            "1. FORMAT ONLY: Use reference reports ONLY for format, structure, style, and professional tone.\n"
-            "2. USER CONTENT ONLY: The content of your report MUST come EXCLUSIVELY from the user's documents.\n"
-            "3. NO INVENTION: Do not add ANY information not explicitly present in the user's documents.\n"
-            "4. MATCH LANGUAGE: Write the report in the same language as the user documents (either Italian or English).\n"
-            "5. MISSING INFO: If key information is missing, state 'Not provided in the documents' rather than inventing it.\n"
-            "6. NO CREATIVITY: This is a factual insurance document - stick strictly to information in the user's documents.\n"
-            "7. OCR AWARENESS: Some content may come from OCR of images and may contain errors - focus on the most reliable information."
+            "Sei un esperto redattore di relazioni assicurative incaricato di creare una relazione formale assicurativa.\n\n"
+            "ISTRUZIONI RIGOROSE - SEGUI CON PRECISIONE:\n"
+            "1. SOLO FORMATO: Utilizza la struttura del formato per organizzare la tua relazione in modo professionale.\n"
+            "2. SOLO CONTENUTO UTENTE: Il contenuto della tua relazione DEVE provenire ESCLUSIVAMENTE dai documenti dell'utente.\n"
+            "3. NESSUNA INVENZIONE: Non aggiungere ALCUNA informazione non esplicitamente presente nei documenti dell'utente.\n"
+            "4. LINGUA ITALIANA: Scrivi la relazione SEMPRE in italiano, indipendentemente dalla lingua dei documenti dell'utente.\n"
+            "5. INFORMAZIONI MANCANTI: Se mancano informazioni chiave, indica 'Non fornito nei documenti' anziché inventarle.\n"
+            "6. NESSUNA CREATIVITÀ: Questo è un documento assicurativo fattuale - attieniti strettamente alle informazioni nei documenti dell'utente.\n"
+            "7. CONSAPEVOLEZZA OCR: Alcuni contenuti potrebbero provenire dall'OCR di immagini e potrebbero contenere errori - concentrati sulle informazioni più affidabili."
             f"{multimodal_note}\n\n"
-            f"REFERENCE FORMAT (use ONLY for structure/style/tone):\n{context}\n\n"
-            f"USER DOCUMENTS (ONLY SOURCE FOR CONTENT):\n{file_contents}\n\n"
-            "Generate a structured insurance claim report that follows the format of the reference but "
-            "ONLY uses facts from the user documents. Include sections like:\n"
-            "- CLAIM SUMMARY\n"
-            "- CLAIMANT INFORMATION\n"
-            "- INCIDENT DETAILS\n"
-            "- COVERAGE ANALYSIS\n"
-            "- DAMAGES/INJURIES\n"
-            "- INVESTIGATION FINDINGS\n"
-            "- LIABILITY ASSESSMENT\n"
-            "- SETTLEMENT RECOMMENDATION\n\n"
-            "CRITICAL: Do NOT invent ANY information. Only use facts explicitly stated in the user's documents."
+            f"MODELLO DI FORMATO (usa SOLO per la struttura):\n{format_template}\n\n"
+            f"DOCUMENTI DELL'UTENTE (UNICA FONTE PER IL CONTENUTO):\n{file_contents}\n\n"
+            "Genera una relazione strutturata di sinistro assicurativo che segue il formato del modello ma "
+            "utilizza SOLO fatti dai documenti dell'utente. Includi sezioni appropriate in base alle informazioni disponibili.\n\n"
+            "FONDAMENTALE: NON inventare ALCUNA informazione. Utilizza solo fatti esplicitamente dichiarati nei documenti dell'utente."
         )
         
         try:
@@ -401,7 +508,7 @@ async def generate_report_from_id(data: Dict[str, Any]):
                     "messages": [
                         {
                             "role": "system", 
-                            "content": "You are an expert insurance report writer. You MUST ONLY use facts explicitly stated in the user's documents. Do not invent, assume, or hallucinate ANY information not explicitly provided. Remain strictly factual. If content appears to be from OCR with potential errors, focus on the most reliable information."
+                            "content": "Sei un esperto redattore di relazioni assicurative. DEVI utilizzare SOLO fatti esplicitamente dichiarati nei documenti dell'utente. Non inventare, presumere o allucinare ALCUNA informazione non esplicitamente fornita. Rimani strettamente fattuale. NON utilizzare ALCUNA informazione dal modello di formato per il contenuto - serve SOLO per la struttura. Scrivi SEMPRE in italiano, indipendentemente dalla lingua di input."
                         },
                         {"role": "user", "content": prompt}
                     ],
@@ -614,3 +721,262 @@ async def summarize_documents(data: Dict[str, Any]):
             "key_facts": [],
             "error": str(e)
         }
+
+
+@router.post("/from-structure")
+async def generate_from_structure(
+    request: StructureReportRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate a report from uploaded documents using a specific structure."""
+    logger.info(f"Generating report from structure for user {current_user.id}")
+    
+    try:
+        # Create a report record
+        report = Report(
+            title=request.title or "Generated Report",
+            user_id=current_user.id,
+            status="processing"
+        )
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+        report_id = report.id
+        
+        logger.info(f"Created report record with ID: {report_id}")
+        
+        # Create temp directory for this report
+        report_dir = get_report_directory(report_id)
+        os.makedirs(report_dir, exist_ok=True)
+        
+        # Prepare file paths for documents
+        document_paths = []
+        
+        # Handle file IDs - convert them to file paths
+        for file_id in request.document_ids:
+            # Get file path from database
+            file_record = db.query(File).filter(File.id == file_id).first()
+            if not file_record:
+                logger.warning(f"File with ID {file_id} not found")
+                continue
+                
+            # Verify file existence
+            file_path = os.path.join(settings.UPLOAD_DIR, file_record.file_path)
+            if not os.path.exists(file_path):
+                logger.warning(f"File not found at path: {file_path}")
+                continue
+                
+            document_paths.append(file_path)
+            logger.info(f"Added document: {file_path}")
+        
+        if not document_paths:
+            logger.error("No valid documents found for processing")
+            db.query(Report).filter(Report.id == report_id).update({"status": "failed"})
+            db.commit()
+            return {"status": "failed", "error": "No valid documents found for processing"}
+        
+        # Extract text from documents
+        logger.info("Extracting text from documents...")
+        from services.pdf_extractor import extract_text_from_files
+        document_text = extract_text_from_files(document_paths)
+        
+        # Get the structure to use
+        custom_format_template = request.structure or ""
+        
+        if not custom_format_template.strip():
+            # Create a default format template with placeholders if none provided
+            custom_format_template = """
+## RIEPILOGO SINISTRO
+[Format placeholder for claim summary]
+
+## INFORMAZIONI SUL RICHIEDENTE
+[Format placeholder for claimant information]
+
+## DETTAGLI INCIDENTE
+[Format placeholder for incident details]
+
+## ANALISI COPERTURA
+[Format placeholder for coverage analysis]
+
+## DANNI/FERITE
+[Format placeholder for damages/injuries]
+
+## RISULTATI INVESTIGAZIONE
+[Format placeholder for investigation findings]
+
+## VALUTAZIONE RESPONSABILITÀ
+[Format placeholder for liability assessment]
+
+## RACCOMANDAZIONE RISARCIMENTO
+[Format placeholder for settlement recommendation]
+"""
+        
+        # Prepare the system message
+        system_message = (
+            "Sei un esperto redattore di relazioni assicurative. DEVI utilizzare SOLO fatti esplicitamente dichiarati nei documenti dell'utente. "
+            "Non inventare, presumere o allucinare ALCUNA informazione non esplicitamente fornita. Rimani strettamente fattuale. "
+            "NON utilizzare ALCUNA informazione dal modello di formato per il contenuto - serve SOLO per la struttura. "
+            "Scrivi SEMPRE in italiano, indipendentemente dalla lingua di input."
+        )
+        
+        # Prepare the prompt with strict instructions
+        prompt = (
+            "Sei un esperto redattore di relazioni assicurative incaricato di creare una relazione formale assicurativa.\n\n"
+            "ISTRUZIONI RIGOROSE - SEGUI CON PRECISIONE:\n"
+            "1. SOLO FORMATO: Utilizza la struttura del formato per organizzare la tua relazione in modo professionale.\n"
+            "2. SOLO CONTENUTO UTENTE: Il contenuto della tua relazione DEVE provenire ESCLUSIVAMENTE dai documenti dell'utente.\n"
+            "3. NESSUNA INVENZIONE: Non aggiungere ALCUNA informazione non esplicitamente presente nei documenti dell'utente.\n"
+            "4. LINGUA ITALIANA: Scrivi la relazione SEMPRE in italiano, indipendentemente dalla lingua dei documenti dell'utente.\n"
+            "5. INFORMAZIONI MANCANTI: Se mancano informazioni chiave, indica 'Non fornito nei documenti' anziché inventarle.\n"
+            "6. NESSUNA CREATIVITÀ: Questo è un documento assicurativo fattuale - attieniti strettamente alle informazioni nei documenti dell'utente.\n"
+            f"STRUTTURA DEL FORMATO (usa SOLO per l'organizzazione):\n{custom_format_template}\n\n"
+            f"DOCUMENTI DELL'UTENTE (UNICA FONTE PER IL CONTENUTO):\n{document_text}\n\n"
+            "Genera una relazione strutturata di sinistro assicurativo che segue il formato del modello ma "
+            "utilizza SOLO fatti dai documenti dell'utente. Includi sezioni appropriate in base alle informazioni disponibili.\n\n"
+            "FONDAMENTALE: NON inventare ALCUNA informazione. Utilizza solo fatti esplicitamente dichiarati nei documenti dell'utente."
+        )
+        
+        # Background task to generate report
+        background_tasks.add_task(
+            _generate_and_save_report,
+            system_message=system_message,
+            prompt=prompt,
+            report_id=report_id,
+            report_dir=report_dir,
+            document_text=document_text,
+            token_limit=settings.MAX_TOKENS
+        )
+        
+        return {"status": "processing", "report_id": report_id}
+        
+    except Exception as e:
+        logger.error(f"Error in generate_from_structure: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # Update report status if report was created
+        if 'report_id' in locals():
+            db.query(Report).filter(Report.id == report_id).update({"status": "failed"})
+            db.commit()
+            
+        # Return error response
+        return {"status": "failed", "error": str(e)}
+
+
+def get_report_directory(report_id):
+    """Get the directory path for a report"""
+    return os.path.join(settings.UPLOAD_DIR, "reports", str(report_id))
+
+
+async def _generate_and_save_report(
+    system_message: str,
+    prompt: str,
+    report_id: int,
+    report_dir: str,
+    document_text: str,
+    token_limit: int = 4000
+):
+    """Generate a report and save it to disk"""
+    try:
+        logger.info(f"Starting report generation for report ID: {report_id}")
+        start_time = time.time()
+        
+        # Prepare API request
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt}
+        ]
+        
+        # Log the API call
+        logger.info(f"Calling OpenRouter API with prompt length: {len(prompt)} characters")
+        
+        # Call the OpenRouter API
+        response = await call_openrouter_api(
+            messages=messages,
+            max_retries=2,
+            timeout=120.0
+        )
+        
+        # Calculate time taken
+        time_taken = time.time() - start_time
+        logger.info(f"API call completed in {time_taken:.2f} seconds")
+        
+        # Process the response
+        if (
+            response
+            and "choices" in response
+            and len(response["choices"]) > 0
+            and "message" in response["choices"][0]
+            and "content" in response["choices"][0]["message"]
+        ):
+            # Extract the generated text
+            generated_text = response["choices"][0]["message"]["content"]
+            logger.info(f"Successfully generated report with {len(generated_text)} characters")
+            
+            # Save the generated text to a file
+            output_file = os.path.join(report_dir, "report.md")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(generated_text)
+                
+            # Update the report record in the database
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            
+            engine = create_engine(settings.DATABASE_URL)
+            SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            db = SessionLocal()
+            
+            try:
+                # Update the report record
+                db.query(Report).filter(Report.id == report_id).update({
+                    "content": generated_text,
+                    "file_path": os.path.join("reports", str(report_id), "report.md"),
+                    "status": "completed"
+                })
+                db.commit()
+                logger.info(f"Updated report record for ID: {report_id}")
+            except Exception as db_error:
+                logger.error(f"Database error: {str(db_error)}")
+            finally:
+                db.close()
+                
+        else:
+            logger.error(f"Unexpected API response format: {response}")
+            
+            # Update report status to failed
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            
+            engine = create_engine(settings.DATABASE_URL)
+            SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            db = SessionLocal()
+            
+            try:
+                db.query(Report).filter(Report.id == report_id).update({"status": "failed"})
+                db.commit()
+            except Exception as db_error:
+                logger.error(f"Database error: {str(db_error)}")
+            finally:
+                db.close()
+                
+    except Exception as e:
+        logger.error(f"Error in _generate_and_save_report: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # Update report status to failed
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            
+            engine = create_engine(settings.DATABASE_URL)
+            SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            db = SessionLocal()
+            
+            db.query(Report).filter(Report.id == report_id).update({"status": "failed"})
+            db.commit()
+            db.close()
+        except Exception as db_error:
+            logger.error(f"Database error when updating status: {str(db_error)}")

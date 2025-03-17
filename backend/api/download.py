@@ -29,15 +29,22 @@ def fetch_report_path_from_supabase(report_id: str):
         supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         
         try:
-            # Query the reports table using the integer ID
-            response = supabase.table("reports").select("formatted_file_path,is_finalized").eq("id", db_id).execute()
+            # Try to find by ID first - select both file path columns
+            print(f"Looking for report with ID: {db_id}")
+            response = supabase.table("reports").select("formatted_file_path,file_path,is_finalized").eq("id", db_id).execute()
+            
+            # If not found by ID and it's a UUID format, try searching by UUID too
+            if (not response.data or not response.data[0]) and isinstance(report_id, str) and "-" in report_id:
+                print(f"Report not found by ID {db_id}, trying UUID: {report_id}")
+                response = supabase.table("reports").select("formatted_file_path,file_path,is_finalized").eq("uuid", report_id).execute()
+            
         except Exception as e:
-            # If the formatted_file_path column doesn't exist yet, try to find the file locally
-            print(f"Database error (likely missing formatted_file_path column): {str(e)}")
+            # If database query fails, try to find the file locally
+            print(f"Database error: {str(e)}")
             local_path = find_report_file_locally(report_id)
             if local_path:
                 return local_path
-            raise HTTPException(status_code=500, detail="Database schema not fully initialized")
+            raise HTTPException(status_code=500, detail="Database error when retrieving report")
         
         if not response.data:
             raise HTTPException(status_code=404, detail=f"Report with ID {report_id} not found in the database.")
@@ -45,8 +52,23 @@ def fetch_report_path_from_supabase(report_id: str):
         report_data = response.data[0]
         if not report_data["is_finalized"]:
             raise HTTPException(status_code=403, detail="Report is not finalized yet.")
+        
+        # Try both path fields, prioritizing formatted_file_path
+        file_path = None
+        if report_data.get("formatted_file_path") and os.path.exists(report_data["formatted_file_path"]):
+            file_path = report_data["formatted_file_path"]
+        elif report_data.get("file_path") and os.path.exists(report_data["file_path"]):
+            file_path = report_data["file_path"]
+        
+        # If no valid path found in the database, fall back to local search
+        if not file_path:
+            print(f"No valid file path found in database, searching locally for: {report_id}")
+            local_path = find_report_file_locally(report_id)
+            if local_path:
+                return local_path
+            raise HTTPException(status_code=404, detail=f"Report file not found for ID: {report_id}")
             
-        return report_data["formatted_file_path"]
+        return file_path
     except Exception as e:
         print(f"Error fetching report path: {str(e)}")
         traceback.print_exc()
@@ -90,15 +112,52 @@ def find_report_file_locally(report_id: str):
         report_filename = f"report_{hash_id}.pdf"
         
         # Check in the generated reports directory
-        report_path = os.path.join(settings.GENERATED_REPORTS_DIR, report_filename)
+        generated_reports_dir = settings.GENERATED_REPORTS_DIR
+        if not os.path.isabs(generated_reports_dir):
+            # If it's a relative path, make it absolute
+            generated_reports_dir = os.path.abspath(generated_reports_dir)
+            
+        report_path = os.path.join(generated_reports_dir, report_filename)
         if os.path.exists(report_path):
             return report_path
             
-        # Check for any file that contains the report ID
-        all_pdfs = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, "*.pdf"))
-        for pdf in all_pdfs:
-            if report_id in os.path.basename(pdf):
-                return pdf
+        # Check for any file that contains the report ID in various directories
+        search_dirs = [
+            generated_reports_dir,
+            os.path.join(os.getcwd(), "generated_reports"),
+            os.path.join(os.getcwd(), "backend", "generated_reports"),
+            "./generated_reports",
+            "../generated_reports",
+            "/tmp/generated_reports"
+        ]
+        
+        for search_dir in search_dirs:
+            if os.path.exists(search_dir) and os.path.isdir(search_dir):
+                # Look for any PDF file with matching ID or hash in name
+                pdf_files = glob.glob(os.path.join(search_dir, "*.pdf"))
+                for pdf_file in pdf_files:
+                    filename = os.path.basename(pdf_file)
+                    if report_id in filename or str(hash_id) in filename:
+                        print(f"Found matching report PDF: {pdf_file}")
+                        return pdf_file
+    
+    # If still not found, try searching all PDFs in the generated reports directory
+    try:
+        print(f"Looking for any PDFs related to report ID: {report_id}")
+        
+        # Check if generated reports directory exists
+        if os.path.exists(settings.GENERATED_REPORTS_DIR) and os.path.isdir(settings.GENERATED_REPORTS_DIR):
+            all_pdfs = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, "*.pdf"))
+            all_pdfs.extend(glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, "**", "*.pdf")))
+            
+            if all_pdfs:
+                print(f"Found {len(all_pdfs)} PDFs to check")
+                # Return the most recently modified PDF as a last resort
+                newest_pdf = max(all_pdfs, key=os.path.getmtime)
+                print(f"Using most recent PDF: {newest_pdf}")
+                return newest_pdf
+    except Exception as e:
+        print(f"Error during extended PDF search: {str(e)}")
     
     return None
 
@@ -108,6 +167,8 @@ async def download_report(report_id: str):
     """
     Download a finalized report PDF.
     """
+    print(f"Received download request for report ID: {report_id}")
+    
     # First check if this is a UUID that exists locally
     is_uuid = False
     local_path = None
@@ -115,10 +176,12 @@ async def download_report(report_id: str):
     if "-" in report_id:
         is_uuid = True
         local_path = find_report_file_locally(report_id)
+        print(f"UUID detected, local path search result: {local_path}")
     
     # If found locally, return the file
     if local_path and os.path.exists(local_path):
         filename = os.path.basename(local_path)
+        print(f"Returning local file: {local_path}")
         return FileResponse(
             local_path,
             media_type="application/pdf",
@@ -128,16 +191,25 @@ async def download_report(report_id: str):
     
     # If not found locally or not a UUID, try the database
     try:
+        print(f"Looking up file path in database for report ID: {report_id}")
         file_path = fetch_report_path_from_supabase(report_id)
         
         if not file_path:
             raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
             
         if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
+            print(f"File path from database doesn't exist: {file_path}")
+            # Try to find locally one more time as a fallback
+            fallback_path = find_report_file_locally(report_id)
+            if fallback_path and os.path.exists(fallback_path):
+                print(f"Using fallback path: {fallback_path}")
+                file_path = fallback_path
+            else:
+                raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
             
         # Return the PDF file as an attachment
         filename = os.path.basename(file_path)
+        print(f"Returning file from database path: {file_path}")
         return FileResponse(
             file_path,
             media_type="application/pdf",

@@ -63,11 +63,51 @@ def update_report_file_path(report_id, pdf_path: str):
             raise HTTPException(status_code=400, detail=f"Invalid report ID format: {str(e)}")
         
         # Update the report with the file path
-        data = {"formatted_file_path": pdf_path, "is_finalized": True}
-        response = supabase.table("reports").update(data).eq("id", db_id).execute()
-        
-        if not response.data:
-            raise HTTPException(status_code=500, detail=f"Failed to update report in database with ID: {report_id}")
+        try:
+            # Update both fields to ensure compatibility
+            data = {
+                "formatted_file_path": pdf_path, 
+                "file_path": pdf_path,
+                "is_finalized": True
+            }
+            
+            # Try to find the report by ID first
+            response = supabase.table("reports").update(data).eq("id", db_id).execute()
+            
+            if not response.data:
+                # If not found by ID, try UUID
+                if isinstance(report_id, str) and "-" in report_id:
+                    print(f"Report not found by ID {db_id}, trying UUID {report_id}")
+                    response = supabase.table("reports").update(data).eq("uuid", report_id).execute()
+            
+            if not response.data:
+                print(f"Warning: No report found with ID {db_id} or UUID {report_id} when updating file path")
+        except Exception as db_error:
+            # Handle database errors
+            print(f"Database error updating report file path: {str(db_error)}")
+            print("This is likely due to missing columns in the database.")
+            
+            # Save locally as fallback
+            report_dir = os.path.join(settings.UPLOAD_DIR, str(report_id))
+            metadata_path = os.path.join(report_dir, "metadata.json")
+            
+            if os.path.exists(report_dir) and os.path.isdir(report_dir):
+                # Save locally in metadata.json
+                try:
+                    metadata = {}
+                    if os.path.exists(metadata_path):
+                        with open(metadata_path, "r") as f:
+                            metadata = json.load(f)
+                    
+                    metadata["pdf_path"] = pdf_path
+                    metadata["is_finalized"] = True
+                    
+                    with open(metadata_path, "w") as f:
+                        json.dump(metadata, f)
+                        
+                    print(f"Saved file path to local metadata file: {metadata_path}")
+                except Exception as file_error:
+                    print(f"Error saving metadata file: {str(file_error)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating report file path: {str(e)}")
 
@@ -206,6 +246,8 @@ async def format_final(data: Dict = Body(...)):
         if os.path.exists(report_dir) and os.path.isdir(report_dir):
             is_uuid = True
     
+    print(f"Processing report_id: {report_id} (is_uuid: {is_uuid})")
+    
     # Try to convert the ID if needed
     try:
         db_id = ensure_id_is_int(report_id)
@@ -340,6 +382,7 @@ async def format_final(data: Dict = Body(...)):
             "success": True,
             "report_id": report_id,
             "file_path": absolute_pdf_path,
+            "formatted_file_path": absolute_pdf_path,
             "download_url": f"/api/download/{report_id}"
         }
 

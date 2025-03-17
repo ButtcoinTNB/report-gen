@@ -119,19 +119,39 @@ export async function downloadReport(reportId) {
   try {
     console.log("Downloading report with ID:", reportId);
     
-    // Direct download approach - create a download URL and trigger browser download
-    const directUrl = `${config.API_URL}/api/download/${reportId}`;
-    console.log("Using direct download URL:", directUrl);
+    // First get the report metadata and download URL
+    const response = await axios.get(`${config.endpoints.download}/${reportId}`, {
+      timeout: 10000 // 10 second timeout
+    });
     
-    // Return the direct URL to be opened in a new tab/window
+    console.log("Download response:", response.data);
+    
+    // Construct full URL for download including host
+    let downloadUrl = response.data.download_url;
+    
+    // If the URL doesn't include the protocol and host, add it
+    if (downloadUrl && downloadUrl.startsWith('/api/')) {
+      downloadUrl = `${config.API_URL}${downloadUrl}`;
+    }
+    
     return {
       data: {
-        download_url: directUrl
+        ...response.data,
+        download_url: downloadUrl
       },
-      status: 200
+      status: response.status
     };
   } catch (error) {
-    console.error("Error preparing download:", error);
-    throw new Error(`Failed to prepare download: ${error.message}`);
+    console.error("Error downloading report:", error);
+    if (error.response) {
+      console.error("Server responded with error:", error.response.data);
+      console.error("Status code:", error.response.status);
+      throw new Error(`Server error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
+    } else if (error.request) {
+      console.error("No response received:", error.request);
+      throw new Error("No response received from server");
+    } else {
+      throw error;
+    }
   }
 } 

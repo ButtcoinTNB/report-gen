@@ -32,17 +32,12 @@ class ReportDB(Base):
     __tablename__ = "reports"
 
     id = Column(Integer, primary_key=True, index=True)
-    uuid = Column(String, unique=True, index=True)  # Add UUID field
-    template_id = Column(Integer, ForeignKey("templates.id"))
-    title = Column(String, index=True)
+    uuid = Column(String, unique=True, index=True)
     content = Column(Text)
-    formatted_file_path = Column(
-        String, nullable=True
-    )  # Path in Supabase Storage
-    meta_data = Column(JSON, nullable=True)  # Additional metadata
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    formatted_file_path = Column(String, nullable=True)
+    file_path = Column(String, nullable=True)
     is_finalized = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # Pydantic Models for API
