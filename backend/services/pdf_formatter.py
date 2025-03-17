@@ -8,12 +8,225 @@ from reportlab.lib import colors
 import os
 import asyncio
 import uuid
-from weasyprint import HTML, CSS
-from weasyprint.text.fonts import FontConfiguration
+import io
+import sys
 import tempfile
 import re
 from typing import Dict, Any, List, Optional
 from config import settings
+from utils.error_handler import logger
+
+# Conditionally import WeasyPrint and related modules
+try:
+    from weasyprint import HTML, CSS
+    from weasyprint.text.fonts import FontConfiguration
+    WEASYPRINT_AVAILABLE = True
+    logger.info("WeasyPrint is available for PDF generation")
+except ImportError as e:
+    WEASYPRINT_AVAILABLE = False
+    logger.warning(f"WeasyPrint is not available: {str(e)}")
+
+# Conditionally import pdfrw
+try:
+    import pdfrw
+    PDFRW_AVAILABLE = True
+    logger.info("pdfrw is available for PDF manipulation")
+except ImportError as e:
+    PDFRW_AVAILABLE = False
+    logger.warning(f"pdfrw is not available: {str(e)}")
+
+
+def check_pdf_libraries():
+    """
+    Check if the required PDF libraries are available and compatible.
+    Returns a dictionary with information about available libraries.
+    """
+    libraries = {
+        "reportlab": True,  # Always available as it's a core dependency
+        "weasyprint": WEASYPRINT_AVAILABLE,
+        "pdfrw": PDFRW_AVAILABLE,
+    }
+    
+    # Check specific versions if libraries are available
+    if WEASYPRINT_AVAILABLE:
+        import weasyprint
+        libraries["weasyprint_version"] = weasyprint.__version__
+        logger.info(f"WeasyPrint version: {weasyprint.__version__}")
+    
+    if PDFRW_AVAILABLE:
+        import pdfrw
+        libraries["pdfrw_version"] = pdfrw.__version__
+        logger.info(f"pdfrw version: {pdfrw.__version__}")
+    
+    # Check compatibility between WeasyPrint and pdfrw
+    # This is a known issue with certain versions
+    if WEASYPRINT_AVAILABLE and PDFRW_AVAILABLE:
+        try:
+            # Create a minimal PDF using WeasyPrint
+            html = HTML(string="<p>Test</p>")
+            pdf_bytes = html.write_pdf()
+            
+            # Try to read it with pdfrw
+            pdf_file = io.BytesIO(pdf_bytes)
+            pdfrw.PdfReader(pdf_file)
+            
+            libraries["weasyprint_pdfrw_compatible"] = True
+            logger.info("WeasyPrint and pdfrw are compatible")
+        except Exception as e:
+            libraries["weasyprint_pdfrw_compatible"] = False
+            libraries["compatibility_error"] = str(e)
+            logger.warning(f"WeasyPrint and pdfrw compatibility issue: {str(e)}")
+    
+    return libraries
+
+
+def generate_weasyprint_pdf(report_text: str, output_path: str, reference_metadata: Dict[str, Any]) -> str:
+    """
+    Generate a PDF using WeasyPrint.
+    """
+    logger.info(f"Generating PDF with WeasyPrint: {output_path}")
+    
+    # Convert markdown-like formatting to HTML
+    html_content = convert_markdown_to_html(report_text)
+    
+    # Extract headers and footers
+    headers = reference_metadata.get("headers", [])
+    footers = reference_metadata.get("footers", [])
+    
+    # Create a basic HTML template with styling
+    html_template = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Insurance Report</title>
+        <style>
+            @page {{
+                margin: 2.5cm 2cm;
+                @top-center {{
+                    content: {headers[0] if headers else "'Insurance Report'"};
+                    font-family: Helvetica, Arial, sans-serif;
+                    font-weight: bold;
+                    font-size: 10pt;
+                }}
+                @bottom-center {{
+                    content: {footers[0].replace('{page}', 'counter(page)').replace('{total_pages}', 'counter(pages)') if footers else "'Page ' counter(page) ' of ' counter(pages)"};
+                    font-family: Helvetica, Arial, sans-serif;
+                    font-style: italic;
+                    font-size: 8pt;
+                    color: #555;
+                }}
+            }}
+            body {{
+                font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+                font-size: 11pt;
+                line-height: 1.4;
+                color: #333;
+            }}
+            h1, h2, h3, h4, h5, h6 {{
+                font-family: Helvetica, Arial, sans-serif;
+                font-weight: bold;
+                margin-top: 1em;
+                margin-bottom: 0.5em;
+                color: #000;
+            }}
+            h1 {{ font-size: 16pt; }}
+            h2 {{ font-size: 14pt; }}
+            h3 {{ font-size: 12pt; }}
+            p {{ margin: 0.5em 0; }}
+            ul, ol {{ margin: 0.5em 0; padding-left: 2em; }}
+            table {{ width: 100%; border-collapse: collapse; margin: 1em 0; }}
+            th, td {{ border: 1px solid #ddd; padding: 0.5em; text-align: left; }}
+            th {{ background-color: #f5f5f5; }}
+        </style>
+    </head>
+    <body>
+        {html_content}
+    </body>
+    </html>
+    """
+    
+    try:
+        # Configure fonts
+        font_config = FontConfiguration()
+        
+        # Create HTML object
+        html = HTML(string=html_template)
+        
+        # Generate PDF
+        html.write_pdf(output_path, font_config=font_config)
+        
+        logger.info(f"Successfully generated PDF with WeasyPrint at {output_path}")
+        
+        # Return absolute path
+        return os.path.abspath(output_path)
+    except Exception as e:
+        logger.error(f"Error generating PDF with WeasyPrint: {str(e)}")
+        logger.exception("WeasyPrint PDF generation failed with exception")
+        raise
+
+
+def convert_markdown_to_html(markdown_text: str) -> str:
+    """
+    Convert basic markdown formatting to HTML.
+    """
+    html = markdown_text
+    
+    # Replace markdown headers with HTML headers
+    html = re.sub(r'^# (.*?)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+    html = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+    html = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+    
+    # Replace markdown bold with HTML bold
+    html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html)
+    
+    # Replace markdown italic with HTML italic
+    html = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html)
+    
+    # Replace markdown lists with HTML lists
+    html = re.sub(r'^\- (.*?)$', r'<li>\1</li>', html, flags=re.MULTILINE)
+    
+    # Wrap paragraphs
+    paragraphs = []
+    current_paragraph = []
+    in_list = False
+    
+    for line in html.split('\n'):
+        if line.strip() == '':
+            if current_paragraph:
+                if in_list:
+                    paragraphs.append('<ul>' + ''.join(current_paragraph) + '</ul>')
+                    in_list = False
+                else:
+                    paragraphs.append('<p>' + ''.join(current_paragraph) + '</p>')
+                current_paragraph = []
+        elif line.startswith('<li>'):
+            in_list = True
+            current_paragraph.append(line)
+        elif line.startswith('<h'):
+            if current_paragraph:
+                if in_list:
+                    paragraphs.append('<ul>' + ''.join(current_paragraph) + '</ul>')
+                    in_list = False
+                else:
+                    paragraphs.append('<p>' + ''.join(current_paragraph) + '</p>')
+                current_paragraph = []
+            paragraphs.append(line)
+        else:
+            if in_list and not line.startswith('<li>'):
+                paragraphs.append('<ul>' + ''.join(current_paragraph) + '</ul>')
+                current_paragraph = [line]
+                in_list = False
+            else:
+                current_paragraph.append(line)
+    
+    if current_paragraph:
+        if in_list:
+            paragraphs.append('<ul>' + ''.join(current_paragraph) + '</ul>')
+        else:
+            paragraphs.append('<p>' + ''.join(current_paragraph) + '</p>')
+    
+    return ''.join(paragraphs)
 
 
 def generate_pdf(
@@ -35,6 +248,17 @@ def generate_pdf(
     
     # Create full path
     output_path = os.path.join(settings.GENERATED_REPORTS_DIR, output_filename)
+    
+    # Check for WeasyPrint availability first
+    if WEASYPRINT_AVAILABLE:
+        try:
+            logger.info("Attempting to generate PDF with WeasyPrint")
+            return generate_weasyprint_pdf(report_text, output_path, reference_metadata)
+        except Exception as e:
+            logger.warning(f"WeasyPrint failed, falling back to ReportLab: {str(e)}")
+            # Fall back to ReportLab
+    
+    logger.info("Generating PDF with ReportLab")
     
     try:
         c = canvas.Canvas(output_path, pagesize=A4)
@@ -189,12 +413,13 @@ def generate_pdf(
                     y_offset += 15
         
         c.save()
-        print(f"Successfully generated PDF at {output_path}")
+        logger.info(f"Successfully generated PDF with ReportLab at {output_path}")
         
         # Return absolute path
         return os.path.abspath(output_path)
     except Exception as e:
-        print(f"Error generating PDF: {str(e)}")
+        logger.error(f"Error generating PDF with ReportLab: {str(e)}")
+        logger.exception("PDF generation failed with exception")
         raise
 
 
@@ -218,11 +443,25 @@ async def format_report_as_pdf(
         filename = f"preview_{unique_id}.pdf" if is_preview else f"report_{unique_id}.pdf"
 
     try:
+        # Check PDF libraries compatibility
+        libraries = check_pdf_libraries()
+        logger.info(f"PDF library compatibility check: {libraries}")
+        
+        # Log when starting PDF generation
+        logger.info(f"Starting PDF generation for {'preview' if is_preview else 'final'} mode")
+        logger.info(f"Output filename: {filename}")
+        
         # Run the synchronous function in a thread to avoid blocking
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None, generate_pdf, report_content, filename, reference_metadata
         )
+        
+        # Log successful PDF generation
+        logger.info(f"PDF generation completed: {result}")
+        
+        return result
     except Exception as e:
-        print(f"Error in format_report_as_pdf: {str(e)}")
+        logger.error(f"Error in format_report_as_pdf: {str(e)}")
+        logger.exception("PDF formatting failed with exception")
         raise
