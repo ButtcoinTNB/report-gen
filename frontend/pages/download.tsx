@@ -38,6 +38,15 @@ interface Report {
   download_url?: string;
 }
 
+// Interface for download response
+interface DownloadResponse {
+  data: {
+    download_url: string;
+    [key: string]: any;
+  };
+  status: number;
+}
+
 const DownloadPage = () => {
   const router = useRouter();
   const { id } = router.query; // Get report ID from URL
@@ -56,10 +65,10 @@ const DownloadPage = () => {
       setIsLoading(true);
       try {
         // Call the API client function to fetch the report
-        const reportData = await getReport(Number(id));
+        const reportData = await getReport(Number(id)) as Report;
         
         // Then get the download information
-        const downloadData = await downloadReport(Number(id));
+        const downloadData = await downloadReport(Number(id)) as DownloadResponse;
         
         setReport({
           ...reportData,
