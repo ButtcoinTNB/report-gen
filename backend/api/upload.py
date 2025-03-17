@@ -150,6 +150,19 @@ async def upload_documents(
     try:
         print(f"Upload documents request received: {len(files)} files, template_id={template_id}")
         
+        # Check total size of all files
+        total_size = sum(file.size for file in files)
+        max_total_size = settings.MAX_UPLOAD_SIZE  # 100MB by default
+        
+        print(f"Total size of all files: {total_size} bytes / {total_size/(1024*1024):.2f} MB")
+        print(f"Maximum allowed combined size: {max_total_size} bytes / {max_total_size/(1024*1024):.2f} MB")
+        
+        if total_size > max_total_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Total size of all files ({total_size/(1024*1024):.2f} MB) exceeds the {max_total_size/(1024*1024):.2f} MB combined limit"
+            )
+        
         uploaded_files = []
         
         # Generate a unique report ID
@@ -177,12 +190,15 @@ async def upload_documents(
                         status_code=400,
                         detail="Only PDF, Word, text files and images are accepted",
                     )
-
-                # Check file size
-                if file.size > settings.MAX_UPLOAD_SIZE:
+                
+                # Individual file size check is no longer needed since we check total size above
+                # But keeping a relaxed limit for individual files (80% of max)
+                individual_max = int(max_total_size * 0.8)  # 80% of max allowed size
+                if file.size > individual_max:
+                    max_size_mb = individual_max / (1024 * 1024)
                     raise HTTPException(
                         status_code=400,
-                        detail=f"File size exceeds the {settings.MAX_UPLOAD_SIZE} bytes limit",
+                        detail=f"Individual file size exceeds {max_size_mb:.1f} MB limit"
                     )
 
                 # Create unique filename

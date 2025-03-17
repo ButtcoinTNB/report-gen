@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     # File storage
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")
     MAX_UPLOAD_SIZE: int = int(
-        os.getenv("MAX_UPLOAD_SIZE", "10485760")
-    )  # 10MB default
+        os.getenv("MAX_UPLOAD_SIZE", "104857600")
+    )  # 100MB default
 
     # API Settings
     API_RATE_LIMIT: int = int(

@@ -18,6 +18,22 @@ export async function uploadFile(files, templateId = 1) {
     throw new Error("No files were provided for upload");
   }
   
+  // Calculate total size before uploading
+  let totalSize = 0;
+  for (const file of filesArray) {
+    totalSize += file.size || 0;
+  }
+  const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+  console.log(`Total size of all files: ${totalSizeMB} MB`);
+  
+  // Check if total size exceeds 100MB (client-side validation)
+  const MAX_SIZE_MB = 100;
+  if (totalSize > (MAX_SIZE_MB * 1024 * 1024)) {
+    const errorMsg = `Total file size (${totalSizeMB} MB) exceeds the ${MAX_SIZE_MB} MB limit`;
+    console.error(errorMsg);
+    throw new Error(errorMsg);
+  }
+  
   // Append each file with the same key 'files'
   filesArray.forEach((file) => {
     formData.append("files", file);
@@ -32,7 +48,7 @@ export async function uploadFile(files, templateId = 1) {
     // Safely log file details if available
     try {
       console.log("Files to upload:", filesArray.map(f => 
-        `${f.name || 'unnamed'} (${f.size || 'unknown'} bytes, ${f.type || 'unknown type'})`
+        `${f.name || 'unnamed'} (${(f.size / (1024 * 1024)).toFixed(2)} MB, ${f.type || 'unknown type'})`
       ));
     } catch (logError) {
       console.warn("Could not log file details:", logError);
@@ -42,7 +58,7 @@ export async function uploadFile(files, templateId = 1) {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 60000 // 60 second timeout for larger files
+      timeout: 120000 // 120 second timeout for larger files
     });
     
     console.log("Upload response:", response.data);
@@ -59,14 +75,20 @@ export async function uploadFile(files, templateId = 1) {
         console.error("Status code:", error.response.status);
         
         if (error.response.data && error.response.data.detail) {
-          errorMessage = `Server error: ${error.response.data.detail}`;
+          // Check if it's a file size error
+          if (typeof error.response.data.detail === 'string' && 
+              error.response.data.detail.includes('size')) {
+            errorMessage = `File size error: ${error.response.data.detail}`;
+          } else {
+            errorMessage = `Server error: ${error.response.data.detail}`;
+          }
         } else {
           errorMessage = `Server error (${error.response.status})`;
         }
       } else if (error.request) {
         // Request was made but no response received
         console.error("No response received:", error.request);
-        errorMessage = "Server did not respond to upload request";
+        errorMessage = "Server did not respond to upload request. This could be due to the large file size exceeding server limits.";
       } else {
         // Error in setting up the request
         errorMessage = `Request error: ${error.message}`;

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { 
   Box, 
   Button, 
@@ -12,7 +12,8 @@ import {
   ListItemText,
   ListItemIcon,
   IconButton,
-  Chip
+  Chip,
+  LinearProgress
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
@@ -31,8 +32,33 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [totalSize, setTotalSize] = useState<number>(0);
+  const [sizeWarning, setSizeWarning] = useState<string | null>(null);
   // Using a default template ID of 1, no dropdown needed
   const templateId = 1;
+  
+  // Maximum allowed size in bytes (100MB)
+  const MAX_TOTAL_SIZE = 100 * 1024 * 1024;
+  const WARNING_THRESHOLD = 0.8 * MAX_TOTAL_SIZE; // 80% of max
+
+  // Update total size whenever files change
+  useEffect(() => {
+    const newTotalSize = files.reduce((sum, file) => sum + file.size, 0);
+    setTotalSize(newTotalSize);
+    
+    // Set warning if approaching limit
+    if (newTotalSize > WARNING_THRESHOLD && newTotalSize <= MAX_TOTAL_SIZE) {
+      setSizeWarning(`Total size (${getFileSize(newTotalSize)}) is approaching the 100MB limit`);
+    } else if (newTotalSize > MAX_TOTAL_SIZE) {
+      setSizeWarning(`Total size (${getFileSize(newTotalSize)}) exceeds the 100MB limit. Please remove some files.`);
+      setError("Total file size exceeds 100MB limit. Please remove some files before uploading.");
+    } else {
+      setSizeWarning(null);
+      if (error === "Total file size exceeds 100MB limit. Please remove some files before uploading.") {
+        setError(null);
+      }
+    }
+  }, [files]);
 
   // Get icon based on file type
   const getFileIcon = (file: File) => {
@@ -86,6 +112,12 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       setError("Please select at least one file to upload.");
       return;
     }
+    
+    // Double-check size before submitting
+    if (totalSize > MAX_TOTAL_SIZE) {
+      setError("Total file size exceeds 100MB limit. Please remove some files before uploading.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -110,6 +142,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       setLoading(false);
     }
   };
+  
+  // Calculate size usage percentage
+  const sizePercentage = Math.min((totalSize / MAX_TOTAL_SIZE) * 100, 100);
 
   return (
     <Paper sx={{ 
@@ -156,9 +191,31 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
         
         {files.length > 0 && (
           <Box sx={{ mb: 3 }}>
-            <Typography variant="h6" sx={{ mb: 1 }}>
-              Selected Files ({files.length})
-            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Typography variant="h6">
+                Selected Files ({files.length})
+              </Typography>
+              <Typography variant="body2" color={sizePercentage > 80 ? "error.main" : "text.secondary"}>
+                Total Size: {getFileSize(totalSize)} / 100 MB
+              </Typography>
+            </Box>
+            
+            {/* Size progress bar */}
+            <Box sx={{ mb: 2 }}>
+              <LinearProgress 
+                variant="determinate" 
+                value={sizePercentage} 
+                color={sizePercentage > 80 ? "error" : "primary"}
+                sx={{ height: 8, borderRadius: 4 }}
+              />
+            </Box>
+            
+            {sizeWarning && (
+              <Alert severity={sizePercentage > 100 ? "error" : "warning"} sx={{ mb: 2, borderRadius: 2 }}>
+                {sizeWarning}
+              </Alert>
+            )}
+            
             <Paper variant="outlined" sx={{ maxHeight: 240, overflow: 'auto', borderRadius: 2 }}>
               <List dense disablePadding>
                 {files.map((file, index) => (
