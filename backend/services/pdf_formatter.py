@@ -2,7 +2,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import simpleSplit
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, KeepTogether
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib import colors
 import os
@@ -12,7 +12,7 @@ import io
 import sys
 import tempfile
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from config import settings
 from utils.error_handler import logger
 
@@ -36,10 +36,10 @@ except ImportError as e:
     logger.warning(f"pdfrw is not available: {str(e)}")
 
 
-def check_pdf_libraries():
+def check_pdf_libraries() -> Dict[str, Any]:
     """
-    Check if the required PDF libraries are available and compatible.
-    Returns a dictionary with information about available libraries.
+    Check if required PDF libraries are available and test their compatibility.
+    Returns a dictionary with library availability and compatibility results.
     """
     libraries = {
         "reportlab": True,  # Always available as it's a core dependency
@@ -58,20 +58,34 @@ def check_pdf_libraries():
         libraries["pdfrw_version"] = pdfrw.__version__
         logger.info(f"pdfrw version: {pdfrw.__version__}")
     
-    # Check compatibility between WeasyPrint and pdfrw
-    # This is a known issue with certain versions
+    # Full compatibility test between WeasyPrint and pdfrw
     if WEASYPRINT_AVAILABLE and PDFRW_AVAILABLE:
         try:
-            # Create a minimal PDF using WeasyPrint
-            html = HTML(string="<p>Test</p>")
+            # Create minimal PDF using WeasyPrint
+            html = HTML(string="<p>Test PDF</p>")
             pdf_bytes = html.write_pdf()
             
-            # Try to read it with pdfrw
+            # Load with pdfrw
             pdf_file = io.BytesIO(pdf_bytes)
-            pdfrw.PdfReader(pdf_file)
+            pdf_reader = pdfrw.PdfReader(pdf_file)
+            
+            # Modify the document
+            pdf_writer = pdfrw.PdfWriter()
+            for page in pdf_reader.pages:
+                if hasattr(page, "/Title"):
+                    page["/Title"] = pdfrw.objects.pdfstring.PdfString("Modified Title")
+                pdf_writer.addpage(page)
+            
+            # Write modified PDF
+            temp_pdf = io.BytesIO()
+            pdf_writer.write(temp_pdf)
+            
+            # Validate new PDF
+            temp_pdf.seek(0)
+            pdfrw.PdfReader(temp_pdf)
             
             libraries["weasyprint_pdfrw_compatible"] = True
-            logger.info("WeasyPrint and pdfrw are compatible")
+            logger.info("WeasyPrint and pdfrw are fully compatible - modification test passed")
         except Exception as e:
             libraries["weasyprint_pdfrw_compatible"] = False
             libraries["compatibility_error"] = str(e)
@@ -83,6 +97,14 @@ def check_pdf_libraries():
 def generate_weasyprint_pdf(report_text: str, output_path: str, reference_metadata: Dict[str, Any]) -> str:
     """
     Generate a PDF using WeasyPrint.
+    
+    Args:
+        report_text: The text content to convert to PDF
+        output_path: Path where the PDF will be saved
+        reference_metadata: Dictionary containing headers, footers, etc.
+        
+    Returns:
+        Absolute path to the generated PDF
     """
     logger.info(f"Generating PDF with WeasyPrint: {output_path}")
     
@@ -169,6 +191,12 @@ def generate_weasyprint_pdf(report_text: str, output_path: str, reference_metada
 def convert_markdown_to_html(markdown_text: str) -> str:
     """
     Convert basic markdown formatting to HTML.
+    
+    Args:
+        markdown_text: Text with markdown-style formatting
+        
+    Returns:
+        HTML-formatted text
     """
     html = markdown_text
     
@@ -229,6 +257,203 @@ def convert_markdown_to_html(markdown_text: str) -> str:
     return ''.join(paragraphs)
 
 
+class HeaderFooterCanvas(canvas.Canvas):
+    """
+    Custom canvas class for ReportLab that adds headers and footers to each page
+    """
+    
+    def __init__(self, *args, **kwargs):
+        self.headers = kwargs.pop('headers', [])
+        self.footers = kwargs.pop('footers', [])
+        self.width, self.height = A4
+        self.page_count = 0
+        canvas.Canvas.__init__(self, *args, **kwargs)
+    
+    def showPage(self):
+        self.page_count += 1
+        
+        # Add headers
+        if self.headers:
+            self.saveState()
+            self.setFont("Helvetica-Bold", 12)
+            
+            y_offset = self.height - 40
+            for header in self.headers:
+                # Center the header
+                header_width = self.stringWidth(header, "Helvetica-Bold", 12)
+                x_position = (self.width - header_width) / 2
+                self.drawString(x_position, y_offset, header)
+                y_offset -= 20
+                
+            self.restoreState()
+        
+        # Add footers
+        if self.footers:
+            self.saveState()
+            self.setFont("Helvetica-Oblique", 8)
+            
+            y_offset = 30
+            for footer in self.footers:
+                # Replace placeholders with actual page numbers
+                footer_text = footer.replace("{page}", str(self.page_count))
+                # We don't know total pages yet, will be updated in save()
+                footer_text = footer_text.replace("{total_pages}", "{total_pages}")
+                
+                # Center the footer
+                footer_width = self.stringWidth(footer_text, "Helvetica-Oblique", 8)
+                x_position = (self.width - footer_width) / 2
+                self.drawString(x_position, y_offset, footer_text)
+                y_offset += 15
+                
+            self.restoreState()
+            
+        canvas.Canvas.showPage(self)
+        
+    def save(self):
+        # Process all pages to update the {total_pages} placeholder
+        total_pages = self.page_count
+        
+        # We need to pass through each page and update footers if they contain {total_pages}
+        for page_num in range(1, total_pages + 1):
+            # Get page
+            page = self._pageBuffer[page_num - 1]
+            
+            # Replace {total_pages} placeholder with the actual total
+            updated_page = page.replace(b"{total_pages}", str(total_pages).encode())
+            
+            # Update page in buffer
+            self._pageBuffer[page_num - 1] = updated_page
+            
+        canvas.Canvas.save(self)
+
+
+def generate_reportlab_pdf(report_text: str, output_path: str, reference_metadata: Dict[str, Any]) -> str:
+    """
+    Generate a PDF using ReportLab's Platypus for proper text flow handling.
+    
+    Args:
+        report_text: The text content to convert to PDF
+        output_path: Path where the PDF will be saved
+        reference_metadata: Dictionary containing headers, footers, etc.
+        
+    Returns:
+        Absolute path to the generated PDF
+    """
+    logger.info(f"Generating PDF with ReportLab Platypus: {output_path}")
+    
+    # Extract headers and footers
+    headers = reference_metadata.get("headers", [])
+    footers = reference_metadata.get("footers", ["Page {page} of {total_pages}"])
+    
+    try:
+        # Create a document template with custom canvas for headers/footers
+        def make_canvas(*args, **kwargs):
+            return HeaderFooterCanvas(
+                *args, headers=headers, footers=footers, **kwargs
+            )
+        
+        # Create the document template
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=A4,
+            leftMargin=50,
+            rightMargin=50,
+            topMargin=70,  # Extra space for headers
+            bottomMargin=40  # Extra space for footers
+        )
+        
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Create custom styles
+        title_style = ParagraphStyle(
+            'TitleStyle', 
+            parent=styles['Heading1'],
+            fontSize=16,
+            alignment=TA_CENTER,
+            spaceAfter=16
+        )
+        
+        heading1_style = ParagraphStyle(
+            'Heading1Style', 
+            parent=styles['Heading1'],
+            fontSize=14,
+            spaceAfter=10
+        )
+        
+        heading2_style = ParagraphStyle(
+            'Heading2Style', 
+            parent=styles['Heading2'],
+            fontSize=12,
+            spaceAfter=8
+        )
+        
+        normal_style = styles["Normal"]
+        normal_style.spaceAfter = 10
+        
+        # Parse markdown and convert to Platypus elements
+        sections = report_text.split('\n# ')
+        
+        # Process first part (introduction)
+        intro_text = sections[0].strip()
+        if intro_text:
+            for paragraph in intro_text.split('\n\n'):
+                if paragraph.strip():
+                    story.append(Paragraph(paragraph, normal_style))
+        
+        # Process sections with headers
+        for i in range(1, len(sections)):
+            section = sections[i]
+            section_parts = section.split('\n', 1)
+            
+            # Add section title
+            section_title = section_parts[0].strip()
+            story.append(Paragraph(section_title, heading1_style))
+            
+            # Process section content if any
+            if len(section_parts) > 1:
+                section_content = section_parts[1].strip()
+                
+                # Process subsections if they exist
+                subsections = section_content.split('\n## ')
+                
+                # Process first part (before any subsection)
+                main_content = subsections[0].strip()
+                if main_content:
+                    for paragraph in main_content.split('\n\n'):
+                        if paragraph.strip():
+                            story.append(Paragraph(paragraph, normal_style))
+                
+                # Process each subsection
+                for j in range(1, len(subsections)):
+                    subsection = subsections[j]
+                    subsection_parts = subsection.split('\n', 1)
+                    
+                    # Add subsection title
+                    subsection_title = subsection_parts[0].strip()
+                    story.append(Paragraph(subsection_title, heading2_style))
+                    
+                    # Process subsection content if any
+                    if len(subsection_parts) > 1:
+                        subsection_content = subsection_parts[1].strip()
+                        if subsection_content:
+                            for paragraph in subsection_content.split('\n\n'):
+                                if paragraph.strip():
+                                    story.append(Paragraph(paragraph, normal_style))
+        
+        # Build the document
+        doc.build(story, canvasmaker=make_canvas)
+        
+        logger.info(f"Successfully generated PDF with ReportLab at {output_path}")
+        
+        # Return absolute path
+        return os.path.abspath(output_path)
+    except Exception as e:
+        logger.error(f"Error generating PDF with ReportLab Platypus: {str(e)}")
+        logger.exception("ReportLab PDF generation failed with exception")
+        raise
+
+
 def generate_pdf(
     report_text: str, output_filename: str, reference_metadata: Dict[str, Any]
 ) -> str:
@@ -249,178 +474,23 @@ def generate_pdf(
     # Create full path
     output_path = os.path.join(settings.GENERATED_REPORTS_DIR, output_filename)
     
-    # Check for WeasyPrint availability first
+    # Try WeasyPrint first (if available)
     if WEASYPRINT_AVAILABLE:
         try:
             logger.info("Attempting to generate PDF with WeasyPrint")
             return generate_weasyprint_pdf(report_text, output_path, reference_metadata)
-        except Exception as e:
-            logger.warning(f"WeasyPrint failed, falling back to ReportLab: {str(e)}")
-            # Fall back to ReportLab
+        except Exception as weasy_err:
+            logger.warning(f"WeasyPrint failed, falling back to ReportLab: {str(weasy_err)}")
+    else:
+        logger.info("WeasyPrint is not available, using ReportLab")
     
-    logger.info("Generating PDF with ReportLab")
-    
+    # If WeasyPrint is not available or failed, use ReportLab
     try:
-        c = canvas.Canvas(output_path, pagesize=A4)
-        width, height = A4
-
-        # Define styles
-        styles = getSampleStyleSheet()
-        header_style = ParagraphStyle(
-            'HeaderStyle',
-            parent=styles['Heading1'],
-            fontName='Helvetica-Bold',
-            fontSize=12,
-            alignment=TA_CENTER,
-            spaceAfter=10
-        )
-        
-        footer_style = ParagraphStyle(
-            'FooterStyle',
-            parent=styles['Normal'],
-            fontName='Helvetica-Oblique',
-            fontSize=8,
-            textColor=colors.darkgrey
-        )
-
-        # Add headers
-        if "headers" in reference_metadata and reference_metadata["headers"]:
-            y_offset = 40
-            for i, header in enumerate(reference_metadata["headers"]):
-                c.setFont("Helvetica-Bold", 12)
-                # Center the header text
-                header_width = c.stringWidth(header, "Helvetica-Bold", 12)
-                x_position = (width - header_width) / 2
-                c.drawString(x_position, height - y_offset, header)
-                y_offset += 20
-
-        # For calculating text positions
-        top_margin = 100  # Start text 100pts from top
-        bottom_margin = 50  # Stop 50pts from bottom
-        y_position = height - top_margin
-
-        # Split report text by sections (if using markdown-style headers)
-        sections = report_text.split('\n# ')
-        
-        # Process first part (non-header text if any)
-        intro_text = sections[0]
-        remaining_sections = []
-        
-        if len(sections) > 1:
-            # Process each section (adding back the # that was removed in the split)
-            for i in range(1, len(sections)):
-                remaining_sections.append("# " + sections[i])
-        
-        # Process introduction text
-        intro_lines = simpleSplit(intro_text, "Helvetica", 11, width - 100)
-        
-        c.setFont("Helvetica", 11)
-        for line in intro_lines:
-            if y_position < bottom_margin:  # Start a new page if needed
-                c.showPage()
-                y_position = height - top_margin
-                c.setFont("Helvetica", 11)
-                
-                # Add headers to new page
-                if "headers" in reference_metadata and reference_metadata["headers"]:
-                    y_offset = 40
-                    for i, header in enumerate(reference_metadata["headers"]):
-                        c.setFont("Helvetica-Bold", 12)
-                        header_width = c.stringWidth(header, "Helvetica-Bold", 12)
-                        x_position = (width - header_width) / 2
-                        c.drawString(x_position, height - y_offset, header)
-                        y_offset += 20
-                    c.setFont("Helvetica", 11)  # Reset font
-
-            c.drawString(50, y_position, line)
-            y_position -= 15  # Smaller line spacing for normal text
-        
-        # Process remaining sections
-        for section in remaining_sections:
-            # Extract section title (everything before first newline)
-            parts = section.split('\n', 1)
-            section_title = parts[0].replace('# ', '').strip()
-            section_content = parts[1] if len(parts) > 1 else ""
-            
-            # Add section title
-            if y_position < bottom_margin + 30:  # Need more space for section title
-                c.showPage()
-                y_position = height - top_margin
-                
-                # Add headers to new page
-                if "headers" in reference_metadata and reference_metadata["headers"]:
-                    y_offset = 40
-                    for i, header in enumerate(reference_metadata["headers"]):
-                        c.setFont("Helvetica-Bold", 12)
-                        header_width = c.stringWidth(header, "Helvetica-Bold", 12)
-                        x_position = (width - header_width) / 2
-                        c.drawString(x_position, height - y_offset, header)
-                        y_offset += 20
-            
-            # Draw section title
-            c.setFont("Helvetica-Bold", 12)
-            c.drawString(50, y_position, section_title)
-            y_position -= 20  # More space after section title
-            
-            # Draw section content
-            c.setFont("Helvetica", 11)
-            content_lines = simpleSplit(section_content, "Helvetica", 11, width - 100)
-            
-            for line in content_lines:
-                if y_position < bottom_margin:  # Start a new page if needed
-                    c.showPage()
-                    y_position = height - top_margin
-                    
-                    # Add headers to new page
-                    if "headers" in reference_metadata and reference_metadata["headers"]:
-                        y_offset = 40
-                        for i, header in enumerate(reference_metadata["headers"]):
-                            c.setFont("Helvetica-Bold", 12)
-                            header_width = c.stringWidth(header, "Helvetica-Bold", 12)
-                            x_position = (width - header_width) / 2
-                            c.drawString(x_position, height - y_offset, header)
-                            y_offset += 20
-                    c.setFont("Helvetica", 11)  # Reset font
-                
-                c.drawString(50, y_position, line)
-                y_position -= 15
-
-        # Add footers to all pages
-        c.showPage()  # Finalize the current page
-        
-        # Get total number of pages
-        total_pages = c.getPageNumber()
-        
-        # Go through each page and add footers
-        for page_num in range(1, total_pages + 1):
-            c.setFont("Helvetica-Oblique", 8)
-            
-            # Go to the page
-            c.getPage(page_num - 1)
-            
-            if "footers" in reference_metadata and reference_metadata["footers"]:
-                y_offset = 30
-                for i, footer in enumerate(reference_metadata["footers"]):
-                    # Replace {page} placeholder with actual page number
-                    footer_text = footer.replace("{page}", str(page_num))
-                    footer_text = footer_text.replace("{total_pages}", str(total_pages))
-                    
-                    # Center the footer
-                    footer_width = c.stringWidth(footer_text, "Helvetica-Oblique", 8)
-                    x_position = (width - footer_width) / 2
-                    
-                    c.drawString(x_position, y_offset, footer_text)
-                    y_offset += 15
-        
-        c.save()
-        logger.info(f"Successfully generated PDF with ReportLab at {output_path}")
-        
-        # Return absolute path
-        return os.path.abspath(output_path)
-    except Exception as e:
-        logger.error(f"Error generating PDF with ReportLab: {str(e)}")
-        logger.exception("PDF generation failed with exception")
-        raise
+        return generate_reportlab_pdf(report_text, output_path, reference_metadata)
+    except Exception as reportlab_err:
+        logger.error(f"ReportLab also failed: {str(reportlab_err)}")
+        logger.exception("All PDF generation methods failed")
+        raise RuntimeError("Failed to generate PDF: Both WeasyPrint and ReportLab methods failed.") from reportlab_err
 
 
 async def format_report_as_pdf(
