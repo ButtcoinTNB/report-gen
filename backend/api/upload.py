@@ -1,15 +1,17 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from typing import List
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, Request
+from typing import List, Dict, Optional
+from fastapi.responses import JSONResponse
 import os
 import uuid
-import shutil
+import json
 from config import settings
+import datetime
+from supabase import create_client, Client
+import mimetypes
+import shutil
 from models import Template
 from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
 from werkzeug.utils import secure_filename
-import json
-import datetime
-from supabase import create_client, Client
 
 router = APIRouter()
 
@@ -315,3 +317,43 @@ async def upload_document(
         "file_type": doc_type,
         "report_id": report_id,
     }
+
+
+@router.post("/template", status_code=201)
+async def upload_template_docx(file: UploadFile = File(...)):
+    """
+    Upload a DOCX template file that will be used for generating reports.
+    
+    Args:
+        file: The DOCX template file to upload
+        
+    Returns:
+        Dictionary containing the status and path where the template is stored
+    """
+    try:
+        # Check if the file is a DOCX
+        content_type = file.content_type
+        if content_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            raise HTTPException(
+                status_code=400,
+                detail="File must be a DOCX document"
+            )
+        
+        # Ensure the reference_reports directory exists
+        template_dir = os.path.join("backend", "reference_reports")
+        os.makedirs(template_dir, exist_ok=True)
+        
+        # Define the path where the template will be saved
+        template_path = os.path.join(template_dir, "template.docx")
+        
+        # Save the file
+        with open(template_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        return {
+            "status": "success",
+            "message": "Template uploaded successfully",
+            "path": template_path
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Template upload failed: {str(e)}")

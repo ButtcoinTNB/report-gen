@@ -6,10 +6,13 @@ import {
   Paper,
   CircularProgress,
   Alert,
-  Divider
+  Divider,
+  Stack
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
-import { downloadPDF } from '../api/download';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import DescriptionIcon from '@mui/icons-material/Description';
+import { downloadPDF, downloadDOCX, generateDOCX } from '../api/download';
 
 interface DownloadReportProps {
   reportId: number | null;
@@ -21,9 +24,10 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
   isPdfReady
 }) => {
   const [loading, setLoading] = useState(false);
+  const [docxLoading, setDocxLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleDownload = async () => {
+  const handlePdfDownload = async () => {
     if (!reportId) {
       setError('No report ID provided');
       return;
@@ -36,10 +40,34 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
       await downloadPDF(reportId);
       // Success is handled by the downloadPDF function (it triggers the browser download)
     } catch (err) {
-      console.error('Error downloading report:', err);
-      setError('Failed to download the report. Please try again.');
+      console.error('Error downloading PDF report:', err);
+      setError('Failed to download the PDF report. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDocxDownload = async () => {
+    if (!reportId) {
+      setError('No report ID provided');
+      return;
+    }
+
+    setDocxLoading(true);
+    setError(null);
+
+    try {
+      // First generate the DOCX
+      await generateDOCX(reportId);
+      
+      // Then download it
+      await downloadDOCX(reportId);
+      // Success is handled by the downloadDOCX function (it triggers the browser download)
+    } catch (err) {
+      console.error('Error downloading DOCX report:', err);
+      setError('Failed to download the DOCX report. Please try again.');
+    } finally {
+      setDocxLoading(false);
     }
   };
 
@@ -59,16 +87,29 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
         </Typography>
       </Box>
       
-      <Button
-        variant="contained"
-        color="primary"
-        onClick={handleDownload}
-        disabled={loading || !reportId || !isPdfReady}
-        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <DownloadIcon />}
-        fullWidth
-      >
-        {loading ? 'Downloading...' : 'Download PDF Report'}
-      </Button>
+      <Stack spacing={2}>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handlePdfDownload}
+          disabled={loading || !reportId || !isPdfReady}
+          startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <PictureAsPdfIcon />}
+          fullWidth
+        >
+          {loading ? 'Downloading...' : 'Download PDF Report'}
+        </Button>
+        
+        <Button
+          variant="contained"
+          color="secondary"
+          onClick={handleDocxDownload}
+          disabled={docxLoading || !reportId || !isPdfReady}
+          startIcon={docxLoading ? <CircularProgress size={20} color="inherit" /> : <DescriptionIcon />}
+          fullWidth
+        >
+          {docxLoading ? 'Downloading...' : 'Download DOCX Report'}
+        </Button>
+      </Stack>
       
       {error && (
         <Alert severity="error" sx={{ mt: 2 }}>

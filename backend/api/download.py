@@ -168,3 +168,92 @@ async def cleanup_report_files(report_id: str):
             "status": "error",
             "message": f"Failed to clean up report files: {str(e)}"
         }
+
+
+@router.get("/docx/{report_id}")
+async def download_docx_report(report_id: str):
+    """
+    Download a finalized report as DOCX by ID.
+    
+    Args:
+        report_id: ID of the report to download
+        
+    Returns:
+        The DOCX file as a download
+    """
+    try:
+        # Get file path from Supabase
+        file_path = fetch_report_path_from_supabase(report_id)
+        
+        if not file_path:
+            raise HTTPException(status_code=404, detail="Report file not found")
+        
+        # Check if file exists locally
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Report file not found on server")
+        
+        # Check if the file is a DOCX file
+        if not file_path.lower().endswith('.docx'):
+            # Try to find a matching DOCX file with the same base name
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            docx_path = os.path.join("generated_reports", f"{base_name}.docx")
+            
+            if not os.path.exists(docx_path):
+                raise HTTPException(
+                    status_code=404, 
+                    detail="DOCX version of this report not found. Please generate it first."
+                )
+            file_path = docx_path
+            
+        # Return the file as a download
+        return FileResponse(
+            path=file_path,
+            filename=f"report_{report_id}.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading report: {str(e)}")
+
+
+@router.get("/file/docx/{report_id}")
+async def serve_docx_report_file(report_id: str):
+    """
+    Serve a DOCX report file directly.
+    
+    Args:
+        report_id: ID of the report to serve
+        
+    Returns:
+        The DOCX file
+    """
+    try:
+        # Get file path from Supabase
+        file_path = fetch_report_path_from_supabase(report_id)
+        
+        if not file_path:
+            raise HTTPException(status_code=404, detail="Report file not found")
+        
+        # Check if file exists locally
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Report file not found on server")
+        
+        # Check if the file is a DOCX file
+        if not file_path.lower().endswith('.docx'):
+            # Try to find a matching DOCX file with the same base name
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            docx_path = os.path.join("generated_reports", f"{base_name}.docx")
+            
+            if not os.path.exists(docx_path):
+                raise HTTPException(
+                    status_code=404, 
+                    detail="DOCX version of this report not found. Please generate it first."
+                )
+            file_path = docx_path
+        
+        # Return the file
+        return FileResponse(
+            path=file_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error serving report file: {str(e)}")

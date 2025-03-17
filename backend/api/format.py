@@ -6,6 +6,7 @@ import requests
 from config import settings
 from services.pdf_formatter import format_report_as_pdf
 from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
+from services.docx_formatter import format_report_as_docx
 import uuid
 import glob
 from supabase import create_client, Client
@@ -226,3 +227,48 @@ async def format_final(data: Dict = Body(...)):
         raise HTTPException(
             status_code=500, detail=f"Error formatting final report: {str(e)}"
         )
+
+
+@router.post("/docx", status_code=200)
+async def format_docx(data: Dict = Body(...)):
+    """
+    Formats the report as a DOCX file and updates Supabase with the file path.
+    
+    Args:
+        data: Dictionary containing report_id or report_content
+        
+    Returns:
+        Dictionary with the path to the generated DOCX and status
+    """
+    try:
+        report_id = data.get("report_id")
+        report_content = data.get("report_content")
+        
+        # If report_id is provided, fetch content from Supabase
+        if report_id and not report_content:
+            report_content = fetch_report_from_supabase(report_id)
+        
+        if not report_content:
+            raise HTTPException(status_code=400, detail="Report content is required")
+        
+        # Get metadata from reference reports for formatting
+        reference_metadata = get_reference_metadata()
+        
+        # Generate a unique filename
+        filename = f"report_{uuid.uuid4().hex}.docx"
+        
+        # Format the report as DOCX
+        result = await format_report_as_docx(report_content, reference_metadata, filename)
+        
+        # If report_id is provided, update the file path in Supabase
+        if report_id:
+            update_report_file_path(report_id, result["docx_path"])
+        
+        return {
+            "status": "success",
+            "message": "Report formatted as DOCX successfully",
+            "docx_path": result["docx_path"],
+            "filename": result["filename"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error formatting DOCX: {str(e)}")

@@ -51,4 +51,48 @@ export async function cleanupReportFiles(reportId) {
     console.error("Error cleaning up report files:", error);
     throw error;
   }
+}
+
+// Function to download report as DOCX
+export async function downloadDOCX(reportId) {
+  try {
+    const response = await axios.get(`${config.endpoints.download}/docx/${reportId}`, {
+      responseType: "blob",
+    });
+
+    // Create a Blob URL and trigger download
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `report_${reportId}.docx`);
+    document.body.appendChild(link);
+    link.click();
+    
+    // After successful download, clean up server files
+    try {
+      await cleanupReportFiles(reportId);
+      console.log("Cleanup completed for report files");
+    } catch (cleanupError) {
+      console.warn("Failed to clean up report files:", cleanupError);
+      // Don't throw the error as the download was still successful
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error downloading DOCX report:", error);
+    throw error;
+  }
+}
+
+// Function to generate a DOCX from report content
+export async function generateDOCX(reportId) {
+  try {
+    const response = await axios.post(`${config.endpoints.format}/docx`, {
+      report_id: reportId
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Error generating DOCX:", error);
+    throw error;
+  }
 } 
