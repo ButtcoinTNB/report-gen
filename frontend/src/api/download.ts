@@ -1,8 +1,11 @@
 import axios from "axios";
 
+// Get API URL from environment or fallback to localhost
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export async function downloadPDF(reportId: number) {
   try {
-    const response = await axios.get(`http://localhost:8000/api/download/${reportId}`, {
+    const response = await axios.get(`${API_URL}/api/download/${reportId}`, {
       responseType: "blob",
     });
 

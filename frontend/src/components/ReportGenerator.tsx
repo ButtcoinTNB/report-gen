@@ -11,6 +11,9 @@ import {
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import axios from 'axios';
 
+// Get API URL from environment or fallback to localhost
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface ReportGeneratorProps {
   reportId: number | null;
   onGenerateSuccess: (text: string) => void;
@@ -33,7 +36,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
     setError(null);
 
     try {
-      const response = await axios.post('http://localhost:8000/api/generate/', { 
+      const response = await axios.post(`${API_URL}/api/generate/`, { 
         report_id: reportId 
       });
 

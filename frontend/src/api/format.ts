@@ -1,9 +1,12 @@
 import axios from "axios";
 
+// Get API URL from environment or fallback to localhost
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export async function formatReport(reportId: number, isPreview: boolean) {
   try {
     const endpoint = isPreview ? "preview" : "final";
-    const response = await axios.post(`http://localhost:8000/api/format/${endpoint}`, {
+    const response = await axios.post(`${API_URL}/api/format/${endpoint}`, {
       report_id: reportId
     });
 
