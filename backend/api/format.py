@@ -11,6 +11,7 @@ import uuid
 import glob
 from supabase import create_client, Client
 from utils.id_mapper import ensure_id_is_int
+import json
 
 router = APIRouter()
 
@@ -197,18 +198,75 @@ async def format_final(data: Dict = Body(...)):
 
     report_id = data["report_id"]
     
-    # Use the ID mapper utility to handle UUID/integer conversion
+    # First, check if this is a UUID or report directory
+    is_uuid = False
+    if isinstance(report_id, str) and "-" in report_id:
+        # Check if this is a directory in the uploads folder
+        report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+        if os.path.exists(report_dir) and os.path.isdir(report_dir):
+            is_uuid = True
+    
+    # Try to convert the ID if needed
     try:
         db_id = ensure_id_is_int(report_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid report_id format: {str(e)}"
-        )
+        # If this is a UUID but conversion failed, try to work with it directly
+        if is_uuid:
+            print(f"Working with UUID report_id directly: {report_id}")
+            try:
+                # Use a hash of the UUID as an integer ID for filename purposes
+                import hashlib
+                db_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
+            except Exception:
+                # Last resort fallback
+                db_id = 999999
+        else:
+            # If not UUID format or no directory found, raise the original error
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid report_id format: {str(e)}"
+            )
 
     try:
-        # Fetch the actual report content from Supabase
-        report_content = fetch_report_from_supabase(report_id)
+        # For UUID-based reports, try to get content from files instead of Supabase
+        report_content = None
+        if is_uuid:
+            # Try to find any generated report file in the directory
+            report_files = []
+            metadata_path = os.path.join(report_dir, "metadata.json")
+            
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, "r") as f:
+                        metadata = json.load(f)
+                        if "report_content" in metadata:
+                            report_content = metadata["report_content"]
+                            print(f"Using report content from metadata.json for UUID {report_id}")
+                except Exception as e:
+                    print(f"Error reading metadata for UUID {report_id}: {str(e)}")
+        
+        # If we didn't get content from files, try Supabase
+        if not report_content:
+            try:
+                report_content = fetch_report_from_supabase(report_id)
+            except HTTPException as e:
+                if is_uuid:
+                    # For UUID reports, if Supabase fetch fails, check for a content.txt file
+                    content_path = os.path.join(report_dir, "content.txt")
+                    if os.path.exists(content_path):
+                        try:
+                            with open(content_path, "r") as f:
+                                report_content = f.read()
+                            print(f"Using content from content.txt for UUID {report_id}")
+                        except Exception as read_err:
+                            print(f"Error reading content.txt: {str(read_err)}")
+                    
+                    if not report_content:
+                        # Create a minimal report indicating the error
+                        report_content = f"# Error: Could not retrieve report content\n\nReport ID: {report_id}\n\nThe system was unable to retrieve the content for this report. Please regenerate the report or contact support."
+                else:
+                    # For non-UUID reports, propagate the original error
+                    raise e
         
         # Create the generated_reports directory if it doesn't exist
         os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
@@ -234,8 +292,43 @@ async def format_final(data: Dict = Body(...)):
         
         print(f"PDF generated at: {absolute_pdf_path}")
 
-        # Update the database with the file path
-        update_report_file_path(report_id, absolute_pdf_path)
+        # For UUID reports, save the path in metadata.json too
+        if is_uuid:
+            try:
+                metadata_path = os.path.join(report_dir, "metadata.json")
+                metadata = {}
+                
+                if os.path.exists(metadata_path):
+                    try:
+                        with open(metadata_path, "r") as f:
+                            metadata = json.load(f)
+                    except:
+                        pass
+                
+                metadata["pdf_path"] = absolute_pdf_path
+                metadata["is_finalized"] = True
+                
+                with open(metadata_path, "w") as f:
+                    json.dump(metadata, f)
+                    
+                # Also save content.txt if we have content
+                if report_content and "report_content" not in metadata:
+                    content_path = os.path.join(report_dir, "content.txt")
+                    with open(content_path, "w") as f:
+                        f.write(report_content)
+                        
+            except Exception as e:
+                print(f"Error updating metadata for UUID {report_id}: {str(e)}")
+
+        # Try to update the database with the file path
+        try:
+            update_report_file_path(report_id, absolute_pdf_path)
+        except Exception as e:
+            # For UUID reports, we already saved the path in metadata.json
+            # so log but don't fail if database update fails
+            if not is_uuid:
+                raise e
+            print(f"Warning: Could not update database for UUID {report_id}: {str(e)}")
         
         # Verify the file exists
         if not os.path.exists(absolute_pdf_path):

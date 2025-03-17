@@ -148,29 +148,74 @@ def extract_text_from_file(file_path):
         
         logger.info(f"Extracting text from {file_path} ({file_size_mb:.2f} MB, {file_extension})")
         
+        # Check if file is empty
+        if file_size_bytes == 0:
+            error_msg = f"File is empty: {file_path}"
+            logger.error(error_msg)
+            return error_msg
+            
+        # Detect file type regardless of extension for better handling
+        is_binary = False
+        try:
+            with open(file_path, 'r', encoding='utf-8') as check_file:
+                check_file.read(1024)  # Try to read as text
+        except UnicodeDecodeError:
+            is_binary = True
+            logger.info(f"File appears to be binary: {file_path}")
+        
         if file_extension == '.pdf':
             return extract_text_from_pdf(file_path)
-        elif file_extension in ['.docx', '.doc']:
-            # Make sure python-docx is installed
+        elif file_extension in ['.docx', '.doc', '.docm', '.dot', '.dotx']:
+            # Improved handling for Microsoft Word documents
             try:
                 import docx
-                if file_extension == '.docx':
+                
+                # For DOCX files
+                if file_extension in ['.docx', '.docm', '.dotx']:
+                    logger.info(f"Processing DOCX format file: {file_path}")
                     return extract_text_from_docx(file_path)
+                # For older DOC files
                 else:
-                    # For older .doc files, log a warning about potential issues
-                    logger.warning(f"Processing .doc file which may have limited compatibility: {file_path}")
+                    logger.warning(f"Processing legacy DOC file with limited compatibility: {file_path}")
                     try:
-                        # Try to use docx for .doc files (might work for some)
+                        # Try docx for some .doc files (might work for newer ones)
                         return extract_text_from_docx(file_path)
                     except Exception as doc_e:
                         logger.error(f"Failed to extract .doc with docx: {str(doc_e)}")
-                        return f"Error: Failed to extract text from .doc file. Please convert it to .docx: {str(doc_e)}"
+                        
+                        # If on Windows, try win32com as alternative
+                        try:
+                            import platform
+                            if platform.system() == 'Windows':
+                                logger.info("Attempting Windows-specific DOC extraction")
+                                try:
+                                    import win32com.client
+                                    word = win32com.client.Dispatch("Word.Application")
+                                    word.Visible = False
+                                    
+                                    doc = word.Documents.Open(os.path.abspath(file_path))
+                                    text = doc.Content.Text
+                                    doc.Close()
+                                    word.Quit()
+                                    
+                                    if text:
+                                        logger.info(f"Successfully extracted {len(text)} characters using win32com")
+                                        return text
+                                except Exception as win_e:
+                                    logger.error(f"Win32com extraction failed: {str(win_e)}")
+                        except ImportError:
+                            logger.info("Win32com not available (non-Windows OS or not installed)")
+                        
+                        # If Mac, we could add AppleScript-based extraction here
+                        
+                        # As a fallback, suggest conversion
+                        return f"Error: Unable to extract text from this DOC file format. Please convert it to DOCX: {str(doc_e)}"
             except ImportError:
                 logger.error("python-docx module not installed, cannot extract text from Word documents")
                 return "Error: python-docx module not installed, cannot extract text from Word documents"
         elif file_extension == '.txt':
             return extract_text_from_txt(file_path)
-        elif file_extension in ['.jpg', '.jpeg', '.png']:
+        elif file_extension in ['.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.gif']:
             # For image files, log a message about OCR capabilities
             logger.info(f"Processing image file: {file_path}")
             try:
@@ -182,6 +227,28 @@ def extract_text_from_file(file_path):
                 logger.warning("pytesseract not installed, cannot extract text from images")
                 return "Image file detected. OCR (text extraction from images) is not currently available."
         else:
+            # Try to detect if it's a document by examining file contents
+            if is_binary:
+                logger.info("Attempting to process unknown binary file as document")
+                try:
+                    # First try as PDF
+                    try:
+                        return extract_text_from_pdf(file_path)
+                    except Exception as e:
+                        logger.info(f"Not a PDF: {str(e)}")
+                    
+                    # Then try as DOCX
+                    try:
+                        return extract_text_from_docx(file_path)
+                    except Exception as e:
+                        logger.info(f"Not a DOCX: {str(e)}")
+                        
+                    # Fall through to generic error
+                    raise Exception("Unrecognized binary file format")
+                except Exception as e:
+                    logger.warning(f"Could not identify binary file format: {str(e)}")
+            
+            # If we get here, we don't know how to handle this file
             error_msg = f"Unsupported file type: {file_extension} for file {file_path}"
             logger.warning(error_msg)
             return error_msg
@@ -297,9 +364,49 @@ def extract_text_from_docx(file_path: str) -> str:
             logger.error(f"File not found: {file_path}")
             return f"Error: File not found: {file_path}"
         
+        # Get file size for debugging
+        file_size = os.path.getsize(file_path)
+        logger.info(f"DOCX file size: {file_size} bytes")
+        
         try:
-            # Try to open the DOCX file
-            doc = docx.Document(file_path)
+            # Try to open the DOCX file - with more robust error handling
+            try:
+                doc = docx.Document(file_path)
+            except Exception as doc_open_error:
+                logger.error(f"Failed to open DOCX with python-docx: {str(doc_open_error)}")
+                
+                # Try an alternative approach for problematic files
+                try:
+                    import zipfile
+                    from xml.etree import ElementTree
+                    
+                    logger.info("Attempting alternative extraction method for docx")
+                    
+                    # DOCX files are zip files containing XML
+                    text_content = []
+                    with zipfile.ZipFile(file_path) as docx_zip:
+                        # Look for the main document content
+                        if "word/document.xml" in docx_zip.namelist():
+                            with docx_zip.open("word/document.xml") as content:
+                                tree = ElementTree.parse(content)
+                                for elem in tree.iter():
+                                    # Look for text elements in the XML
+                                    if elem.tag.endswith('}t') and elem.text:
+                                        text_content.append(elem.text)
+                    
+                    if text_content:
+                        result = '\n'.join(text_content)
+                        logger.info(f"Successfully extracted {len(result)} characters using alternative method")
+                        return result
+                    else:
+                        raise Exception("No text content found in document XML")
+                        
+                except Exception as alt_error:
+                    logger.error(f"Alternative extraction also failed: {str(alt_error)}")
+                    # Fall through to error reporting
+                
+                # If we get here, both extraction methods failed
+                return f"Error: Could not open DOCX file: {str(doc_open_error)}"
             
             # Log the number of paragraphs for debugging
             paragraph_count = len(doc.paragraphs)
@@ -317,17 +424,33 @@ def extract_text_from_docx(file_path: str) -> str:
                     logger.info(f"Processed {i}/{paragraph_count} paragraphs")
             
             # Also extract text from tables which might contain important information
-            for table in doc.tables:
+            table_count = len(doc.tables)
+            logger.info(f"DOCX contains {table_count} tables")
+            
+            for i, table in enumerate(doc.tables):
                 for row in table.rows:
+                    row_text = []
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
                             text = paragraph.text.strip()
                             if text:
-                                all_text.append(text)
+                                row_text.append(text)
+                    if row_text:
+                        all_text.append(" | ".join(row_text))
+                
+                # Log progress for tables
+                if i > 0 and i % 5 == 0:
+                    logger.info(f"Processed {i}/{table_count} tables")
             
             # Join all text with newlines
             result = '\n'.join(all_text)
             logger.info(f"Successfully extracted {len(result)} characters from {file_path}")
+            
+            # If we got no text, report this specifically
+            if not result.strip():
+                logger.warning(f"No text was extracted from DOCX file: {file_path}")
+                return f"Warning: No text content found in DOCX file: {os.path.basename(file_path)}"
+                
             return result
             
         except Exception as e:
@@ -377,6 +500,9 @@ def extract_text_from_files(file_paths, max_chars=None):
         
         all_texts = []
         results = {}
+        success_count = 0
+        error_count = 0
+        empty_count = 0
         
         for file_path in file_paths:
             if not file_path or not os.path.exists(file_path):
@@ -384,37 +510,66 @@ def extract_text_from_files(file_paths, max_chars=None):
                 logger.error(error_msg)
                 results[file_path] = {"error": error_msg, "text": ""}
                 all_texts.append(f"[Error: File not found or invalid path: {file_path}]")
+                error_count += 1
                 continue
                 
             try:
+                # Get file details for better diagnostics
+                file_size = os.path.getsize(file_path)
+                file_name = os.path.basename(file_path)
+                file_ext = os.path.splitext(file_name)[1].lower()
+                
                 # Extract text from the file
-                logger.info(f"Extracting text from file: {file_path}")
+                logger.info(f"Extracting text from file: {file_name} ({file_size} bytes, {file_ext})")
                 text = extract_text_from_file(file_path)
                 
+                # Check if the returned text is an error message
+                if text and text.startswith("Error:"):
+                    logger.error(f"Extraction error for {file_name}: {text}")
+                    results[file_path] = {"error": text, "text": ""}
+                    all_texts.append(f"[{text}]")
+                    error_count += 1
+                    continue
+                
+                # Check if we extracted any meaningful content
                 if not text or text.strip() == "":
-                    error_msg = f"No text was extracted from: {file_path}"
-                    logger.warning(error_msg)
-                    text = f"[Empty content from file: {os.path.basename(file_path)}]"
+                    empty_msg = f"No text was extracted from: {file_name}"
+                    logger.warning(empty_msg)
+                    text = f"[Empty content from file: {file_name}]"
+                    empty_count += 1
+                else:
+                    success_count += 1
                 
                 # Store the result
                 results[file_path] = {"text": text, "size": len(text)}
-                all_texts.append(text)
+                
+                # Add a file identifier before adding to all_texts
+                all_texts.append(f"--- BEGIN CONTENT FROM: {file_name} ---\n{text}\n--- END CONTENT FROM: {file_name} ---")
                 
             except Exception as e:
                 error_msg = f"Error extracting text from {file_path}: {str(e)}"
                 logger.error(error_msg)
-                logger.exception("Extraction error details:")
+                import traceback
+                logger.error(traceback.format_exc())
                 results[file_path] = {"error": str(e), "text": ""}
                 all_texts.append(f"[Error extracting text from {os.path.basename(file_path)}: {str(e)}]")
+                error_count += 1
         
         # Combine the extracted text
-        combined_text = "\n\n----------------\n\n".join(all_texts)
+        combined_text = "\n\n".join(all_texts)
+        
+        # Add extraction statistics
+        stats_text = f"\n\n--- DOCUMENT EXTRACTION SUMMARY ---\n"
+        stats_text += f"Total files processed: {len(file_paths)}\n"
+        stats_text += f"Files successfully extracted: {success_count}\n"
+        stats_text += f"Files with extraction errors: {error_count}\n"
+        stats_text += f"Files with no text content: {empty_count}\n"
         
         # Check if any text was extracted
         if not combined_text or combined_text.strip() == "":
             error_msg = "No text was extracted from any of the provided files"
             logger.error(error_msg)
-            return error_msg
+            return error_msg + stats_text
             
         # Optionally limit the text length
         if max_chars and len(combined_text) > max_chars:
@@ -423,25 +578,14 @@ def extract_text_from_files(file_paths, max_chars=None):
             
         logger.info(f"Successfully extracted {len(combined_text)} characters from {len(file_paths)} files")
         
-        # Add a summary of the extraction results
-        extraction_summary = "\n\n--- Extraction Summary ---\n"
-        for path, result in results.items():
-            if "error" in result:
-                extraction_summary += f"\nFile {os.path.basename(path)}: ERROR - {result['error']}"
-            else:
-                extraction_summary += f"\nFile {os.path.basename(path)}: {result['size']} characters extracted"
-                
-        # Add the summary at the end, but ensure it's within limit if max_chars is set
-        if max_chars and len(combined_text) + len(extraction_summary) > max_chars:
-            # Skip the summary if it would exceed the limit
-            return combined_text
-        else:
-            return combined_text + extraction_summary
-            
+        # Return the combined text with statistics
+        return combined_text + stats_text
+        
     except Exception as e:
-        logger.error(f"Error in extract_text_from_files: {str(e)}")
-        logger.exception("Full extraction error:")
-        return f"Error extracting text from files: {str(e)}"
+        logger.error(f"Critical error in extract_text_from_files: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"Critical error in text extraction process: {str(e)}"
 
 
 def extract_text_from_image(file_path):

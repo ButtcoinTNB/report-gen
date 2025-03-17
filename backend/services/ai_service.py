@@ -310,18 +310,24 @@ async def generate_report_text(
         
         # Create prompt with strict instructions about using reference only for format
         prompt = (
-            "You are an insurance report writer. Generate a formal insurance "
-            "report based ONLY on the case information provided. Follow these strict instructions:\n\n"
-            "1. FORMAT & STRUCTURE: Use the reference documents ONLY for format, structure, and style.\n"
-            "2. CONTENT: ALL content MUST come ONLY from the case information provided.\n"
-            "3. NO HALLUCINATION: Do not invent ANY details not present in the case information.\n"
-            "4. LANGUAGE: Use the same language as the case documents (English or Italian).\n\n"
-            f"REFERENCE FORMAT (use ONLY for structure/style):\n{reference_content}\n\n"
-            f"CASE INFORMATION (use ONLY this for content):\n{combined_content}\n\n"
-            "IMPORTANT: Generate a properly formatted insurance report based ONLY on the "
-            "factual information provided in the case information. Use the reference only for "
-            "formatting guidance. If certain information is missing, note that it is 'Not provided' "
-            "rather than inventing details."
+            "You're an expert insurance report writer. Follow these important instructions:\n\n"
+            "1. REFERENCE REPORTS: I'm providing reference reports ONLY to show you the correct FORMAT, "
+            "STRUCTURE, STYLE, and TONE OF VOICE. DO NOT memorize or use any factual content from these references.\n\n"
+            "2. CASE NOTES: Generate a new report using ONLY the information from the user's case notes.\n\n"
+            "3. LANGUAGE: Generate the report in the SAME LANGUAGE as the case notes (either Italian or English).\n\n"
+            f"REFERENCE REPORTS (for format/style only):\n{reference_content}\n\n"
+            f"CASE NOTES (use this content for your report):\n{combined_content}\n\n"
+            "Generate a structured insurance claim report that includes common sections such as:\n"
+            "- CLAIM SUMMARY\n"
+            "- CLAIMANT INFORMATION\n"
+            "- INCIDENT DETAILS\n"
+            "- COVERAGE ANALYSIS\n"
+            "- DAMAGES/INJURIES\n"
+            "- INVESTIGATION FINDINGS\n"
+            "- LIABILITY ASSESSMENT\n"
+            "- SETTLEMENT RECOMMENDATION\n\n"
+            "Important: Match the professional tone, formatting, and style of the reference reports, "
+            "but ONLY use facts from the case notes."
         )
         
         # Prepare messages for API call

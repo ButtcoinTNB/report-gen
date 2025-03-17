@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import os
+import glob
+import json
 from supabase import create_client, Client
 from config import settings
 from utils.id_mapper import ensure_id_is_int
@@ -43,62 +45,140 @@ def fetch_report_path_from_supabase(report_id: str):
         raise HTTPException(status_code=500, detail=f"Error fetching report: {str(e)}")
 
 
-@router.get("/{report_id}", response_model=dict)
-async def download_report(report_id: str):
+def find_report_file_locally(report_id: str):
     """
-    Download a finalized report by ID.
+    Find a report file locally based on UUID.
     
     Args:
-        report_id: ID of the report to download (can be UUID string or integer ID)
+        report_id: UUID of the report
         
     Returns:
-        Report details including download URL
+        Path to the report file or None if not found
     """
+    # Check if this ID corresponds to a directory in uploads
+    report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+    
+    if os.path.exists(report_dir) and os.path.isdir(report_dir):
+        # First check metadata.json for the PDF path
+        metadata_path = os.path.join(report_dir, "metadata.json")
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, "r") as f:
+                    metadata = json.load(f)
+                    if "pdf_path" in metadata and os.path.exists(metadata["pdf_path"]):
+                        return metadata["pdf_path"]
+            except Exception as e:
+                print(f"Error reading metadata for {report_id}: {str(e)}")
+        
+        # If metadata doesn't have the path, search for PDF files in the report directory
+        pdf_files = glob.glob(os.path.join(report_dir, "*.pdf"))
+        if pdf_files:
+            # Use the most recently modified PDF file
+            return max(pdf_files, key=os.path.getmtime)
+        
+        # If no PDFs in report directory, check the reports directory
+        import hashlib
+        hash_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
+        report_filename = f"report_{hash_id}.pdf"
+        
+        # Check in the generated reports directory
+        report_path = os.path.join(settings.GENERATED_REPORTS_DIR, report_filename)
+        if os.path.exists(report_path):
+            return report_path
+            
+        # Check for any file that contains the report ID
+        all_pdfs = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, "*.pdf"))
+        for pdf in all_pdfs:
+            if report_id in os.path.basename(pdf):
+                return pdf
+    
+    return None
+
+
+@router.get("/{report_id}")
+async def download_report(report_id: str):
+    """
+    Download a finalized report PDF.
+    """
+    # First check if this is a UUID that exists locally
+    is_uuid = False
+    local_path = None
+    
+    if "-" in report_id:
+        is_uuid = True
+        local_path = find_report_file_locally(report_id)
+    
+    # If found locally, return the file
+    if local_path and os.path.exists(local_path):
+        filename = os.path.basename(local_path)
+        return FileResponse(
+            local_path,
+            media_type="application/pdf",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    
+    # If not found locally or not a UUID, try the database
     try:
-        # Get file path from Supabase
         file_path = fetch_report_path_from_supabase(report_id)
         
         if not file_path:
-            raise HTTPException(status_code=404, detail="Report file not found")
-        
-        # Check if the file exists locally
+            raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
+            
         if not os.path.exists(file_path):
-            # Try to download from Supabase Storage
-            try:
-                supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-                
-                # Extract the storage path (remove any local path prefix)
-                storage_path = file_path
-                if "/" in storage_path:
-                    storage_path = storage_path.split("/")[-1]
-                
-                # Get a signed URL for downloading
-                response = supabase.storage.from_("reports").create_signed_url(storage_path, 60)  # 60 seconds expiry
-                
-                if "signedURL" in response:
-                    return {
-                        "report_id": report_id,
-                        "filename": f"report_{report_id}.pdf",
-                        "download_url": response["signedURL"],
-                    }
-            except Exception as storage_error:
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Error retrieving file from storage: {str(storage_error)}"
-                )
-        
-        # If we have the file locally, serve it directly
-        return {
-            "report_id": report_id,
-            "filename": os.path.basename(file_path),
-            "download_url": f"/api/download/file/{report_id}",
-        }
+            raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
+            
+        # Return the PDF file as an attachment
+        filename = os.path.basename(file_path)
+        return FileResponse(
+            file_path,
+            media_type="application/pdf",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+            
     except HTTPException:
-        raise
+        # If database lookup fails for a UUID, make one more attempt to find any report
+        if is_uuid:
+            # Generate a hash-based filename as a last resort
+            import hashlib
+            hash_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
+            last_resort_filename = f"report_{hash_id}.pdf"
+            
+            # Check all possible locations
+            possible_paths = [
+                os.path.join(settings.GENERATED_REPORTS_DIR, last_resort_filename),
+                os.path.join(settings.UPLOAD_DIR, report_id, last_resort_filename),
+                os.path.join("reports", last_resort_filename),
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    filename = os.path.basename(path)
+                    return FileResponse(
+                        path,
+                        media_type="application/pdf",
+                        filename=filename,
+                        headers={"Content-Disposition": f"attachment; filename={filename}"}
+                    )
+            
+            # If all else fails, return a more helpful error message
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Could not find any report file for ID {report_id}. "
+                       f"Please try regenerating the report."
+            )
+        else:
+            # For non-UUID IDs, re-raise the original exception
+            raise
+            
     except Exception as e:
+        # Return a generic error for any other exception
+        print(f"Error downloading report: {str(e)}")
+        traceback.print_exc()
         raise HTTPException(
             status_code=500, 
-            detail=f"Error processing download request: {str(e)}"
+            detail=f"Error downloading report: {str(e)}"
         )
 
 
