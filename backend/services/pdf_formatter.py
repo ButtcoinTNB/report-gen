@@ -402,7 +402,7 @@ def generate_reportlab_pdf(report_text: str, output_path: str, reference_metadat
                     story.append(Paragraph(paragraph, normal_style))
         
         # Process sections with headers
-        for i in range(1, len(sections)):
+            for i in range(1, len(sections)):
             section = sections[i]
             section_parts = section.split('\n', 1)
             
