@@ -5,8 +5,6 @@ const withBundleAnalyzer = process.env.ANALYZE === 'true' ?
 
 const nextConfig = {
   reactStrictMode: true,
-  // Explicitly use Pages Router
-  useFileSystemPublicRoutes: true,
   // Specify which file extensions to use for Pages Router
   pageExtensions: ['tsx', 'ts', 'jsx', 'js'],
   // ESLint configuration
@@ -24,14 +22,9 @@ const nextConfig = {
   swcMinify: true, // Use SWC for minification (faster than Terser)
   compiler: {
     // Remove console.log in production
-    removeConsole: process.env.NODE_ENV === 'production',
-  },
-  // Enable React strict mode for better error detection
-  experimental: {
-    // Enable concurrent features
-    concurrentFeatures: true,
-    // Optimize server components
-    serverComponents: false,
+    removeConsole: process.env.NODE_ENV === 'production' ? {
+      exclude: ['error', 'warn'],
+    } : false,
   },
   // Output standalone build for better deployment performance
   output: 'standalone',
