@@ -7,9 +7,10 @@ import { handleApiError, formatApiError } from "../utils/errorHandler";
  * 
  * @param {number} reportId - ID of the report to generate content for
  * @param {Object} options - Additional options for generation
+ * @param {Function} onProgress - Optional callback for progress updates
  * @returns {Promise<Object>} Generated report content
  */
-export async function generateReport(reportId, options = {}) {
+export async function generateReport(reportId, options = {}, onProgress) {
   try {
     console.log("Generating report with ID:", reportId);
     
@@ -18,10 +19,28 @@ export async function generateReport(reportId, options = {}) {
       ...options
     };
     
+    // Let the UI know we're starting
+    if (onProgress) {
+      onProgress({ 
+        step: 0, 
+        message: "Extracting content 📄", 
+        progress: 30
+      });
+    }
+    
     // Use the configured API URL from config
     const response = await axios.post(`${config.endpoints.generate}/from-id`, payload);
     
     console.log("Generate API response status:", response.status);
+    
+    // Let the UI know we're completed
+    if (onProgress) {
+      onProgress({ 
+        step: 3, 
+        message: "Done! Reviewing your report... ✅", 
+        progress: 100
+      });
+    }
     
     // Ensure response.data contains a content field
     if (!response.data.content) {
@@ -68,16 +87,35 @@ export async function generateReport(reportId, options = {}) {
  * 
  * @param {number} reportId - ID of the report to refine
  * @param {string} instructions - User instructions for refinement
+ * @param {Function} onProgress - Optional callback for progress updates
  * @returns {Promise<Object>} Refined report content
  */
-export async function refineReport(reportId, instructions) {
+export async function refineReport(reportId, instructions, onProgress) {
   try {
     console.log(`Refining report ${reportId} with instructions: ${instructions}`);
+    
+    // Let the UI know we're starting
+    if (onProgress) {
+      onProgress({ 
+        step: 0, 
+        message: "Analyzing your report 📑", 
+        progress: 30
+      });
+    }
     
     const response = await axios.post(`${config.endpoints.generate}/refine`, {
       report_id: reportId,
       instructions: instructions
     });
+    
+    // Let the UI know we're completed
+    if (onProgress) {
+      onProgress({ 
+        step: 2, 
+        message: "Refinement complete ✅", 
+        progress: 100
+      });
+    }
     
     return response.data;
   } catch (error) {
