@@ -309,3 +309,111 @@ async def format_docx(data: Dict = Body(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error formatting DOCX: {str(e)}")
+
+
+@router.post("/preview-file", response_model=dict)
+async def preview_file(data: Dict = Body(...)):
+    """
+    Generate a preview of the report PDF from a report ID.
+    
+    Args:
+        data: Contains report_id to preview
+        
+    Returns:
+        URL to the preview PDF
+    """
+    if "report_id" not in data:
+        raise HTTPException(status_code=400, detail="report_id is required")
+        
+    report_id = data["report_id"]
+    
+    try:
+        # Use the ID mapper utility to handle UUID/integer conversion
+        try:
+            db_id = ensure_id_is_int(report_id)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid report_id format: {str(e)}"
+            )
+        
+        # Fetch the report content from Supabase
+        report_content = fetch_report_from_supabase(report_id)
+        
+        # Generate unique filename for the preview
+        preview_id = str(uuid.uuid4())
+        output_filename = f"preview_{preview_id}.pdf"
+        
+        # Create reference metadata for preview
+        reference_metadata = {
+            "headers": ["INSURANCE REPORT - PREVIEW", f"Report #{db_id}"],
+            "footers": ["Preview Only - Not for Distribution", "Page {page}"]
+        }
+        
+        # Call PDF formatting service
+        pdf_path = await format_report_as_pdf(
+            report_content,
+            reference_metadata,
+            is_preview=True,
+            filename=output_filename
+        )
+        
+        # Create preview directory if it doesn't exist
+        preview_dir = os.path.join(settings.GENERATED_REPORTS_DIR, "previews")
+        os.makedirs(preview_dir, exist_ok=True)
+        
+        # Create a static endpoint to access this file
+        file_name = os.path.basename(pdf_path)
+        preview_url = f"/api/format/preview-file/{preview_id}"
+        
+        return {
+            "preview_id": preview_id,
+            "preview_url": preview_url,
+            "pdf_path": pdf_path
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate preview: {str(e)}"
+        )
+
+
+@router.get("/preview-file/{preview_id}")
+async def get_preview_file(preview_id: str):
+    """
+    Get a generated preview file by its ID
+    
+    Args:
+        preview_id: UUID of the preview to retrieve
+        
+    Returns:
+        PDF file
+    """
+    try:
+        # Look for the preview file
+        preview_filename = f"preview_{preview_id}.pdf"
+        
+        # Check in multiple possible locations
+        possible_paths = [
+            os.path.join(settings.GENERATED_REPORTS_DIR, "previews", preview_filename),
+            os.path.join(settings.GENERATED_REPORTS_DIR, preview_filename),
+            os.path.join("generated_reports", preview_filename),
+            os.path.join("generated_reports", "previews", preview_filename)
+        ]
+        
+        # Find the first path that exists
+        file_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                file_path = path
+                break
+                
+        if not file_path:
+            raise HTTPException(status_code=404, detail=f"Preview file not found: {preview_id}")
+            
+        return FileResponse(file_path, media_type="application/pdf")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving preview file: {str(e)}")

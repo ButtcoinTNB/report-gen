@@ -3,6 +3,37 @@ import { config } from "../config";
 import { handleApiError } from "../utils/errorHandler";
 
 /**
+ * Get a preview of the report PDF
+ * 
+ * @param {number} reportId - ID of the report to preview
+ * @returns {Promise<Object>} Preview information including URL
+ */
+export async function fetchPDFPreview(reportId) {
+  try {
+    console.log(`Generating PDF preview for report ${reportId}`);
+    
+    // First, tell the server to generate a preview
+    const response = await axios.post(`${config.endpoints.format}/preview-file`, {
+      report_id: reportId
+    });
+    
+    // The response should include a URL to view the preview
+    if (response.data && response.data.preview_url) {
+      return {
+        success: true,
+        previewUrl: `${config.API_URL}${response.data.preview_url}`,
+        previewId: response.data.preview_id
+      };
+    } else {
+      console.error("Invalid preview response:", response.data);
+      throw new Error("Failed to generate preview");
+    }
+  } catch (error) {
+    return handleApiError(error, "PDF preview generation", { throwError: true });
+  }
+}
+
+/**
  * Download a report PDF directly
  * 
  * @param {number} reportId - ID of the report to download
