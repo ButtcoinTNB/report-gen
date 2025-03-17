@@ -104,41 +104,40 @@ async def call_openrouter_api(
     )
 
 
-async def generate_case_summary(document_paths: List[str]) -> Dict[str, str]:
+async def generate_case_summary(document_paths: List[str], ocr_context: str = "") -> Dict[str, str]:
     """
     Generate a very brief summary of case documents highlighting key findings.
     
     Args:
         document_paths: List of paths to the uploaded documents
+        ocr_context: Optional context about OCR processing for image-based documents
         
     Returns:
         Dictionary with summary and key_facts
     """
     try:
-        document_content = []
+        logger.info(f"Generating case summary for {len(document_paths)} documents")
         
-        # Extract text from documents
-        for path in document_paths:
-            try:
-                with open(path, "r") as file:
-                    try:
-                        document_content.append(file.read())
-                    except UnicodeDecodeError:
-                        # If not a text file, add placeholder
-                        document_content.append(f"[Non-text file: {os.path.basename(path)}]")
-            except FileNotFoundError:
-                logger.warning(f"Document not found: {path}")
-            except Exception as e:
-                logger.warning(f"Error reading document {path}: {str(e)}")
+        # Use our improved extractor to handle different file types including images
+        from services.pdf_extractor import extract_text_from_files
         
-        if not document_content:
+        # Extract text from all documents at once with better file handling
+        extracted_content = extract_text_from_files(document_paths)
+        
+        if not extracted_content or extracted_content.strip() == "":
+            logger.warning("No readable content extracted from documents")
             return {
                 "summary": "No readable content found in the provided documents.",
                 "key_facts": []
             }
+            
+        logger.info(f"Successfully extracted {len(extracted_content)} characters from documents")
         
-        # Combine all document content
-        combined_content = "\n\n".join(document_content)
+        # Add OCR context to the prompt if provided
+        ocr_instruction = ""
+        if ocr_context:
+            logger.info(f"Including OCR context in prompt: {ocr_context}")
+            ocr_instruction = f"\n5. OCR AWARENESS: {ocr_context}\n"
         
         # Create prompt for a very brief summary with strict instructions
         prompt = (
@@ -149,18 +148,24 @@ async def generate_case_summary(document_paths: List[str]) -> Dict[str, str]:
             "3. KEY INFORMATION: Focus on claim amount, property damage, injuries, policy details, "
             "and incident date if present in the documents.\n"
             "4. IF MISSING: If any key information is not in the documents, note it as 'not provided' "
-            "rather than making assumptions.\n\n"
-            f"DOCUMENT CONTENT:\n{combined_content}\n\n"
+            "rather than making assumptions."
+            f"{ocr_instruction}\n"
+            f"DOCUMENT CONTENT:\n{extracted_content}\n\n"
             "Provide your response in this format:\n"
             "SUMMARY: [A 1-2 sentence factual summary based ONLY on the provided documents]\n"
             "KEY_FACTS: [2-4 key points in bullet format with amounts, dates, and specifics ONLY from the documents]"
         )
         
+        # Prepare system message with OCR awareness if needed
+        system_content = "You are an insurance claims analyzer. Provide extremely concise, FACTUAL summaries and key facts only. Do not invent details not present in the documents."
+        if ocr_context:
+            system_content += " " + ocr_context
+        
         # Prepare messages for API call
         messages = [
             {
                 "role": "system", 
-                "content": "You are an insurance claims analyzer. Provide extremely concise, FACTUAL summaries and key facts only. Do not invent details not present in the documents."
+                "content": system_content
             },
             {"role": "user", "content": prompt}
         ]
@@ -194,6 +199,8 @@ async def generate_case_summary(document_paths: List[str]) -> Dict[str, str]:
                 if cleaned_line:
                     key_facts.append(cleaned_line)
             
+            logger.info(f"Generated summary with {len(key_facts)} key facts")
+            
             return {
                 "summary": summary,
                 "key_facts": key_facts
@@ -207,6 +214,8 @@ async def generate_case_summary(document_paths: List[str]) -> Dict[str, str]:
                 
     except Exception as e:
         logger.error(f"Error in generate_case_summary: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {
             "summary": "Unable to generate case summary. An error occurred.",
             "key_facts": []

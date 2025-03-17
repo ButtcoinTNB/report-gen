@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     API_RATE_LIMIT: int = int(
         os.getenv("API_RATE_LIMIT", "100")
     )  # Requests per hour
+    NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL", "")
 
     # AI Model Settings
     DEFAULT_MODEL: str = os.getenv(
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Allow extra fields in .env without validation errors
 
 
 # Create settings instance

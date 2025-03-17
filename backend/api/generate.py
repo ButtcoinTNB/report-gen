@@ -266,6 +266,42 @@ async def generate_report_from_id(data: Dict[str, Any]):
             file_contents = extract_text_from_files(file_paths)
             extraction_time = time.time() - extraction_start_time
             print(f"Text extraction completed in {extraction_time:.2f} seconds")
+            
+            # Check if multimodal extraction was used
+            used_multimodal = "[Extracted using AI Vision technology]" in file_contents
+            
+            # Check for specific OCR markers that indicate image-based documents
+            ocr_markers = ["[OCR failed", "No readable text detected in image", "Image file detected"]
+            has_ocr_content = any(marker in file_contents for marker in ocr_markers)
+            
+            # Check if the extraction returned an error message
+            if file_contents.startswith("Error:") or "Error extracting text" in file_contents:
+                is_protected_file = any(
+                    msg in file_contents for msg in 
+                    ["password-protected", "encrypted", "protected", "binary format"]
+                )
+                
+                if is_protected_file:
+                    error_msg = "One or more files appear to be password-protected or in an unsupported format."
+                    return {
+                        "content": f"## Document Access Error\n\n{error_msg}\n\nPlease try uploading the document again after removing any password protection, or convert it to a more compatible format like PDF or plain DOCX without encryption.\n\n**Technical Details:**\n\n{file_contents}",
+                        "extraction_error": error_msg
+                    }
+                else:
+                    error_msg = "An error occurred while extracting text from your documents"
+                    return {
+                        "content": f"## Document Processing Error\n\n{error_msg}\n\nPlease check your documents and try again with a different format.\n\n**Technical Details:**\n\n{file_contents}",
+                        "extraction_error": error_msg
+                    }
+            
+            # If we only have OCR content (from images) but very little actual text
+            if has_ocr_content and len(file_contents.strip()) < 500 and not used_multimodal:
+                print("WARNING: Document appears to be primarily image-based with little text")
+                return {
+                    "content": f"## Image-Based Document Detected\n\nYour document appears to be primarily image-based. While we've attempted to extract text using OCR technology, the results may be limited. For best results, please consider uploading a text-based document.\n\n### OCR Results:\n\n{file_contents}\n\nIf the text above is incomplete or inaccurate, please try providing a text-based document version instead.",
+                    "ocr_limited": True
+                }
+            
         except Exception as extract_error:
             error_msg = f"Error extracting text from files: {str(extract_error)}"
             print(error_msg)
@@ -276,8 +312,8 @@ async def generate_report_from_id(data: Dict[str, Any]):
                 "extraction_error": str(extract_error)
             }
         
-        # If we have very little content, provide a more detailed message
-        if len(file_contents.strip()) < 100:
+        # If we have very little content and multimodal wasn't used, provide a detailed message
+        if len(file_contents.strip()) < 100 and not used_multimodal:
             print("WARNING: Extracted less than 100 characters of text")
             file_statuses = []
             for file in report_files:
@@ -292,13 +328,26 @@ async def generate_report_from_id(data: Dict[str, Any]):
             if file_contents.strip() == "":
                 print("ERROR: No text extracted from any files")
                 return {
-                    "content": f"## Error: No Text Extracted\n\nWe couldn't extract any text from your documents. This might be because:\n\n- The files contain only images without OCR\n- The files are password protected\n- The files are corrupted\n\nPlease try again with different documents or convert them to a different format.{file_status_text}",
+                    "content": f"## Error: No Text Extracted\n\nWe couldn't extract any text from your documents. This might be because:\n\n- The files contain only images without OCR\n- The files are password protected\n- The files are in a format we can't read\n- The files are corrupted\n\nPlease try again with different documents or convert them to a different format.{file_status_text}",
                     "extraction_error": "No text extracted from files"
+                }
+            
+            # Check if there's a meaningful error message in the extracted content
+            if "Error:" in file_contents or "Warning:" in file_contents:
+                print(f"WARNING: Error messages found in extracted content: {file_contents}")
+                return {
+                    "content": f"## Document Processing Issue\n\nWe had some issues processing your documents:\n\n```\n{file_contents}\n```\n\nPlease consider:\n\n1. Converting your documents to PDF\n2. Removing any password protection\n3. Using files that contain actual text content (not just images)\n\n{file_status_text}",
+                    "extraction_error": "Error messages in extracted content"
                 }
             
             file_contents += file_status_text
             
         print(f"Extracted {len(file_contents)} characters of text from {len(file_paths)} files")
+        
+        # Add a note if multimodal extraction was used
+        multimodal_note = ""
+        if used_multimodal:
+            multimodal_note = "\n\nNote: Advanced AI Vision technology was used to analyze your document directly."
         
         # Get reference reports to use as style templates
         reference_reports = fetch_reference_reports()
@@ -323,7 +372,9 @@ async def generate_report_from_id(data: Dict[str, Any]):
             "3. NO INVENTION: Do not add ANY information not explicitly present in the user's documents.\n"
             "4. MATCH LANGUAGE: Write the report in the same language as the user documents (either Italian or English).\n"
             "5. MISSING INFO: If key information is missing, state 'Not provided in the documents' rather than inventing it.\n"
-            "6. NO CREATIVITY: This is a factual insurance document - stick strictly to information in the user's documents.\n\n"
+            "6. NO CREATIVITY: This is a factual insurance document - stick strictly to information in the user's documents.\n"
+            "7. OCR AWARENESS: Some content may come from OCR of images and may contain errors - focus on the most reliable information."
+            f"{multimodal_note}\n\n"
             f"REFERENCE FORMAT (use ONLY for structure/style/tone):\n{context}\n\n"
             f"USER DOCUMENTS (ONLY SOURCE FOR CONTENT):\n{file_contents}\n\n"
             "Generate a structured insurance claim report that follows the format of the reference but "
@@ -336,7 +387,7 @@ async def generate_report_from_id(data: Dict[str, Any]):
             "- INVESTIGATION FINDINGS\n"
             "- LIABILITY ASSESSMENT\n"
             "- SETTLEMENT RECOMMENDATION\n\n"
-            "CRITICAL: Do NOT invent ANY information. Only use facts explicitly stated in the user documents."
+            "CRITICAL: Do NOT invent ANY information. Only use facts explicitly stated in the user's documents."
         )
         
         try:
@@ -350,7 +401,7 @@ async def generate_report_from_id(data: Dict[str, Any]):
                     "messages": [
                         {
                             "role": "system", 
-                            "content": "You are an expert insurance report writer. You MUST ONLY use facts explicitly stated in the user's documents. Do not invent, assume, or hallucinate ANY information not explicitly provided. Remain strictly factual."
+                            "content": "You are an expert insurance report writer. You MUST ONLY use facts explicitly stated in the user's documents. Do not invent, assume, or hallucinate ANY information not explicitly provided. Remain strictly factual. If content appears to be from OCR with potential errors, focus on the most reliable information."
                         },
                         {"role": "user", "content": prompt}
                     ],
@@ -368,7 +419,18 @@ async def generate_report_from_id(data: Dict[str, Any]):
             
             if "choices" in response_data and len(response_data["choices"]) > 0:
                 generated_text = response_data["choices"][0]["message"]["content"]
-                return {"content": generated_text}
+                
+                # Add a note about multimodal processing if it was used
+                if used_multimodal:
+                    generated_text = (
+                        "**Note: Advanced AI Vision technology was used to analyze your document directly.**\n\n" 
+                        + generated_text
+                    )
+                    
+                return {
+                    "content": generated_text,
+                    "used_multimodal": used_multimodal
+                }
             else:
                 # Fallback if API response is unexpected
                 error_text = (
@@ -451,20 +513,104 @@ async def summarize_documents(data: Dict[str, Any]):
         # Extract file paths
         file_paths = [file["path"] for file in report_files]
         
+        # Extract text from files first to validate content
+        try:
+            extraction_start_time = time.time()
+            print(f"Starting text extraction from {len(file_paths)} files for summary...")
+            
+            extracted_text = extract_text_from_files(file_paths)
+            extraction_time = time.time() - extraction_start_time
+            print(f"Text extraction completed in {extraction_time:.2f} seconds")
+            
+            # Check for OCR markers or errors
+            ocr_markers = ["[OCR failed", "No readable text detected in image", "Image file detected"]
+            has_ocr_content = any(marker in extracted_text for marker in ocr_markers)
+            has_error = extracted_text.startswith("Error:") or "Error extracting text" in extracted_text
+            
+            # Check if we have an extraction error
+            if has_error:
+                error_msg = "Error extracting text from documents"
+                print(f"WARNING: {error_msg} - {extracted_text}")
+                return {
+                    "summary": f"We encountered an issue processing your documents. {extracted_text.split('.')[0]}.",
+                    "key_facts": [],
+                    "error": extracted_text
+                }
+                
+            # Check for minimal content from OCR
+            if has_ocr_content and len(extracted_text.strip()) < 300:
+                print("WARNING: Document appears to be primarily image-based with little text")
+                return {
+                    "summary": "Your document appears to be primarily image-based. While we've attempted to extract text using OCR technology, the results are too limited for a proper summary. For best results, please consider uploading a text-based document.",
+                    "key_facts": [
+                        "Document is primarily image-based",
+                        "Limited text content could be extracted",
+                        "OCR results may be unreliable",
+                        "Consider providing a text-based document"
+                    ],
+                    "ocr_limited": True
+                }
+                
+            # If very little content overall, return a helpful message
+            if len(extracted_text.strip()) < 100:
+                print("WARNING: Extracted less than 100 characters of text")
+                return {
+                    "summary": "We could only extract a very small amount of text from your documents. This may be because the documents are image-based, password-protected, or in a format we can't fully process.",
+                    "key_facts": [
+                        "Limited text content extracted",
+                        "Document may be primarily graphical",
+                        "Consider providing a text-based version"
+                    ],
+                    "limited_content": True
+                }
+            
+        except Exception as extract_error:
+            error_msg = f"Error during text extraction: {str(extract_error)}"
+            print(error_msg)
+            import traceback
+            print(traceback.format_exc())
+            return {
+                "summary": "Error processing documents. Please try uploading in a different format.",
+                "key_facts": [],
+                "error": str(extract_error)
+            }
+            
         # Generate the summary using our AI function that includes strict factual instructions
-        summary_result = await generate_case_summary(file_paths)
-        
-        print(f"Generated summary: {summary_result['summary']}")
-        print(f"Key facts identified: {len(summary_result['key_facts'])}")
-        
-        return summary_result
+        try:
+            # Pass additional context if we have OCR content
+            ocr_context = ""
+            if has_ocr_content:
+                ocr_context = "Note: Some content appears to be from OCR of images and may contain errors. Focus on the most reliable information."
+                
+            summary_result = await generate_case_summary(file_paths, ocr_context)
+            
+            print(f"Generated summary: {summary_result['summary']}")
+            print(f"Key facts identified: {len(summary_result['key_facts'])}")
+            
+            # Add a note to the summary if OCR was used
+            if has_ocr_content:
+                summary_result["summary"] = "Note: Your document appears to contain image-based content. Our system used OCR to extract text, which may result in some inaccuracies. " + summary_result["summary"]
+                summary_result["ocr_used"] = True
+                
+            return summary_result
+            
+        except Exception as summary_error:
+            error_msg = f"Error generating summary: {str(summary_error)}"
+            print(error_msg)
+            import traceback
+            print(traceback.format_exc())
+            return {
+                "summary": f"Error generating summary: {str(summary_error)}. Please try again.",
+                "key_facts": [],
+                "error": str(summary_error)
+            }
         
     except Exception as e:
-        print(f"Error generating summary: {str(e)}")
+        print(f"Error in summarize_documents endpoint: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return {
-            "summary": f"Error generating summary: {str(e)}. Please try again.",
+            "summary": f"Error processing request: {str(e)}. Please try again.",
             "key_facts": [],
             "error": str(e)
         }
