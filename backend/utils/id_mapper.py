@@ -92,21 +92,28 @@ def ensure_id_is_int(id_value: Union[str, int]) -> int:
                     # Try to get or create a record in the database
                     supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
                     
-                    # Check if a report with this UUID already exists
-                    response = supabase.table("reports").select("id").eq("uuid", id_value).execute()
-                    
-                    if response.data and len(response.data) > 0:
-                        # Report exists, use its ID
-                        db_id = response.data[0]["id"]
-                    else:
-                        # For now, just use a hash of the UUID as an integer ID
+                    try:
+                        # Check if a report with this UUID already exists
+                        response = supabase.table("reports").select("id").eq("uuid", id_value).execute()
+                        
+                        if response.data and len(response.data) > 0:
+                            # Report exists, use its ID
+                            db_id = response.data[0]["id"]
+                        else:
+                            # For now, just use a hash of the UUID as an integer ID
+                            import hashlib
+                            hash_int = int(hashlib.md5(id_value.encode()).hexdigest(), 16) % 10000000
+                            
+                            # Store the mapping for future use
+                            with open(mapping_path, "w") as f:
+                                json.dump({"uuid": id_value, "db_id": hash_int}, f)
+                            
+                            return hash_int
+                    except Exception as e:
+                        # If the UUID column doesn't exist yet, just use the hash method
+                        print(f"Database error (likely missing UUID column): {str(e)}")
                         import hashlib
                         hash_int = int(hashlib.md5(id_value.encode()).hexdigest(), 16) % 10000000
-                        
-                        # Store the mapping for future use
-                        with open(mapping_path, "w") as f:
-                            json.dump({"uuid": id_value, "db_id": hash_int}, f)
-                        
                         return hash_int
                 else:
                     # If no Supabase configured, use hash method

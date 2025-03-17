@@ -32,6 +32,7 @@ class ReportDB(Base):
     __tablename__ = "reports"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String, unique=True, index=True)  # Add UUID field
     template_id = Column(Integer, ForeignKey("templates.id"))
     title = Column(String, index=True)
     content = Column(Text)

@@ -28,8 +28,16 @@ def fetch_report_path_from_supabase(report_id: str):
         # Initialize Supabase client
         supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         
-        # Query the reports table using the integer ID
-        response = supabase.table("reports").select("formatted_file_path,is_finalized").eq("id", db_id).execute()
+        try:
+            # Query the reports table using the integer ID
+            response = supabase.table("reports").select("formatted_file_path,is_finalized").eq("id", db_id).execute()
+        except Exception as e:
+            # If the formatted_file_path column doesn't exist yet, try to find the file locally
+            print(f"Database error (likely missing formatted_file_path column): {str(e)}")
+            local_path = find_report_file_locally(report_id)
+            if local_path:
+                return local_path
+            raise HTTPException(status_code=500, detail="Database schema not fully initialized")
         
         if not response.data:
             raise HTTPException(status_code=404, detail=f"Report with ID {report_id} not found in the database.")

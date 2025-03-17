@@ -214,7 +214,7 @@ export default function Home() {
             }}
           >
             <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
-              Edit Report
+              Modifica Report
             </Typography>
             <Typography variant="body1" sx={{ mb: 3, color: 'text.secondary' }}>
               Revisiona e modifica il report generato dall'AI prima di finalizzarlo.
@@ -241,26 +241,31 @@ export default function Home() {
               color="primary"
               size="large"
               onClick={handleFinalizeReport}
-              disabled={isGenerating}
+              disabled={isDownloading}
               sx={{ 
                 py: 1.5,
                 px: 4,
-                position: 'relative'
+                position: 'relative',
+                minWidth: 200
               }}
             >
-              {isGenerating ? (
+              {isDownloading ? (
                 <>
-                  <CircularProgress 
-                    size={24} 
-                    color="inherit" 
-                    sx={{ 
+                  <CircularProgress
+                    size={24}
+                    sx={{
                       position: 'absolute',
-                      left: 'calc(50% - 12px)'
-                    }} 
+                      top: '50%',
+                      left: '50%',
+                      marginTop: '-12px',
+                      marginLeft: '-12px',
+                    }}
                   />
-                  <span style={{ opacity: 0 }}>Finalizing...</span>
+                  <span style={{ opacity: 0 }}>Finalizza Report</span>
                 </>
-              ) : "Finalize Report"}
+              ) : (
+                'Finalizza Report'
+              )}
             </Button>
           </Paper>
         )}
@@ -271,61 +276,61 @@ export default function Home() {
               p: 4, 
               mb: 4, 
               borderRadius: 3,
-              background: 'linear-gradient(145deg, rgba(255,255,255,1) 0%, rgba(249,249,252,1) 100%)'
+              textAlign: 'center'
             }}
           >
             <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
-              Download Report
+              Report Completato
             </Typography>
-            <Typography variant="body1" sx={{ mb: 4, color: 'text.secondary' }}>
-              Il tuo report è stato generato con successo e pronto per il download.
+            <Typography variant="body1" sx={{ mb: 3, color: 'text.secondary' }}>
+              Il tuo report è stato generato con successo e dovrebbe essere stato scaricato automaticamente.
             </Typography>
-            
-            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
-              <Button
-                variant="contained"
-                color="primary"
-                size="large"
-                onClick={handleDownloadPDF}
-                disabled={isDownloading}
-                startIcon={<CloudDownloadIcon />}
-                sx={{ 
-                  py: 1.5,
-                  px: 4,
-                  position: 'relative'
-                }}
-              >
-                {isDownloading ? (
-                  <>
-                    <CircularProgress 
-                      size={24} 
-                      color="inherit" 
-                      sx={{ 
-                        position: 'absolute',
-                        left: 'calc(50% - 12px)'
-                      }} 
-                    />
-                    <span style={{ opacity: 0 }}>Downloading...</span>
-                  </>
-                ) : "Download PDF"}
-              </Button>
-            </Box>
-            
-            <Typography variant="body2" align="center" color="text.secondary">
-              Report ID: {reportId}
-            </Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={handleDownloadPDF}
+              disabled={isDownloading}
+              startIcon={<CloudDownloadIcon />}
+              sx={{ 
+                py: 1.5,
+                px: 4,
+                position: 'relative',
+                minWidth: 200
+              }}
+            >
+              {isDownloading ? (
+                <>
+                  <CircularProgress
+                    size={24}
+                    sx={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      marginTop: '-12px',
+                      marginLeft: '-12px',
+                    }}
+                  />
+                  <span style={{ opacity: 0 }}>Scarica Report</span>
+                </>
+              ) : (
+                'Scarica Report'
+              )}
+            </Button>
           </Paper>
         )}
+        
+        <Snackbar 
+          open={showError} 
+          autoHideDuration={6000} 
+          onClose={handleCloseError}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert onClose={handleCloseError} severity="error" sx={{ width: '100%' }}>
+            {error}
+          </Alert>
+        </Snackbar>
       </Container>
-      <Snackbar
-        open={showError}
-        autoHideDuration={6000}
-        onClose={handleCloseError}
-      >
-        <Alert onClose={handleCloseError} severity="error">
-          {error}
-        </Alert>
-      </Snackbar>
     </div>
   );
 } 

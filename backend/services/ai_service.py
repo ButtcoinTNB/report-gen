@@ -434,7 +434,8 @@ async def refine_report_text(current_text: str, instructions: str) -> str:
 
 def generate_summary(text: str) -> str:
     """
-    Generate a structured summary using OpenRouter API.
+    Generate a structured summary using Google Gemini via OpenRouter API.
+    Ensures output is in the document's language, defaulting to Italian.
 
     Args:
         text (str): The text content to summarize.
@@ -463,7 +464,7 @@ def generate_summary(text: str) -> str:
                         {"role": "system", "content": "You are an AI assistant that generates factual insurance reports. Only use information explicitly provided in the input text. Do not invent or hallucinate any details."},
                         {"role": "user", "content": f"Summarize the following insurance case details with FACTS ONLY - do not add any information not present in the original text:\n\n{text}\n\nProvide a concise, factual summary using only information explicitly stated in the text. If important details are missing, note them as 'not specified' rather than inventing information. Ensure clarity, factual accuracy, and a professional tone."}
                     ],
-                    "temperature": 0.2,
+                    "temperature": 0.3,
                     "max_tokens": 300
                 },
                 timeout=30
