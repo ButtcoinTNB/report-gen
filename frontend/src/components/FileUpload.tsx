@@ -11,7 +11,7 @@ import {
   TextField
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import { uploadFile } from '@/api/upload';
+import { uploadSingleFile } from '../api/upload';
 
 interface FileUploadProps {
   onUploadSuccess: (reportId: number) => void;
@@ -44,7 +44,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
 
     try {
       // Call the API to upload the file
-      const response = await uploadFile(file, templateId);
+      const response = await uploadSingleFile(file, templateId);
       
       // Handle successful upload
       if (response && response.report_id) {
@@ -54,7 +54,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       }
     } catch (err) {
       console.error('Error uploading file:', err);
-      setError('Failed to upload file. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to upload file. Please try again.');
     } finally {
       setLoading(false);
     }

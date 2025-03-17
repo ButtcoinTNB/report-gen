@@ -9,7 +9,7 @@ import {
   Divider
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
-import { downloadPDF } from '@/api/download';
+import { downloadPDF } from '../api/download';
 
 interface DownloadReportProps {
   reportId: number | null;
@@ -37,7 +37,7 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
       // Success is handled by the downloadPDF function (it triggers the browser download)
     } catch (err) {
       console.error('Error downloading report:', err);
-      setError('Failed to download the report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to download the report. Please try again.');
     } finally {
       setLoading(false);
     }

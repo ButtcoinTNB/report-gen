@@ -1,6 +1,14 @@
 import axios from "axios";
 import { config } from "../config";
+import { handleApiError } from "../utils/errorHandler";
 
+/**
+ * Upload multiple files to the backend
+ * 
+ * @param {File|File[]} files - A single file or array of files to upload
+ * @param {number} templateId - Template ID to use for the upload
+ * @returns {Promise<Object>} The upload response
+ */
 export async function uploadFile(files, templateId = 1) {
   const formData = new FormData();
   
@@ -64,49 +72,24 @@ export async function uploadFile(files, templateId = 1) {
     console.log("Upload response:", response.data);
     return response.data;
   } catch (error) {
-    console.error("Error during file upload:", error);
-    
-    let errorMessage = "File upload failed";
-    
-    if (axios.isAxiosError(error)) {
-      if (error.response) {
-        // Server responded with an error
-        console.error("Server responded with:", error.response.data);
-        console.error("Status code:", error.response.status);
-        
-        if (error.response.data && error.response.data.detail) {
-          // Check if it's a file size error
-          if (typeof error.response.data.detail === 'string' && 
-              error.response.data.detail.includes('size')) {
-            errorMessage = `File size error: ${error.response.data.detail}`;
-          } else {
-            errorMessage = `Server error: ${error.response.data.detail}`;
-          }
-        } else {
-          errorMessage = `Server error (${error.response.status})`;
-        }
-      } else if (error.request) {
-        // Request was made but no response received
-        console.error("No response received:", error.request);
-        errorMessage = "Server did not respond to upload request. This could be due to the large file size exceeding server limits.";
-      } else {
-        // Error in setting up the request
-        errorMessage = `Request error: ${error.message}`;
-      }
-    }
-    
-    throw new Error(errorMessage);
+    return handleApiError(error, "file upload", { throwError: true });
   }
 }
 
-// New function for single file uploads - simpler approach
+/**
+ * Upload a single file to the backend
+ * 
+ * @param {File} file - The file to upload
+ * @param {number} templateId - Template ID to use for the upload
+ * @returns {Promise<Object>} The upload response
+ */
 export async function uploadSingleFile(file, templateId = 1) {
   if (!file) {
     throw new Error("No file provided for upload");
   }
   
   const formData = new FormData();
-  formData.append("files", file); // Note the key is still 'files' as required by backend
+  formData.append("files", file); // Note the key is 'files' as required by backend
   formData.append("template_id", templateId.toString());
   
   try {
@@ -116,67 +99,63 @@ export async function uploadSingleFile(file, templateId = 1) {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 60000
+      timeout: 60000 // 60 second timeout
     });
     
     return response.data;
   } catch (error) {
-    console.error("Error during single file upload:", error);
-    
-    if (axios.isAxiosError(error) && error.response) {
-      throw new Error(`Server error (${error.response.status}): ${
-        error.response.data?.detail || 'Unknown error'
-      }`);
-    } else {
-      throw new Error("File upload failed: " + (error.message || "Unknown error"));
-    }
+    return handleApiError(error, "single file upload");
   }
 }
 
+/**
+ * Upload a template file to the backend
+ * 
+ * @param {File} file - The template file to upload
+ * @param {string} name - Name of the template
+ * @returns {Promise<Object>} The upload response
+ */
 export async function uploadTemplate(file, name) {
+  if (!file) {
+    throw new Error("No template file provided for upload");
+  }
+  
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("name", name);
+  formData.append("name", name || file.name);
   
   try {
-    console.log(`Uploading template ${file.name} (${file.size} bytes) to ${config.endpoints.upload}/template`);
+    console.log(`Uploading template ${file.name} to ${config.endpoints.upload}/template`);
     
     const response = await axios.post(`${config.endpoints.upload}/template`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 30000 // 30 second timeout
+      timeout: 60000 // 60 second timeout
     });
     
-    console.log("Template upload response:", response.data);
     return response.data;
   } catch (error) {
-    console.error("Error uploading template:", error);
-    
-    let errorMessage = "Template upload failed";
-    
-    if (axios.isAxiosError(error) && error.response) {
-      console.error("Server responded with:", error.response.data);
-      
-      if (error.response.data && error.response.data.detail) {
-        errorMessage = `Server error: ${error.response.data.detail}`;
-      }
-    }
-    
-    throw new Error(errorMessage);
+    return handleApiError(error, "template upload");
   }
 }
 
+/**
+ * Test file upload to various endpoints for debugging
+ * 
+ * @param {File} file - The file to test upload
+ * @returns {Promise<Object>} Test response data
+ */
 export async function testFileUpload(file) {
   if (!file) {
     throw new Error("No file provided for test upload");
   }
   
   const formData = new FormData();
-  formData.append("files", file);  // Change from "file" to "files" to match backend expectation
+  formData.append("files", file);  // Using "files" to match backend expectation
   
   try {
-    console.log(`Testing file upload with ${file.name} (${file.size} bytes) to test-single endpoint`);
+    console.log(`Testing file upload with ${file.name} to test-single endpoint`);
     
     // First try the test-single endpoint
     const testResponse = await axios.post(`${config.endpoints.upload}/test-single`, formData, {
@@ -206,20 +185,16 @@ export async function testFileUpload(file) {
       mainResponse: mainResponse.data
     };
   } catch (error) {
-    console.error("Error during test upload:", error);
-    
-    if (axios.isAxiosError(error) && error.response) {
-      console.error("Response data:", error.response.data);
-      console.error("Response status:", error.response.status);
-      throw new Error(`Server error (${error.response.status}): ${
-        JSON.stringify(error.response.data) || 'Unknown error'
-      }`);
-    } else {
-      throw new Error("Test upload failed: " + (error.message || "Unknown error"));
-    }
+    return handleApiError(error, "test upload");
   }
 }
 
+/**
+ * Send a file to a debug upload endpoint for testing
+ * 
+ * @param {File} file - The file to debug upload
+ * @returns {Promise<Object>} Debug response data
+ */
 export async function testDebugUpload(file) {
   if (!file) {
     throw new Error("No file provided for debug upload");
@@ -230,7 +205,7 @@ export async function testDebugUpload(file) {
   formData.append("test_field", "test_value");
   
   try {
-    console.log(`Sending file ${file.name} (${file.size} bytes) to debug endpoint`);
+    console.log(`Sending file ${file.name} to debug endpoint`);
     
     const response = await axios.post(`${config.endpoints.upload}/debug-upload`, formData, {
       headers: {
@@ -242,49 +217,37 @@ export async function testDebugUpload(file) {
     console.log("Debug upload response:", response.data);
     return response.data;
   } catch (error) {
-    console.error("Error during debug upload:", error);
-    
-    if (axios.isAxiosError(error) && error.response) {
-      console.error("Response data:", error.response.data);
-      console.error("Response status:", error.response.status);
-      throw new Error(`Debug error (${error.response.status}): ${
-        JSON.stringify(error.response.data) || 'Unknown error'
-      }`);
-    } else {
-      throw new Error("Debug upload failed: " + (error.message || "Unknown error"));
-    }
+    return handleApiError(error, "debug upload");
   }
 }
 
+/**
+ * Upload a DOCX template file
+ * 
+ * @param {File} file - The DOCX template file to upload
+ * @returns {Promise<Object>} Upload response
+ */
 export async function uploadDocxTemplate(file) {
+  if (!file) {
+    throw new Error("No DOCX template file provided");
+  }
+  
   const formData = new FormData();
   formData.append("file", file);
   
   try {
-    console.log(`Uploading DOCX template ${file.name} (${file.size} bytes) to ${config.endpoints.upload}/template/docx`);
+    console.log(`Uploading DOCX template ${file.name} to ${config.endpoints.upload}/template/docx`);
     
     const response = await axios.post(`${config.endpoints.upload}/template/docx`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 30000 // 30 second timeout
+      timeout: 30000
     });
     
     console.log("DOCX template upload response:", response.data);
     return response.data;
   } catch (error) {
-    console.error("Error uploading DOCX template:", error);
-    
-    let errorMessage = "DOCX template upload failed";
-    
-    if (axios.isAxiosError(error) && error.response) {
-      console.error("Server responded with:", error.response.data);
-      
-      if (error.response.data && error.response.data.detail) {
-        errorMessage = `Server error: ${error.response.data.detail}`;
-      }
-    }
-    
-    throw new Error(errorMessage);
+    return handleApiError(error, "DOCX template upload");
   }
 } 

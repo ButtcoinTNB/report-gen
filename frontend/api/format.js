@@ -1,9 +1,19 @@
 import axios from "axios";
 import { config } from "../config";
+import { handleApiError } from "../utils/errorHandler";
 
+/**
+ * Format a report as PDF with preview or final mode
+ * 
+ * @param {number} reportId - ID of the report to format
+ * @param {boolean} isPreview - Whether this is a preview (true) or final version (false)
+ * @returns {Promise<Object>} Formatting response
+ */
 export async function formatReport(reportId, isPreview) {
   try {
     const endpoint = isPreview ? "preview" : "final";
+    console.log(`Formatting report ${reportId} as ${endpoint} at ${config.endpoints.format}/${endpoint}`);
+    
     const response = await axios.post(`${config.endpoints.format}/${endpoint}`, {
       report_id: reportId
     });
@@ -18,7 +28,6 @@ export async function formatReport(reportId, isPreview) {
 
     return response.data;
   } catch (error) {
-    console.error("Error formatting report:", error);
-    throw error;
+    return handleApiError(error, "report formatting");
   }
 } 

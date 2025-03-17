@@ -9,7 +9,7 @@ import {
   Divider
 } from '@mui/material';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import axios from 'axios';
+import { generateReport } from '../api/generate';
 
 // Get API URL from environment or fallback to localhost
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -26,7 +26,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const generateReport = async () => {
+  const handleGenerate = async () => {
     if (!reportId) {
       setError('No document has been uploaded');
       return;
@@ -36,18 +36,28 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
     setError(null);
 
     try {
-      const response = await axios.post(`${API_URL}/api/generate/`, { 
-        report_id: reportId 
-      });
+      const response = await generateReport(reportId);
 
-      if (response.data) {
-        onGenerateSuccess(response.data.output || response.data);
+      if (response) {
+        // If there was an error in API but it returned fallback content
+        if (response.error) {
+          setError('An error occurred during generation, but partial content was returned.');
+        }
+        
+        // Use the content from the response
+        if (response.content) {
+          onGenerateSuccess(response.content);
+        } else if (response.output) {
+          onGenerateSuccess(response.output);
+        } else {
+          throw new Error('No content returned from generation API');
+        }
       } else {
         throw new Error('Failed to generate report content');
       }
     } catch (err) {
       console.error('Error generating report:', err);
-      setError('Failed to generate report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to generate report. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -72,7 +82,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         variant="contained"
         color="secondary"
         size="large"
-        onClick={generateReport}
+        onClick={handleGenerate}
         disabled={loading || !reportId}
         startIcon={loading ? (
           <CircularProgress size={20} color="inherit" />

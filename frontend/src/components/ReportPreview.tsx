@@ -12,7 +12,7 @@ import {
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
-import { formatReport } from '@/api/format';
+import { formatReport } from '../api/format';
 
 interface ReportPreviewProps {
   reportId: number | null;
