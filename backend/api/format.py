@@ -14,41 +14,64 @@ from supabase import create_client, Client
 router = APIRouter()
 
 
-def fetch_report_from_supabase(report_id: str):
+def fetch_report_from_supabase(report_id):
     """
     Fetch the report content from Supabase using the report_id.
+    
+    Args:
+        report_id: Can be an integer ID or UUID string
     """
     try:
         # Initialize Supabase client
         supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         
+        # Convert to integer if it's a numeric string
+        if isinstance(report_id, str) and report_id.isdigit():
+            try:
+                report_id = int(report_id)
+            except ValueError:
+                # Keep as string if conversion fails
+                pass
+                
         # Query the reports table
         response = supabase.table("reports").select("content").eq("id", report_id).execute()
         
         if not response.data:
-            raise HTTPException(status_code=404, detail="Report not found in the database")
+            raise HTTPException(status_code=404, detail=f"Report not found in the database with ID: {report_id}")
             
         return response.data[0]["content"]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching report: {str(e)}")
 
 
-def update_report_file_path(report_id: str, pdf_path: str):
+def update_report_file_path(report_id, pdf_path: str):
     """
     Updates the finalized report's file path in Supabase.
+    
+    Args:
+        report_id: Can be an integer ID or UUID string
+        pdf_path: Path to the generated PDF file
     """
     try:
         # Initialize Supabase client
         supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        
+        # Convert to integer if it's a numeric string
+        if isinstance(report_id, str) and report_id.isdigit():
+            try:
+                report_id = int(report_id)
+            except ValueError:
+                # Keep as string if conversion fails
+                pass
         
         # Update the report with the file path
         data = {"formatted_file_path": pdf_path, "is_finalized": True}
         response = supabase.table("reports").update(data).eq("id", report_id).execute()
         
         if not response.data:
-            raise HTTPException(status_code=500, detail="Failed to update report in database.")
+            raise HTTPException(status_code=500, detail=f"Failed to update report in database with ID: {report_id}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating report: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error updating report file path: {str(e)}")
 
 
 @router.post("/preview", response_model=dict)
@@ -176,6 +199,28 @@ async def format_final(data: Dict = Body(...)):
         raise HTTPException(status_code=400, detail="report_id is required")
 
     report_id = data["report_id"]
+    
+    # Check if report_id is a UUID string and handle appropriately
+    # This is needed because the frontend may send UUID strings but the database expects integers
+    try:
+        # If it's a UUID, try to find the corresponding numeric ID or handle UUID directly
+        if isinstance(report_id, str) and '-' in report_id:
+            # If your database now uses UUIDs as primary keys, keep as is
+            # If your database uses integers but API returns UUIDs, you might need
+            # to query the database to find the integer ID associated with this UUID
+            # For now we'll proceed with the UUID as is
+            pass
+        else:
+            # If it's already an integer or integer string without dashes
+            try:
+                report_id = int(report_id)
+            except ValueError:
+                pass  # Keep as string if conversion fails
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid report_id format: {str(e)}"
+        )
 
     try:
         # Fetch the actual report content from Supabase
