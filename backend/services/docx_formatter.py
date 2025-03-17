@@ -1,10 +1,11 @@
 from docx import Document
-from docx.shared import Pt, RGBColor
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT, WD_ALIGN_PARAGRAPH
 import os
 import asyncio
 import uuid
 import re
+from config import settings
 
 
 def parse_markdown(doc, markdown_text):
@@ -104,7 +105,7 @@ def process_inline_formatting(paragraph, text):
 
 def generate_docx(report_text, output_filename, reference_metadata=None):
     """
-    Creates a DOCX with AI-generated report text, inserting it into a template.
+    Creates a DOCX with AI-generated report text.
     
     Args:
         report_text: The content of the report
@@ -115,10 +116,10 @@ def generate_docx(report_text, output_filename, reference_metadata=None):
         The full path to the generated DOCX
     """
     # Ensure directory exists
-    os.makedirs("generated_reports", exist_ok=True)
+    os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
     
     # Create full path
-    output_path = os.path.join("generated_reports", output_filename)
+    output_path = os.path.join(settings.GENERATED_REPORTS_DIR, output_filename)
     
     try:
         # Check if a template exists

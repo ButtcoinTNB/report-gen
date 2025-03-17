@@ -182,7 +182,7 @@ async def format_final(data: Dict = Body(...)):
         report_content = fetch_report_from_supabase(report_id)
         
         # Create the generated_reports directory if it doesn't exist
-        os.makedirs("generated_reports", exist_ok=True)
+        os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
 
         # Get metadata from all reference PDFs
         reference_metadata = get_reference_metadata()

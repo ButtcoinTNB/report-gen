@@ -254,4 +254,37 @@ export async function testDebugUpload(file) {
       throw new Error("Debug upload failed: " + (error.message || "Unknown error"));
     }
   }
+}
+
+export async function uploadDocxTemplate(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  
+  try {
+    console.log(`Uploading DOCX template ${file.name} (${file.size} bytes) to ${config.endpoints.upload}/template/docx`);
+    
+    const response = await axios.post(`${config.endpoints.upload}/template/docx`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 30000 // 30 second timeout
+    });
+    
+    console.log("DOCX template upload response:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("Error uploading DOCX template:", error);
+    
+    let errorMessage = "DOCX template upload failed";
+    
+    if (axios.isAxiosError(error) && error.response) {
+      console.error("Server responded with:", error.response.data);
+      
+      if (error.response.data && error.response.data.detail) {
+        errorMessage = `Server error: ${error.response.data.detail}`;
+      }
+    }
+    
+    throw new Error(errorMessage);
+  }
 } 

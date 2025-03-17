@@ -196,7 +196,7 @@ async def download_docx_report(report_id: str):
         if not file_path.lower().endswith('.docx'):
             # Try to find a matching DOCX file with the same base name
             base_name = os.path.splitext(os.path.basename(file_path))[0]
-            docx_path = os.path.join("generated_reports", f"{base_name}.docx")
+            docx_path = os.path.join(settings.GENERATED_REPORTS_DIR, f"{base_name}.docx")
             
             if not os.path.exists(docx_path):
                 raise HTTPException(
@@ -241,7 +241,7 @@ async def serve_docx_report_file(report_id: str):
         if not file_path.lower().endswith('.docx'):
             # Try to find a matching DOCX file with the same base name
             base_name = os.path.splitext(os.path.basename(file_path))[0]
-            docx_path = os.path.join("generated_reports", f"{base_name}.docx")
+            docx_path = os.path.join(settings.GENERATED_REPORTS_DIR, f"{base_name}.docx")
             
             if not os.path.exists(docx_path):
                 raise HTTPException(

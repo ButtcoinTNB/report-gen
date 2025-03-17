@@ -98,32 +98,17 @@ insurance-report-generator/
 │   │   ├── format.py        # PDF formatting
 │   │   ├── edit.py          # User modifications
 │   │   ├── download.py      # PDF download logic
-│   ├── services/            # Utility functions
-│   │   ├── pdf_extractor.py # Extracts text & layout from PDFs
-│   │   ├── ai_service.py    # Calls OpenRouter API for AI generation
-│   │   ├── pdf_formatter.py # Ensures output matches reference PDF
-│   ├── models.py            # Database models
-│   ├── config.py            # Configurations (DB, API Keys)
-│── frontend/                # Next.js frontend
-│   ├── pages/               # Main pages
-│   │   ├── index.tsx        # File upload & report preview
-│   │   ├── edit.tsx         # Edit AI-generated report
-│   │   ├── download.tsx     # Download formatted PDF
-│   ├── components/          # UI components
-│   │   ├── UploadBox.tsx    # Drag & drop file upload
-│   │   ├── ReportPreview.tsx # AI-generated report preview
-│   │   ├── EditBox.tsx      # AI chat & manual editing
-│   ├── styles/              # Styling (CSS/Tailwind)
-│   ├── api/                 # API calls to backend
-│   │   ├── upload.ts        # File upload API request
-│   │   ├── generate.ts      # AI report generation API request
-│   │   ├── format.ts        # Formatting API request
-│   │   ├── edit.ts          # Editing API request
-│   │   ├── download.ts      # PDF download API request
-│── .env                     # Environment variables
-│── .gitignore               # Ignore unnecessary files
-│── README.md                # Documentation
-│── docker-compose.yml       # (Optional) For running locally
+│   │   ├── services/        # Utility functions
+│   │   │   ├── pdf_extractor.py # Extracts text & layout from PDFs
+│   │   │   ├── ai_service.py    # Calls OpenRouter API for AI generation
+│   │   │   ├── pdf_formatter.py # Ensures output matches reference PDF
+│   │   ├── models.py            # Database models
+│   │   ├── config.py            # Configurations (DB, API Keys)
+│   │   └── .env.example        # Environment variables
+│   ├── .env                     # Environment variables
+│   └── .gitignore               # Ignore unnecessary files
+│   └── README.md                # Documentation
+│   └── docker-compose.yml       # (Optional) For running locally
 ```
 
 ## Deployment
@@ -170,7 +155,7 @@ OPENROUTER_API_KEY=your-openrouter-api-key
 
 # File storage settings
 UPLOAD_DIR=./uploads
-MAX_UPLOAD_SIZE=10485760
+MAX_UPLOAD_SIZE=104857600  # 100MB
 
 # API settings
 API_RATE_LIMIT=100

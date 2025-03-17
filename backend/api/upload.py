@@ -32,9 +32,10 @@ async def upload_template(
 
     # Check file size
     if file.size > settings.MAX_UPLOAD_SIZE:
+        max_size_mb = settings.MAX_UPLOAD_SIZE / (1024 * 1024)
         raise HTTPException(
             status_code=400,
-            detail=f"File size exceeds the {settings.MAX_UPLOAD_SIZE} bytes limit",
+            detail=f"File size exceeds the {max_size_mb:.1f} MB limit",
         )
 
     # Create unique filename
@@ -335,7 +336,7 @@ async def upload_document(
         max_size_mb = settings.MAX_UPLOAD_SIZE / (1024 * 1024)
         raise HTTPException(
             status_code=400,
-            detail=f"File exceeds the {max_size_mb:.1f} MB size limit"
+            detail=f"File size exceeds the {max_size_mb:.1f} MB limit"
         )
     
     # Create unique filename
@@ -362,10 +363,11 @@ async def upload_document(
     }
 
 
-@router.post("/template", status_code=201)
+@router.post("/template/docx", status_code=201)
 async def upload_template_docx(file: UploadFile = File(...)):
     """
     Upload a DOCX template file that will be used for generating reports.
+    Uses the /template/docx endpoint to distinguish from PDF template uploads.
     
     Args:
         file: The DOCX template file to upload

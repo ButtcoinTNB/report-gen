@@ -8,25 +8,33 @@ from reportlab.lib import colors
 import os
 import asyncio
 import uuid
+from weasyprint import HTML, CSS
+from weasyprint.text.fonts import FontConfiguration
+import tempfile
+import re
+from typing import Dict, Any, List, Optional
+from config import settings
 
 
-def generate_pdf(report_text, output_filename, reference_metadata):
+def generate_pdf(
+    report_text: str, output_filename: str, reference_metadata: Dict[str, Any]
+) -> str:
     """
-    Creates a PDF with AI-generated report text, matching the reference format.
+    Generate a PDF from report text, using reference metadata for formatting.
     
     Args:
-        report_text: The content of the report
-        output_filename: The filename for the output PDF
+        report_text: The text content of the report
+        output_filename: Filename for the output PDF
         reference_metadata: Dictionary containing headers and footers
         
     Returns:
         The full path to the generated PDF
     """
     # Ensure directory exists
-    os.makedirs("generated_reports", exist_ok=True)
+    os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
     
     # Create full path
-    output_path = os.path.join("generated_reports", output_filename)
+    output_path = os.path.join(settings.GENERATED_REPORTS_DIR, output_filename)
     
     try:
         c = canvas.Canvas(output_path, pagesize=A4)

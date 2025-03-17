@@ -9,8 +9,8 @@ from config import settings
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-os.makedirs("generated_reports", exist_ok=True)
-print(f"Ensured directories exist: {settings.UPLOAD_DIR}, generated_reports")
+os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
+print(f"Ensured directories exist: {settings.UPLOAD_DIR}, {settings.GENERATED_REPORTS_DIR}")
 
 app = FastAPI(
     title="Scrittore Automatico di Perizie",

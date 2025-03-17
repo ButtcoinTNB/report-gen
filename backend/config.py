@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     # File storage
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")
+    GENERATED_REPORTS_DIR: str = os.getenv("GENERATED_REPORTS_DIR", "./generated_reports")
     MAX_UPLOAD_SIZE: int = int(
         os.getenv("MAX_UPLOAD_SIZE", "104857600")
     )  # 100MB default
