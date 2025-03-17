@@ -191,7 +191,8 @@ async def generate_report_from_id(data: Dict[str, Any]):
     print(f"Received report generation request with ID: {report_id}")
     
     try:
-        # Get files associated with this report
+        # If report_id is a UUID, the files will be in a directory named with the UUID
+        # This relies on files being stored using the UUID as a directory name
         report_files = get_report_files(report_id)
         
         if not report_files:

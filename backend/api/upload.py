@@ -166,12 +166,12 @@ async def upload_documents(
         
         uploaded_files = []
         
-        # Generate a unique report ID
-        report_id = str(uuid.uuid4())
-        print(f"Generated report ID: {report_id}")
+        # Generate a unique report ID (UUID for external reference)
+        report_uuid = str(uuid.uuid4())
+        print(f"Generated report UUID: {report_uuid}")
         
-        # Create a directory for this report's files
-        report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+        # Create a directory for this report's files using the UUID
+        report_dir = os.path.join(settings.UPLOAD_DIR, report_uuid)
         os.makedirs(report_dir, exist_ok=True)
         print(f"Created report directory: {report_dir}")
 
@@ -223,7 +223,7 @@ async def upload_documents(
                     
                 # Try to upload to Supabase Storage
                 try:
-                    storage_path = f"reports/{report_id}/{filename}"
+                    storage_path = f"reports/{report_uuid}/{filename}"
                     
                     with open(file_path, "rb") as f:
                         file_data = f.read()
@@ -268,11 +268,13 @@ async def upload_documents(
         # Store report metadata in local JSON file
         metadata_path = os.path.join(report_dir, "metadata.json")
         metadata = {
-            "report_id": report_id,
+            "uuid": report_uuid,  # Store the UUID for external reference
             "template_id": template_id,
             "files": uploaded_files,
             "created_at": datetime.datetime.now().isoformat(),
-            "status": "uploaded"
+            "status": "uploaded",
+            "title": f"Report #{report_uuid[:8]}",  # Default title using part of the UUID
+            "content": ""  # Initialize empty content
         }
         
         with open(metadata_path, "w") as f:
@@ -283,15 +285,42 @@ async def upload_documents(
         # Store metadata in Supabase database
         try:
             print("Saving metadata to Supabase database")
-            response = supabase.table("reports").insert(metadata).execute()
+            # Note: We don't include the 'uuid' field in the database insert
+            # The database will generate its own integer ID
+            db_metadata = {
+                "template_id": template_id,
+                "title": metadata["title"],
+                "content": "",
+                "is_finalized": False
+            }
+            response = supabase.table("reports").insert(db_metadata).execute()
             print("Saved report metadata to Supabase:", response)
+            
+            # Get the database-generated integer ID
+            if response.data and len(response.data) > 0:
+                db_id = response.data[0]["id"]
+                # Save the mapping between UUID and integer ID
+                mapping_path = os.path.join(report_dir, "id_mapping.json")
+                with open(mapping_path, "w") as f:
+                    json.dump({"uuid": report_uuid, "db_id": db_id}, f, indent=2)
+                print(f"Created ID mapping: UUID {report_uuid} -> Database ID {db_id}")
+                
+                # Return the database ID in the response
+                return {
+                    "message": f"Successfully uploaded {len(uploaded_files)} files",
+                    "files": uploaded_files,
+                    "report_id": report_uuid,  # Keep returning the UUID for backward compatibility
+                    "db_id": db_id,  # Also return the database ID
+                    "supabase_urls": supabase_urls if supabase_urls else None
+                }
+            
         except Exception as e:
             print(f"Error saving report metadata to Supabase (continuing with local file): {str(e)}")
         
         return {
             "message": f"Successfully uploaded {len(uploaded_files)} files",
             "files": uploaded_files,
-            "report_id": report_id,
+            "report_id": report_uuid,
             "supabase_urls": supabase_urls if supabase_urls else None
         }
     except Exception as e:

@@ -3,6 +3,8 @@ from fastapi.responses import FileResponse
 import os
 from supabase import create_client, Client
 from config import settings
+from utils.id_mapper import ensure_id_is_int
+import traceback
 
 router = APIRouter()
 
@@ -10,16 +12,25 @@ router = APIRouter()
 def fetch_report_path_from_supabase(report_id: str):
     """
     Retrieves the finalized report file path from Supabase.
+    
+    Args:
+        report_id: Can be either a UUID string or an integer ID
     """
     try:
+        # Try to convert the report_id to an integer if it's a UUID
+        try:
+            db_id = ensure_id_is_int(report_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid report ID format: {str(e)}")
+            
         # Initialize Supabase client
         supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         
-        # Query the reports table
-        response = supabase.table("reports").select("formatted_file_path,is_finalized").eq("id", report_id).execute()
+        # Query the reports table using the integer ID
+        response = supabase.table("reports").select("formatted_file_path,is_finalized").eq("id", db_id).execute()
         
         if not response.data:
-            raise HTTPException(status_code=404, detail="Report not found in the database.")
+            raise HTTPException(status_code=404, detail=f"Report with ID {report_id} not found in the database.")
             
         report_data = response.data[0]
         if not report_data["is_finalized"]:
@@ -27,6 +38,8 @@ def fetch_report_path_from_supabase(report_id: str):
             
         return report_data["formatted_file_path"]
     except Exception as e:
+        print(f"Error fetching report path: {str(e)}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error fetching report: {str(e)}")
 
 
@@ -36,7 +49,7 @@ async def download_report(report_id: str):
     Download a finalized report by ID.
     
     Args:
-        report_id: ID of the report to download
+        report_id: ID of the report to download (can be UUID string or integer ID)
         
     Returns:
         Report details including download URL
