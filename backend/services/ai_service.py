@@ -140,22 +140,27 @@ async def generate_case_summary(document_paths: List[str]) -> Dict[str, str]:
         # Combine all document content
         combined_content = "\n\n".join(document_content)
         
-        # Create prompt for a very brief summary
+        # Create prompt for a very brief summary with strict instructions
         prompt = (
-            "You are an insurance claims analyzer. Create an extremely brief summary (1-2 sentences) "
-            "and extract key facts from the following documents. Focus on claim amount, property damage, "
-            "injuries, policy details, and incident date if present.\n\n"
+            "You are an insurance claims analyzer. Your task is to create an extremely brief summary "
+            "(1-2 sentences) and extract key facts from the provided documents. Follow these strict rules:\n\n"
+            "1. FACTS ONLY: Use ONLY information explicitly stated in the documents.\n"
+            "2. NO INVENTION: Do not add any details not present in the documents.\n"
+            "3. KEY INFORMATION: Focus on claim amount, property damage, injuries, policy details, "
+            "and incident date if present in the documents.\n"
+            "4. IF MISSING: If any key information is not in the documents, note it as 'not provided' "
+            "rather than making assumptions.\n\n"
             f"DOCUMENT CONTENT:\n{combined_content}\n\n"
             "Provide your response in this format:\n"
-            "SUMMARY: [A 1-2 sentence summary of the claim/incident]\n"
-            "KEY_FACTS: [2-4 key points in bullet format with amounts, dates, and specifics]"
+            "SUMMARY: [A 1-2 sentence factual summary based ONLY on the provided documents]\n"
+            "KEY_FACTS: [2-4 key points in bullet format with amounts, dates, and specifics ONLY from the documents]"
         )
         
         # Prepare messages for API call
         messages = [
             {
                 "role": "system", 
-                "content": "You are an insurance claims analyzer. Provide extremely concise summaries and key facts only."
+                "content": "You are an insurance claims analyzer. Provide extremely concise, FACTUAL summaries and key facts only. Do not invent details not present in the documents."
             },
             {"role": "user", "content": prompt}
         ]
@@ -244,41 +249,86 @@ async def generate_report_text(
         # Combine all document content
         combined_content = "\n\n".join(document_content)
         
-        # Get reference template
-        # In a real implementation, this would fetch from Supabase
-        reference_content = (
-            "This is a reference insurance report template.\n"
-            "CLAIM #: XXXXX\n"
-            "DATE OF LOSS: MM/DD/YYYY\n"
-            "INSURED: John Doe\n"
-            "CLAIMANT: Jane Smith\n"
-            "POLICY #: XXXXX\n\n"
-            "SUMMARY OF CLAIM:\n"
-            "The claimant alleges...\n\n"
-            "INVESTIGATION:\n"
-            "Our investigation found...\n\n"
-            "COVERAGE ANALYSIS:\n"
-            "Based on policy section X...\n\n"
-            "EVALUATION:\n"
-            "We recommend..."
-        )
+        # Get reference templates from backend
+        reference_content = ""
         
-        # Create prompt
+        # Define possible locations for reference reports
+        possible_dirs = [
+            os.path.join("backend", "reference_reports"),
+            "reference_reports",
+            os.path.join(settings.UPLOAD_DIR, "templates")
+        ]
+        
+        # Find reference PDFs to use as format templates
+        found_references = False
+        for dir_path in possible_dirs:
+            if os.path.exists(dir_path) and os.path.isdir(dir_path):
+                reference_files = [
+                    os.path.join(dir_path, f) 
+                    for f in os.listdir(dir_path) 
+                    if f.lower().endswith(".pdf") 
+                    or f.lower().endswith(".txt") 
+                    or f.lower().endswith(".docx")
+                ]
+                
+                if reference_files:
+                    logger.info(f"Found {len(reference_files)} reference files in {dir_path}")
+                    
+                    # Use the first reference file (or ideally, use one that matches template_id)
+                    try:
+                        for ref_file in reference_files[:2]:  # Use up to 2 references
+                            try:
+                                with open(ref_file, "r") as f:
+                                    file_content = f.read()
+                                    if file_content.strip():
+                                        reference_content += f"\n\n--- REFERENCE DOCUMENT: {os.path.basename(ref_file)} ---\n\n"
+                                        reference_content += file_content
+                                        found_references = True
+                            except UnicodeDecodeError:
+                                logger.warning(f"Cannot read binary file as reference: {ref_file}")
+                            except Exception as e:
+                                logger.warning(f"Error reading reference file {ref_file}: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"Error processing reference files: {str(e)}")
+                
+                if found_references:
+                    break
+
+        # If no reference files were found, use a minimal structural outline
+        if not reference_content:
+            logger.warning("No reference templates found. Using minimal structure.")
+            reference_content = (
+                "INSURANCE REPORT STRUCTURE\n\n"
+                "CLAIM INFORMATION:\n- Claim Number\n- Date of Loss\n- Insured Name\n- Policy Number\n\n"
+                "CLAIM SUMMARY:\n[Brief description of what happened]\n\n"
+                "COVERAGE DETAILS:\n[Policy coverage relevant to this claim]\n\n"
+                "DAMAGE ASSESSMENT:\n[Details of the damages/injuries]\n\n"
+                "INVESTIGATION FINDINGS:\n[Facts discovered during investigation]\n\n"
+                "LIABILITY DETERMINATION:\n[Analysis of liability]\n\n"
+                "RECOMMENDATIONS:\n[Settlement or action recommendations]"
+            )
+        
+        # Create prompt with strict instructions about using reference only for format
         prompt = (
             "You are an insurance report writer. Generate a formal insurance "
-            "report based on the following case information. Format it like the "
-            "reference report template below.\n\n"
-            f"REFERENCE TEMPLATE:\n{reference_content}\n\n"
-            f"CASE INFORMATION:\n{combined_content}\n\n"
-            "Please generate a properly formatted insurance report based on "
-            "this information, following the structure of the reference template."
+            "report based ONLY on the case information provided. Follow these strict instructions:\n\n"
+            "1. FORMAT & STRUCTURE: Use the reference documents ONLY for format, structure, and style.\n"
+            "2. CONTENT: ALL content MUST come ONLY from the case information provided.\n"
+            "3. NO HALLUCINATION: Do not invent ANY details not present in the case information.\n"
+            "4. LANGUAGE: Use the same language as the case documents (English or Italian).\n\n"
+            f"REFERENCE FORMAT (use ONLY for structure/style):\n{reference_content}\n\n"
+            f"CASE INFORMATION (use ONLY this for content):\n{combined_content}\n\n"
+            "IMPORTANT: Generate a properly formatted insurance report based ONLY on the "
+            "factual information provided in the case information. Use the reference only for "
+            "formatting guidance. If certain information is missing, note that it is 'Not provided' "
+            "rather than inventing details."
         )
         
         # Prepare messages for API call
         messages = [
             {
                 "role": "system", 
-                "content": "You are an expert insurance report writer."
+                "content": "You are an expert insurance report writer. Use only factual information provided by the user. Do not invent or hallucinate any details."
             },
             {"role": "user", "content": prompt}
         ]
@@ -319,20 +369,25 @@ async def refine_report_text(current_text: str, instructions: str) -> str:
         Refined report text
     """
     try:
-        # Create prompt
+        # Create prompt with explicit instructions to avoid hallucination
         prompt = (
-            "You are an insurance report editor. Edit the following insurance "
-            "report according to the instructions provided.\n\n"
+            "You are an insurance report editor. Edit the provided insurance "
+            "report according to the user's instructions, following these strict rules:\n\n"
+            "1. PRESERVE FACTS: Do not remove or change factual information present in the original report.\n"
+            "2. NO NEW FACTS: Do not add any new factual information not present in the original report.\n"
+            "3. EDITS ONLY: Make only the changes explicitly requested in the instructions.\n"
+            "4. FORMATTING: You may improve formatting, clarity, and structure while preserving content.\n\n"
             f"CURRENT REPORT:\n{current_text}\n\n"
             f"INSTRUCTIONS:\n{instructions}\n\n"
-            "Please provide the edited insurance report."
+            "Provide the edited version of the report, making only the changes requested "
+            "while preserving all factual information. Do not invent new facts."
         )
         
         # Prepare messages for API call
         messages = [
             {
                 "role": "system", 
-                "content": "You are an expert insurance report editor."
+                "content": "You are an expert insurance report editor. Edit documents according to requested changes without adding any new factual information not present in the original. Do not hallucinate or invent details."
             },
             {"role": "user", "content": prompt}
         ]
@@ -360,3 +415,61 @@ async def refine_report_text(current_text: str, instructions: str) -> str:
             "NOTE: Unable to apply refinements. The AI service encountered an error. "
             "Please try again later."
         )
+
+
+def generate_summary(text: str) -> str:
+    """
+    Generate a structured summary using OpenRouter API.
+
+    Args:
+        text (str): The text content to summarize.
+
+    Returns:
+        str: AI-generated summary or an error message.
+    """
+    if not settings.OPENROUTER_API_KEY:
+        logger.error("OPENROUTER_API_KEY is missing. Set it in your environment variables.")
+        return "Error: Missing API key for OpenRouter."
+
+    try:
+        # Create a synchronous version of the OpenRouter API call for simplicity
+        with httpx.Client() as client:
+            response = client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://insurance-report-generator.vercel.app",
+                    "X-Title": "Insurance Report Generator"
+                },
+                json={
+                    "model": settings.DEFAULT_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "You are an AI assistant that generates factual insurance reports. Only use information explicitly provided in the input text. Do not invent or hallucinate any details."},
+                        {"role": "user", "content": f"Summarize the following insurance case details with FACTS ONLY - do not add any information not present in the original text:\n\n{text}\n\nProvide a concise, factual summary using only information explicitly stated in the text. If important details are missing, note them as 'not specified' rather than inventing information. Ensure clarity, factual accuracy, and a professional tone."}
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 300
+                },
+                timeout=30
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            if "choices" in result and len(result["choices"]) > 0:
+                summary = result["choices"][0]["message"]["content"].strip()
+                if not summary:
+                    logger.warning("AI response was empty or invalid.")
+                    return "Error: AI did not generate a valid summary."
+                return summary
+            else:
+                logger.warning(f"Unexpected API response format: {result}")
+                return "Error: AI returned an unexpected response format."
+                
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error from OpenRouter: {e.response.text}")
+        return f"Error: API request failed with status {e.response.status_code}."
+    except Exception as e:
+        logger.exception("Unexpected error in generate_summary function")
+        return f"Error: {str(e)}"

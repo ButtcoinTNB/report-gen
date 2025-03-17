@@ -7,12 +7,18 @@ from typing import Dict, Any, List
 from services.pdf_extractor import extract_text_from_files, extract_text_from_file
 from services.ai_service import generate_case_summary
 from utils.id_mapper import ensure_id_is_int
+import time
 
 router = APIRouter(tags=["AI Processing"])
 
 
 def fetch_reference_reports():
-    """Fetches stored reference reports from Supabase or local files."""
+    """
+    Fetches stored reference reports from Supabase or local files.
+    
+    Returns:
+        List of reference report data with extracted text
+    """
     try:
         from supabase import create_client, Client
         
@@ -24,7 +30,20 @@ def fetch_reference_reports():
         
         if hasattr(response, 'data') and response.data:
             print(f"Successfully fetched {len(response.data)} reference reports from Supabase")
-            return response.data
+            
+            # Ensure each report has the expected fields
+            valid_reports = []
+            for report in response.data:
+                if "extracted_text" in report and report["extracted_text"]:
+                    valid_reports.append(report)
+                else:
+                    print(f"Warning: Reference report {report.get('id', 'unknown')} missing extracted text")
+                    
+            if valid_reports:
+                return valid_reports
+            else:
+                print("No valid reference reports found in Supabase (missing extracted text)")
+                # Fall through to local file check
         else:
             print("No reference reports found in Supabase, or empty response")
             # Fall through to local file check
@@ -44,34 +63,45 @@ def fetch_reference_reports():
     
     for dir_path in possible_dirs:
         if os.path.exists(dir_path) and os.path.isdir(dir_path):
-            print(f"Looking for reference PDFs in {dir_path}")
+            print(f"Looking for reference reports in {dir_path}")
             
+            # Look for PDFs, Word docs, and text files
             reference_files = [
                 os.path.join(dir_path, f) 
                 for f in os.listdir(dir_path) 
-                if f.lower().endswith(".pdf")
+                if f.lower().endswith((".pdf", ".docx", ".doc", ".txt"))
             ]
             
             if reference_files:
-                print(f"Found {len(reference_files)} reference files: {reference_files}")
+                print(f"Found {len(reference_files)} reference files: {[os.path.basename(f) for f in reference_files]}")
                 
                 for file_path in reference_files:
                     try:
+                        print(f"Extracting text from reference file: {file_path}")
                         extracted_text = extract_text_from_file(file_path)
+                        
+                        if not extracted_text or extracted_text.startswith("Error:"):
+                            print(f"Warning: Could not extract text from {file_path}: {extracted_text}")
+                            continue
+                            
                         reference_data.append({
                             "id": os.path.basename(file_path),
                             "name": os.path.basename(file_path),
                             "extracted_text": extracted_text,
                             "file_path": file_path
                         })
+                        print(f"Successfully extracted {len(extracted_text)} characters from {file_path}")
                     except Exception as e:
                         print(f"Error extracting text from {file_path}: {str(e)}")
                 
                 if reference_data:
+                    print(f"Successfully loaded {len(reference_data)} reference documents")
                     return reference_data
+                else:
+                    print(f"Could not extract text from any files in {dir_path}, trying next directory")
                     
     if not reference_data:
-        print("No reference reports found in local directories")
+        print("No reference reports found in any local directories")
         
     return reference_data
 
@@ -144,15 +174,20 @@ async def generate_report(text: dict):
     
     print(f"Using {reports_used} reference reports for generation (total {len(context)} chars)")
 
+    # Updated with stricter instructions matching /from-id endpoint format
     prompt = (
-        "You're an expert insurance report writer. Follow these important instructions:\n\n"
-        "1. REFERENCE REPORTS: I'm providing reference reports ONLY to show you the correct FORMAT, "
-        "STRUCTURE, STYLE, and TONE OF VOICE. DO NOT memorize or use any factual content from these references.\n\n"
-        "2. CASE NOTES: Generate a new report using ONLY the information from the user's case notes.\n\n"
-        "3. LANGUAGE: Generate the report in the SAME LANGUAGE as the case notes (either Italian or English).\n\n"
-        f"REFERENCE REPORTS (for format/style only):\n{context}\n\n"
-        f"CASE NOTES (use this content for your report):\n{text['content']}\n\n"
-        "Generate a structured insurance claim report that includes common sections such as:\n"
+        "You are an expert insurance report writer tasked with creating a formal insurance report.\n\n"
+        "STRICT INSTRUCTIONS - FOLLOW PRECISELY:\n"
+        "1. FORMAT ONLY: Use reference reports ONLY for format, structure, style, and professional tone.\n"
+        "2. USER CONTENT ONLY: The content of your report MUST come EXCLUSIVELY from the user's case notes.\n"
+        "3. NO INVENTION: Do not add ANY information not explicitly present in the case notes.\n"
+        "4. MATCH LANGUAGE: Write the report in the same language as the case notes (either Italian or English).\n"
+        "5. MISSING INFO: If key information is missing, state 'Not provided in the documents' rather than inventing it.\n"
+        "6. NO CREATIVITY: This is a factual insurance document - stick strictly to information in the case notes.\n\n"
+        f"REFERENCE FORMAT (use ONLY for structure/style/tone):\n{context}\n\n"
+        f"CASE NOTES (ONLY SOURCE FOR CONTENT):\n{text['content']}\n\n"
+        "Generate a structured insurance claim report that follows the format of the reference but "
+        "ONLY uses facts from the case notes. Include sections like:\n"
         "- CLAIM SUMMARY\n"
         "- CLAIMANT INFORMATION\n"
         "- INCIDENT DETAILS\n"
@@ -161,13 +196,23 @@ async def generate_report(text: dict):
         "- INVESTIGATION FINDINGS\n"
         "- LIABILITY ASSESSMENT\n"
         "- SETTLEMENT RECOMMENDATION\n\n"
-        "Important: Match the professional tone, formatting, and style of the reference reports, "
-        "but ONLY use facts from the case notes."
+        "CRITICAL: Do NOT invent ANY information. Only use facts explicitly stated in the case notes."
     )
 
+    # Updated to use messages array with system message like /from-id endpoint
     response = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
-        json={"model": settings.DEFAULT_MODEL, "prompt": prompt},
+        json={
+            "model": settings.DEFAULT_MODEL,
+            "messages": [
+                {
+                    "role": "system", 
+                    "content": "You are an expert insurance report writer. You MUST ONLY use facts explicitly stated in the user's case notes. Do not invent, assume, or hallucinate ANY information not explicitly provided. Remain strictly factual."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2  # Lower temperature for more factual output
+        },
         headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"},
     )
 
@@ -203,12 +248,37 @@ async def generate_report_from_id(data: Dict[str, Any]):
                 detail=f"No files found for report ID: {report_id}"
             )
         
+        # Log file information for debugging purposes
+        print(f"Found {len(report_files)} files for report ID {report_id}:")
+        for idx, file in enumerate(report_files):
+            print(f"  File {idx+1}: {file['filename']} ({file['type']}) at {file['path']}")
+            
+            # Check if files actually exist
+            if not os.path.exists(file['path']):
+                print(f"WARNING: File path doesn't exist: {file['path']}")
+        
         # Extract text from all files
         file_paths = [file["path"] for file in report_files]
-        file_contents = extract_text_from_files(file_paths)
+        extraction_start_time = time.time()
+        print(f"Starting text extraction from {len(file_paths)} files...")
+        
+        try:
+            file_contents = extract_text_from_files(file_paths)
+            extraction_time = time.time() - extraction_start_time
+            print(f"Text extraction completed in {extraction_time:.2f} seconds")
+        except Exception as extract_error:
+            error_msg = f"Error extracting text from files: {str(extract_error)}"
+            print(error_msg)
+            import traceback
+            print(traceback.format_exc())
+            return {
+                "content": f"## Error Extracting Text\n\nWe encountered a problem extracting text from your documents: {str(extract_error)}\n\nPlease try again with a different file format or contact support.",
+                "extraction_error": str(extract_error)
+            }
         
         # If we have very little content, provide a more detailed message
         if len(file_contents.strip()) < 100:
+            print("WARNING: Extracted less than 100 characters of text")
             file_statuses = []
             for file in report_files:
                 path = file["path"]
@@ -216,7 +286,17 @@ async def generate_report_from_id(data: Dict[str, Any]):
                 size = os.path.getsize(path) if exists else 0
                 file_statuses.append(f"{file['filename']}: Exists={exists}, Size={size} bytes")
             
-            file_contents += "\n\nFile Status:\n" + "\n".join(file_statuses)
+            # Add file status information to the extracted content for debugging
+            file_status_text = "\n\nFile Status:\n" + "\n".join(file_statuses)
+            
+            if file_contents.strip() == "":
+                print("ERROR: No text extracted from any files")
+                return {
+                    "content": f"## Error: No Text Extracted\n\nWe couldn't extract any text from your documents. This might be because:\n\n- The files contain only images without OCR\n- The files are password protected\n- The files are corrupted\n\nPlease try again with different documents or convert them to a different format.{file_status_text}",
+                    "extraction_error": "No text extracted from files"
+                }
+            
+            file_contents += file_status_text
             
         print(f"Extracted {len(file_contents)} characters of text from {len(file_paths)} files")
         
@@ -226,19 +306,28 @@ async def generate_report_from_id(data: Dict[str, Any]):
         # Check if we have any reference reports
         if not reference_reports:
             context = "Professional insurance claim report with sections for Summary, Details, Assessment, and Recommendations."
+            print("WARNING: No reference reports found, using minimal structure.")
         else:
-            context = "\n\n".join([r.get("extracted_text", "") for r in reference_reports[:2]])
+            print(f"Using {len(reference_reports)} reference reports for formatting guidance.")
+            # Join the content of up to 2 reference reports to provide formatting guidance
+            context = "\n\n--- NEXT REFERENCE REPORT ---\n\n".join(
+                [r.get("extracted_text", "") for r in reference_reports[:2]]
+            )
         
-        # Call the OpenRouter API
+        # Call the OpenRouter API with strong instructions about using only user content
         prompt = (
-            "You're an expert insurance report writer. Follow these important instructions:\n\n"
-            "1. REFERENCE REPORTS: I'm providing reference reports ONLY to show you the correct FORMAT, "
-            "STRUCTURE, STYLE, and TONE OF VOICE. DO NOT memorize or use any factual content from these references.\n\n"
-            "2. USER DOCUMENTS: Generate a new report using ONLY the information from the user's case documents.\n\n"
-            "3. LANGUAGE: Generate the report in the SAME LANGUAGE as the case documents (either Italian or English).\n\n"
-            f"REFERENCE REPORTS (for format/style only):\n{context}\n\n"
-            f"CASE DOCUMENTS (use this content for your report):\n{file_contents}\n\n"
-            "Generate a structured insurance claim report that includes common sections such as:\n"
+            "You are an expert insurance report writer tasked with creating a formal insurance report.\n\n"
+            "STRICT INSTRUCTIONS - FOLLOW PRECISELY:\n"
+            "1. FORMAT ONLY: Use reference reports ONLY for format, structure, style, and professional tone.\n"
+            "2. USER CONTENT ONLY: The content of your report MUST come EXCLUSIVELY from the user's documents.\n"
+            "3. NO INVENTION: Do not add ANY information not explicitly present in the user's documents.\n"
+            "4. MATCH LANGUAGE: Write the report in the same language as the user documents (either Italian or English).\n"
+            "5. MISSING INFO: If key information is missing, state 'Not provided in the documents' rather than inventing it.\n"
+            "6. NO CREATIVITY: This is a factual insurance document - stick strictly to information in the user's documents.\n\n"
+            f"REFERENCE FORMAT (use ONLY for structure/style/tone):\n{context}\n\n"
+            f"USER DOCUMENTS (ONLY SOURCE FOR CONTENT):\n{file_contents}\n\n"
+            "Generate a structured insurance claim report that follows the format of the reference but "
+            "ONLY uses facts from the user documents. Include sections like:\n"
             "- CLAIM SUMMARY\n"
             "- CLAIMANT INFORMATION\n"
             "- INCIDENT DETAILS\n"
@@ -247,42 +336,70 @@ async def generate_report_from_id(data: Dict[str, Any]):
             "- INVESTIGATION FINDINGS\n"
             "- LIABILITY ASSESSMENT\n"
             "- SETTLEMENT RECOMMENDATION\n\n"
-            "Important: Match the professional tone, formatting, and style of the reference reports, "
-            "but ONLY use facts from the case documents."
+            "CRITICAL: Do NOT invent ANY information. Only use facts explicitly stated in the user documents."
         )
         
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            json={
-                "model": settings.DEFAULT_MODEL,
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"}
-        )
-        
-        # Extract the generated content from the response
-        response_data = response.json()
-        print("OpenRouter API response:", response_data)
-        
-        if "choices" in response_data and len(response_data["choices"]) > 0:
-            generated_text = response_data["choices"][0]["message"]["content"]
-        else:
-            # Fallback if API response is unexpected
-            generated_text = (
-                "## Error Generating Report\n\n"
-                "The AI model was unable to generate a report from your documents.\n\n"
-                "### Document Contents:\n\n"
-                f"{file_contents[:500]}...\n\n"
-                "### API Response:\n\n"
-                f"{json.dumps(response_data, indent=2)}"
+        try:
+            api_start_time = time.time()
+            print(f"Calling OpenRouter API with prompt length {len(prompt)} characters...")
+            
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json={
+                    "model": settings.DEFAULT_MODEL,
+                    "messages": [
+                        {
+                            "role": "system", 
+                            "content": "You are an expert insurance report writer. You MUST ONLY use facts explicitly stated in the user's documents. Do not invent, assume, or hallucinate ANY information not explicitly provided. Remain strictly factual."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.2  # Lower temperature for more factual output
+                },
+                headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"}
             )
+            
+            api_time = time.time() - api_start_time
+            print(f"OpenRouter API call completed in {api_time:.2f} seconds")
+            
+            # Extract the generated content from the response
+            response_data = response.json()
+            print(f"OpenRouter API response status: {response.status_code}")
+            
+            if "choices" in response_data and len(response_data["choices"]) > 0:
+                generated_text = response_data["choices"][0]["message"]["content"]
+                return {"content": generated_text}
+            else:
+                # Fallback if API response is unexpected
+                error_text = (
+                    "## Error Generating Report\n\n"
+                    "The AI model was unable to generate a report from your documents.\n\n"
+                    "### Document Contents:\n\n"
+                    f"{file_contents[:500]}...\n\n"
+                    "### API Response:\n\n"
+                    f"{json.dumps(response_data, indent=2)}"
+                )
+                print("ERROR: Unexpected API response format")
+                print(json.dumps(response_data, indent=2))
+                return {"content": error_text, "api_error": response_data}
         
-        return {"content": generated_text}
+        except Exception as api_error:
+            error_msg = f"Error calling OpenRouter API: {str(api_error)}"
+            print(error_msg)
+            import traceback
+            print(traceback.format_exc())
+            
+            return {
+                "content": f"## Error Generating Report\n\nWe encountered a problem while generating your report: {str(api_error)}\n\nText was successfully extracted from your documents, but the AI service encountered an error.",
+                "api_error": str(api_error)
+            }
         
     except Exception as e:
         print(f"Error generating report: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return {
-            "content": f"Error generating report: {str(e)}. Please try again.",
+            "content": f"## Error Generating Report\n\nWe encountered a problem: {str(e)}.\n\nPlease try again or contact support.",
             "error": str(e)
         }
 
@@ -322,10 +439,19 @@ async def summarize_documents(data: Dict[str, Any]):
                 detail=f"No files found for report ID: {report_id}"
             )
         
+        # Log file information for debugging
+        print(f"Found {len(report_files)} files for report ID {report_id}:")
+        for idx, file in enumerate(report_files):
+            print(f"  File {idx+1}: {file['filename']} ({file['type']}) at {file['path']}")
+            
+            # Check if files actually exist
+            if not os.path.exists(file['path']):
+                print(f"WARNING: File path doesn't exist: {file['path']}")
+        
         # Extract file paths
         file_paths = [file["path"] for file in report_files]
         
-        # Generate the summary
+        # Generate the summary using our AI function that includes strict factual instructions
         summary_result = await generate_case_summary(file_paths)
         
         print(f"Generated summary: {summary_result['summary']}")
@@ -335,6 +461,8 @@ async def summarize_documents(data: Dict[str, Any]):
         
     except Exception as e:
         print(f"Error generating summary: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return {
             "summary": f"Error generating summary: {str(e)}. Please try again.",
             "key_facts": [],

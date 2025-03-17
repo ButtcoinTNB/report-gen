@@ -122,103 +122,223 @@ def extract_pdf_metadata(file_path: str) -> Dict[str, Any]:
     return metadata
 
 
-def extract_text_from_file(file_path: str) -> str:
+def extract_text_from_file(file_path):
     """
-    Extract text content from a file based on its extension.
+    Extract text from a file, supporting different file formats.
     
     Args:
-        file_path: Path to the file to extract text from
+        file_path: Path to the file
         
     Returns:
-        Extracted text content
+        Extracted text or error message
     """
     if not os.path.exists(file_path):
-        logger.warning(f"File not found: {file_path}")
-        return f"File not found: {file_path}"
-    
-    file_ext = os.path.splitext(file_path)[1].lower()
-    file_size = os.path.getsize(file_path)
-    
-    logger.info(f"Extracting text from {file_path} (type: {file_ext}, size: {file_size} bytes)")
-    
-    # Extract text based on file type
-    try:
-        if file_ext == '.pdf':
-            text = extract_text_from_pdf(file_path)
-            logger.info(f"PDF extraction complete, extracted {len(text)} characters")
-            return text
-        elif file_ext in ['.docx', '.doc']:
-            text = extract_text_from_docx(file_path)
-            logger.info(f"DOCX extraction complete, extracted {len(text)} characters")
-            return text
-        elif file_ext == '.txt':
-            text = extract_text_from_txt(file_path)
-            logger.info(f"TXT extraction complete, extracted {len(text)} characters")
-            return text
-        elif file_ext in ['.jpg', '.jpeg', '.png']:
-            logger.info(f"Image file detected, no text extraction performed")
-            return f"[Image file: {os.path.basename(file_path)}]"
-        else:
-            logger.warning(f"Unsupported file type: {file_ext}")
-            return f"Unsupported file type: {file_ext}"
-    except Exception as e:
-        error_msg = f"Error extracting text from {os.path.basename(file_path)}: {str(e)}"
+        error_msg = f"File does not exist: {file_path}"
         logger.error(error_msg)
-        logger.exception("Text extraction failed with exception")
         return error_msg
-
-
-def extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from a PDF file."""
-    text = ""
-    try:
-        logger.info(f"Opening PDF for text extraction: {file_path}")
-        doc = fitz.open(file_path)
         
-        logger.info(f"PDF has {doc.page_count} pages")
-        for page_num in range(doc.page_count):
-            page = doc[page_num]
-            logger.debug(f"Extracting text from page {page_num + 1}")
-            page_text = page.get_text()
-            text += page_text
-            text += f"\n--- Page {page_num + 1} ---\n"
-            
-            # Log the amount of text extracted from each page
-            logger.debug(f"Page {page_num + 1}: Extracted {len(page_text)} characters")
-            
-            # Check if page appears to be empty
-            if len(page_text.strip()) < 10:
-                logger.warning(f"Page {page_num + 1} appears to have very little text")
+    try:
+        # Get file size for logging
+        file_size_bytes = os.path.getsize(file_path)
+        file_size_mb = file_size_bytes / (1024 * 1024)
+        
+        # Get file extension and log file info
+        _, file_extension = os.path.splitext(file_path)
+        file_extension = file_extension.lower()
+        
+        logger.info(f"Extracting text from {file_path} ({file_size_mb:.2f} MB, {file_extension})")
+        
+        if file_extension == '.pdf':
+            return extract_text_from_pdf(file_path)
+        elif file_extension in ['.docx', '.doc']:
+            # Make sure python-docx is installed
+            try:
+                import docx
+                if file_extension == '.docx':
+                    return extract_text_from_docx(file_path)
+                else:
+                    # For older .doc files, log a warning about potential issues
+                    logger.warning(f"Processing .doc file which may have limited compatibility: {file_path}")
+                    try:
+                        # Try to use docx for .doc files (might work for some)
+                        return extract_text_from_docx(file_path)
+                    except Exception as doc_e:
+                        logger.error(f"Failed to extract .doc with docx: {str(doc_e)}")
+                        return f"Error: Failed to extract text from .doc file. Please convert it to .docx: {str(doc_e)}"
+            except ImportError:
+                logger.error("python-docx module not installed, cannot extract text from Word documents")
+                return "Error: python-docx module not installed, cannot extract text from Word documents"
+        elif file_extension == '.txt':
+            return extract_text_from_txt(file_path)
+        elif file_extension in ['.jpg', '.jpeg', '.png']:
+            # For image files, log a message about OCR capabilities
+            logger.info(f"Processing image file: {file_path}")
+            try:
+                # If pytesseract is installed, use OCR, otherwise return an error
+                import pytesseract
+                from PIL import Image
+                return extract_text_from_image(file_path)
+            except ImportError:
+                logger.warning("pytesseract not installed, cannot extract text from images")
+                return "Image file detected. OCR (text extraction from images) is not currently available."
+        else:
+            error_msg = f"Unsupported file type: {file_extension} for file {file_path}"
+            logger.warning(error_msg)
+            return error_msg
     except Exception as e:
-        logger.error(f"Error extracting text from PDF: {str(e)}")
-        logger.exception("PDF text extraction failed")
+        logger.error(f"Error extracting text from file {file_path}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"Error extracting text: {str(e)}"
+
+
+def extract_text_from_pdf(file_path):
+    """
+    Extract text from a PDF file with detailed error handling.
     
-    logger.info(f"PDF extraction completed with {len(text)} total characters")
-    return text
+    Args:
+        file_path: Path to the PDF file
+        
+    Returns:
+        Extracted text or error message
+    """
+    try:
+        import pdfplumber
+        
+        logger.info(f"Extracting text from PDF file: {file_path}")
+        
+        if not os.path.exists(file_path):
+            error_msg = f"PDF file not found: {file_path}"
+            logger.error(error_msg)
+            return error_msg
+            
+        # Check if file size is 0
+        if os.path.getsize(file_path) == 0:
+            error_msg = f"PDF file is empty (0 bytes): {file_path}"
+            logger.error(error_msg)
+            return error_msg
+        
+        # Try to open the PDF
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                # Check if PDF is empty
+                if len(pdf.pages) == 0:
+                    error_msg = "PDF has no pages"
+                    logger.warning(error_msg)
+                    return error_msg
+                
+                logger.info(f"PDF has {len(pdf.pages)} pages")
+                
+                extracted_text = []
+                for i, page in enumerate(pdf.pages):
+                    try:
+                        # Extract text from the page
+                        page_text = page.extract_text() or ""
+                        extracted_text.append(page_text)
+                        
+                        # Log progress periodically
+                        if i % 5 == 0 or i == len(pdf.pages) - 1:
+                            logger.info(f"Processed page {i+1}/{len(pdf.pages)}")
+                            
+                    except Exception as page_error:
+                        # Log error but continue with other pages
+                        logger.error(f"Error extracting text from page {i+1}: {str(page_error)}")
+                        extracted_text.append(f"[Error extracting text from page {i+1}: {str(page_error)}]")
+                
+                # Combine text from all pages
+                full_text = "\n\n".join(extracted_text)
+                
+                if not full_text.strip():
+                    logger.warning(f"No text was extracted from the PDF (possibly scanned or image-based): {file_path}")
+                    return f"[No text content could be extracted from the PDF, it may be scanned or image-based: {os.path.basename(file_path)}]"
+                
+                logger.info(f"Successfully extracted {len(full_text)} characters from PDF")
+                return full_text
+                
+        except Exception as pdf_error:
+            error_msg = f"Error opening PDF: {str(pdf_error)}"
+            logger.error(error_msg)
+            
+            # Check for common PDF errors
+            error_str = str(pdf_error).lower()
+            if "password" in error_str or "encrypted" in error_str or "decrypt" in error_str:
+                return "Error: This PDF is password-protected. Please remove the password and try again."
+            elif "stream" in error_str or "xref" in error_str or "startxref" in error_str:
+                return "Error: This PDF file appears to be corrupted. Please try repairing or recreating the file."
+            elif "pdf header" in error_str:
+                return "Error: Not a valid PDF file. Please check the file format."
+            else:
+                return f"Error opening PDF: {str(pdf_error)}"
+                
+    except ImportError:
+        logger.error("pdfplumber module not installed")
+        return "Error: pdfplumber module not installed, cannot extract text from PDF"
+    except Exception as e:
+        logger.error(f"Unexpected error in PDF extraction: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"Error extracting text from PDF: {str(e)}"
 
 
 def extract_text_from_docx(file_path: str) -> str:
-    """Extract text from a DOCX file."""
-    text = ""
-    try:
-        logger.info(f"Opening DOCX for text extraction: {file_path}")
-        doc = docx.Document(file_path)
-        paragraph_count = len(doc.paragraphs)
-        logger.info(f"DOCX has {paragraph_count} paragraphs")
-        
-        for i, para in enumerate(doc.paragraphs):
-            text += para.text + "\n"
-            
-            # Log every 50 paragraphs to avoid excessive logging
-            if i % 50 == 0 or i == paragraph_count - 1:
-                logger.debug(f"Processed {i+1}/{paragraph_count} paragraphs")
-                
-        logger.info(f"DOCX extraction completed with {len(text)} total characters")
-    except Exception as e:
-        logger.error(f"Error extracting text from DOCX: {str(e)}")
-        logger.exception("DOCX text extraction failed")
+    """
+    Extract text from a DOCX file.
     
-    return text
+    Args:
+        file_path: Path to the DOCX file
+        
+    Returns:
+        Extracted text
+    """
+    try:
+        logger.info(f"Extracting text from DOCX file: {file_path}")
+        
+        if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
+            return f"Error: File not found: {file_path}"
+        
+        try:
+            # Try to open the DOCX file
+            doc = docx.Document(file_path)
+            
+            # Log the number of paragraphs for debugging
+            paragraph_count = len(doc.paragraphs)
+            logger.info(f"DOCX contains {paragraph_count} paragraphs")
+            
+            # Extract text from each paragraph
+            all_text = []
+            for i, para in enumerate(doc.paragraphs):
+                text = para.text.strip()
+                if text:  # Only add non-empty paragraphs
+                    all_text.append(text)
+                
+                # Log progress periodically to avoid excessive logging
+                if i > 0 and i % 50 == 0:
+                    logger.info(f"Processed {i}/{paragraph_count} paragraphs")
+            
+            # Also extract text from tables which might contain important information
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            text = paragraph.text.strip()
+                            if text:
+                                all_text.append(text)
+            
+            # Join all text with newlines
+            result = '\n'.join(all_text)
+            logger.info(f"Successfully extracted {len(result)} characters from {file_path}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error extracting text from DOCX: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return f"Error extracting text from DOCX: {str(e)}"
+            
+    except ImportError as e:
+        logger.error(f"Python-docx library not installed: {str(e)}")
+        return "Error: Python-docx library not installed"
 
 
 def extract_text_from_txt(file_path: str) -> str:
@@ -235,43 +355,129 @@ def extract_text_from_txt(file_path: str) -> str:
         return ""
 
 
-def extract_text_from_files(file_paths: List[str]) -> str:
+def extract_text_from_files(file_paths, max_chars=None):
     """
-    Extract text from multiple files and combine into a single text.
+    Extract text from multiple files, handling different file types.
     
     Args:
-        file_paths: List of file paths to extract text from
+        file_paths: List of paths to files
+        max_chars: Optional maximum character limit for extracted text
         
     Returns:
-        Combined text from all files
+        Combined extracted text from all files
     """
-    combined_text = ""
-    total_files = len(file_paths)
-    successful_files = 0
-    
-    logger.info(f"Starting text extraction from {total_files} files")
-    
-    for i, file_path in enumerate(file_paths):
-        filename = os.path.basename(file_path)
-        logger.info(f"Processing file {i+1}/{total_files}: {filename}")
+    try:
+        logger.info(f"Extracting text from {len(file_paths)} files")
         
-        try:
-            file_text = extract_text_from_file(file_path)
-            
-            # Check if extraction was successful
-            if not file_text.startswith("Error"):
-                successful_files += 1
-            
-            combined_text += f"\n--- File: {filename} ---\n"
-            combined_text += file_text
-            combined_text += "\n\n"
-        except Exception as e:
-            error_msg = f"Failed to process {filename}: {str(e)}"
+        # Check if we received any files
+        if not file_paths or len(file_paths) == 0:
+            error_message = "No files provided for text extraction"
+            logger.error(error_message)
+            return error_message
+        
+        all_texts = []
+        results = {}
+        
+        for file_path in file_paths:
+            if not file_path or not os.path.exists(file_path):
+                error_msg = f"File not found or invalid path: {file_path}"
+                logger.error(error_msg)
+                results[file_path] = {"error": error_msg, "text": ""}
+                all_texts.append(f"[Error: File not found or invalid path: {file_path}]")
+                continue
+                
+            try:
+                # Extract text from the file
+                logger.info(f"Extracting text from file: {file_path}")
+                text = extract_text_from_file(file_path)
+                
+                if not text or text.strip() == "":
+                    error_msg = f"No text was extracted from: {file_path}"
+                    logger.warning(error_msg)
+                    text = f"[Empty content from file: {os.path.basename(file_path)}]"
+                
+                # Store the result
+                results[file_path] = {"text": text, "size": len(text)}
+                all_texts.append(text)
+                
+            except Exception as e:
+                error_msg = f"Error extracting text from {file_path}: {str(e)}"
+                logger.error(error_msg)
+                logger.exception("Extraction error details:")
+                results[file_path] = {"error": str(e), "text": ""}
+                all_texts.append(f"[Error extracting text from {os.path.basename(file_path)}: {str(e)}]")
+        
+        # Combine the extracted text
+        combined_text = "\n\n----------------\n\n".join(all_texts)
+        
+        # Check if any text was extracted
+        if not combined_text or combined_text.strip() == "":
+            error_msg = "No text was extracted from any of the provided files"
             logger.error(error_msg)
-            combined_text += f"\n--- File: {filename} ---\n"
-            combined_text += f"Error: {str(e)}\n\n"
+            return error_msg
+            
+        # Optionally limit the text length
+        if max_chars and len(combined_text) > max_chars:
+            logger.info(f"Limiting extracted text from {len(combined_text)} to {max_chars} characters")
+            combined_text = combined_text[:max_chars] + f"\n\n[Text truncated to {max_chars} characters]"
+            
+        logger.info(f"Successfully extracted {len(combined_text)} characters from {len(file_paths)} files")
+        
+        # Add a summary of the extraction results
+        extraction_summary = "\n\n--- Extraction Summary ---\n"
+        for path, result in results.items():
+            if "error" in result:
+                extraction_summary += f"\nFile {os.path.basename(path)}: ERROR - {result['error']}"
+            else:
+                extraction_summary += f"\nFile {os.path.basename(path)}: {result['size']} characters extracted"
+                
+        # Add the summary at the end, but ensure it's within limit if max_chars is set
+        if max_chars and len(combined_text) + len(extraction_summary) > max_chars:
+            # Skip the summary if it would exceed the limit
+            return combined_text
+        else:
+            return combined_text + extraction_summary
+            
+    except Exception as e:
+        logger.error(f"Error in extract_text_from_files: {str(e)}")
+        logger.exception("Full extraction error:")
+        return f"Error extracting text from files: {str(e)}"
+
+
+def extract_text_from_image(file_path):
+    """
+    Extract text from an image file using OCR.
     
-    logger.info(f"Text extraction complete. Successfully processed {successful_files}/{total_files} files")
-    logger.info(f"Combined text length: {len(combined_text)} characters")
-    
-    return combined_text
+    Args:
+        file_path: Path to the image file
+        
+    Returns:
+        Extracted text
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+        
+        logger.info(f"Extracting text from image file: {file_path}")
+        
+        # Open the image
+        image = Image.open(file_path)
+        
+        # Perform OCR
+        text = pytesseract.image_to_string(image)
+        
+        if not text or text.strip() == "":
+            logger.warning(f"No text extracted from image: {file_path}")
+            return f"[No text detected in image: {os.path.basename(file_path)}]"
+        
+        logger.info(f"Successfully extracted {len(text)} characters from image")
+        return text
+        
+    except ImportError as e:
+        logger.error(f"OCR libraries not installed: {str(e)}")
+        return "Error: OCR libraries (pytesseract, PIL) not installed"
+    except Exception as e:
+        logger.error(f"Error extracting text from image: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return f"Error extracting text from image: {str(e)}"

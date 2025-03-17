@@ -165,6 +165,7 @@ async def upload_documents(
             )
         
         uploaded_files = []
+        file_processing_log = []
         
         # Generate a unique report ID (UUID for external reference)
         report_uuid = str(uuid.uuid4())
@@ -182,14 +183,18 @@ async def upload_documents(
         for file in files:
             try:
                 print(f"Processing file: {file.filename}, size: {file.size}, content_type: {file.content_type}")
+                file_processing_log.append(f"Processing file: {file.filename}, size: {file.size}, content_type: {file.content_type}")
                 
                 # Check file type
+                file_extension = os.path.splitext(file.filename)[1].lower()
                 if not file.filename.lower().endswith(
                     (".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png")
                 ):
+                    error_msg = f"Unsupported file type: {file_extension}. Only PDF, Word, text files and images are accepted"
+                    file_processing_log.append(f"ERROR: {error_msg}")
                     raise HTTPException(
                         status_code=400,
-                        detail="Only PDF, Word, text files and images are accepted",
+                        detail=error_msg,
                     )
                 
                 # Individual file size check is no longer needed since we check total size above
@@ -197,9 +202,11 @@ async def upload_documents(
                 individual_max = int(max_total_size * 0.8)  # 80% of max allowed size
                 if file.size > individual_max:
                     max_size_mb = individual_max / (1024 * 1024)
+                    error_msg = f"Individual file size ({file.size/(1024*1024):.2f} MB) exceeds {max_size_mb:.1f} MB limit"
+                    file_processing_log.append(f"ERROR: {error_msg}")
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Individual file size exceeds {max_size_mb:.1f} MB limit"
+                        detail=error_msg
                     )
 
                 # Create unique filename
@@ -213,13 +220,34 @@ async def upload_documents(
 
                 # Save file locally
                 print(f"Saving file to: {file_path}")
-                file_content = await file.read()  # Read the file content
+                file_processing_log.append(f"Saving file to: {file_path}")
                 
-                with open(file_path, "wb") as buffer:
-                    buffer.write(file_content)  # Write the content to the file
-                
-                # Reset the file cursor for potential future read operations
-                await file.seek(0)
+                try:
+                    file_content = await file.read()  # Read the file content
+                    
+                    with open(file_path, "wb") as buffer:
+                        buffer.write(file_content)  # Write the content to the file
+                    
+                    # Reset the file cursor for potential future read operations
+                    await file.seek(0)
+                    
+                    # Check if file was saved correctly
+                    if os.path.exists(file_path):
+                        saved_size = os.path.getsize(file_path)
+                        if saved_size == 0:
+                            file_processing_log.append(f"WARNING: File was saved but is empty (0 bytes): {file_path}")
+                        elif saved_size != file.size:
+                            file_processing_log.append(f"WARNING: File size mismatch. Original: {file.size}, Saved: {saved_size}")
+                        else:
+                            file_processing_log.append(f"Successfully saved file: {file_path} ({saved_size} bytes)")
+                    else:
+                        file_processing_log.append(f"ERROR: File was not saved successfully: {file_path}")
+                        
+                except Exception as save_error:
+                    error_msg = f"Error saving file {file.filename}: {str(save_error)}"
+                    print(error_msg)
+                    file_processing_log.append(f"ERROR: {error_msg}")
+                    raise Exception(error_msg)
                     
                 # Try to upload to Supabase Storage
                 try:
@@ -229,19 +257,29 @@ async def upload_documents(
                         file_data = f.read()
                         
                     print(f"Uploading to Supabase: {storage_path}")
+                    file_processing_log.append(f"Uploading to Supabase: {storage_path}")
+                    
+                    # Determine correct content type
+                    content_type = file.content_type
+                    if not content_type or content_type == "application/octet-stream":
+                        # Try to infer content type from extension
+                        content_type = mimetypes.guess_type(file_path)[0] or f"application/{ext.replace('.', '')}"
+                    
                     response = supabase.storage.from_("reports").upload(
                         path=storage_path,
                         file=file_data,
-                        file_options={"content-type": f"application/{ext.replace('.', '')}" if ext != '.png' else "image/png"}
+                        file_options={"content-type": content_type}
                     )
                     
                     # Get public URL
                     public_url = supabase.storage.from_("reports").get_public_url(storage_path)
                     supabase_urls.append(public_url)
                     print(f"Uploaded to Supabase, public URL: {public_url}")
+                    file_processing_log.append(f"Successfully uploaded to Supabase: {public_url}")
                     
                 except Exception as e:
                     print(f"Error uploading to Supabase (continuing with local file): {str(e)}")
+                    file_processing_log.append(f"WARNING: Error uploading to Supabase: {str(e)}")
                     public_url = None
                     storage_path = None
                     
@@ -257,6 +295,10 @@ async def upload_documents(
                 )
             except Exception as file_error:
                 print(f"Error processing file {file.filename}: {str(file_error)}")
+                file_processing_log.append(f"ERROR: Error processing file {file.filename}: {str(file_error)}")
+                import traceback
+                trace = traceback.format_exc()
+                file_processing_log.append(f"Traceback: {trace}")
                 raise HTTPException(
                     status_code=400, 
                     detail=f"Error processing file {file.filename}: {str(file_error)}"
@@ -274,7 +316,8 @@ async def upload_documents(
             "created_at": datetime.datetime.now().isoformat(),
             "status": "uploaded",
             "title": f"Report #{report_uuid[:8]}",  # Default title using part of the UUID
-            "content": ""  # Initialize empty content
+            "content": "",  # Initialize empty content
+            "processing_log": file_processing_log  # Add processing log for debugging
         }
         
         with open(metadata_path, "w") as f:
@@ -291,7 +334,9 @@ async def upload_documents(
                 "template_id": template_id,
                 "title": metadata["title"],
                 "content": "",
-                "is_finalized": False
+                "is_finalized": False,
+                "file_count": len(uploaded_files),
+                "report_uuid": report_uuid  # Store the UUID for reference
             }
             response = supabase.table("reports").insert(db_metadata).execute()
             print("Saved report metadata to Supabase:", response)
@@ -311,23 +356,31 @@ async def upload_documents(
                     "files": uploaded_files,
                     "report_id": report_uuid,  # Keep returning the UUID for backward compatibility
                     "db_id": db_id,  # Also return the database ID
-                    "supabase_urls": supabase_urls if supabase_urls else None
+                    "supabase_urls": supabase_urls if supabase_urls else None,
+                    "processing_log": file_processing_log
                 }
             
         except Exception as e:
             print(f"Error saving report metadata to Supabase (continuing with local file): {str(e)}")
+            file_processing_log.append(f"WARNING: Error saving metadata to Supabase: {str(e)}")
         
         return {
             "message": f"Successfully uploaded {len(uploaded_files)} files",
             "files": uploaded_files,
             "report_id": report_uuid,
-            "supabase_urls": supabase_urls if supabase_urls else None
+            "supabase_urls": supabase_urls if supabase_urls else None,
+            "processing_log": file_processing_log
         }
     except Exception as e:
         print(f"Error in upload_documents: {str(e)}")
         import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        trace = traceback.format_exc()
+        print(trace)
+        # Include the traceback in the error response for better debugging
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Upload failed: {str(e)}\nTraceback: {trace}"
+        )
 
 
 @router.post("/document", response_model=dict)
