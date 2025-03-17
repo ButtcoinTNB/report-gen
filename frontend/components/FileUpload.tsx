@@ -28,6 +28,11 @@ interface FileUploadProps {
   onUploadSuccess: (reportId: number) => void;
 }
 
+interface UploadResponse {
+  report_id: number;
+  [key: string]: any;
+}
+
 const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
@@ -125,7 +130,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
     try {
       // Pass the files array directly to the uploadFile function
       // instead of manually creating a FormData object
-      const response = await uploadFile(files, templateId);
+      const response = await uploadFile(files, templateId) as UploadResponse;
       console.log("Upload response:", response);
       
       // Check for success
@@ -137,7 +142,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       }
     } catch (err) {
       console.error("Error uploading files:", err);
-      setError("Failed to upload files. Please try again.");
+      setError(err instanceof Error ? err.message : "Failed to upload files. Please try again.");
     } finally {
       setLoading(false);
     }

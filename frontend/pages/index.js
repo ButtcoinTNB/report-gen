@@ -9,7 +9,9 @@ import {
   Step, 
   StepLabel,
   TextField,
-  CircularProgress
+  CircularProgress,
+  Alert,
+  Snackbar
 } from '@mui/material';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import Navbar from '../components/Navbar';
@@ -24,6 +26,8 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(null);
+  const [error, setError] = useState(null);
+  const [showError, setShowError] = useState(false);
   
   // Simplified steps
   const steps = ['Upload Documents', 'Edit Report', 'Download PDF'];
@@ -33,6 +37,7 @@ export default function Home() {
     console.log('Upload success with report ID:', id);
     setReportId(id);
     setIsGenerating(true);
+    setError(null);
     
     try {
       // Auto-generate report
@@ -48,9 +53,10 @@ export default function Home() {
         console.error('Missing content in result:', result);
         throw new Error('Failed to generate report content');
       }
-    } catch (error) {
-      console.error('Error generating report:', error);
-      alert('There was an error generating your report. Please try again.');
+    } catch (err) {
+      console.error('Error generating report:', err);
+      setError(err instanceof Error ? err.message : 'There was an error generating your report. Please try again.');
+      setShowError(true);
     } finally {
       setIsGenerating(false);
     }
@@ -59,11 +65,14 @@ export default function Home() {
   // Handler for finalizing and downloading the report
   const handleFinalizeReport = async () => {
     if (!reportId) {
-      alert('Nessun ID di report trovato. Per favore carica i documenti e genera un report prima.');
+      setError('No report ID found. Please upload documents and generate a report first.');
+      setShowError(true);
       return;
     }
     
     setIsDownloading(true);
+    setError(null);
+    
     try {
       // First finalize the report with edited text
       console.log('Finalizing report with ID:', reportId);
@@ -104,18 +113,22 @@ export default function Home() {
       } else {
         throw new Error('Failed to get download URL');
       }
-    } catch (error) {
-      console.error('Error in report finalization/download process:', error);
+    } catch (err) {
+      console.error('Error in report finalization/download process:', err);
       
-      let errorMessage = 'There was an error downloading your report. Please try again.';
-      if (error.message) {
-        errorMessage += ' Error details: ' + error.message;
-      }
+      const errorMessage = err instanceof Error 
+        ? `There was an error downloading your report: ${err.message}`
+        : 'There was an error downloading your report. Please try again.';
       
-      alert(errorMessage);
+      setError(errorMessage);
+      setShowError(true);
     } finally {
       setIsDownloading(false);
     }
+  };
+  
+  const handleCloseError = () => {
+    setShowError(false);
   };
 
   // Handler for downloading the finalized PDF
@@ -304,6 +317,15 @@ export default function Home() {
           </Paper>
         )}
       </Container>
+      <Snackbar
+        open={showError}
+        autoHideDuration={6000}
+        onClose={handleCloseError}
+      >
+        <Alert onClose={handleCloseError} severity="error">
+          {error}
+        </Alert>
+      </Snackbar>
     </div>
   );
 } 

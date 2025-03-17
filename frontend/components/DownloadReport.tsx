@@ -7,6 +7,7 @@ import {
   CircularProgress,
   Alert,
   Divider,
+  Grid,
   Stack
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -41,7 +42,7 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
       // Success is handled by the downloadPDF function (it triggers the browser download)
     } catch (err) {
       console.error('Error downloading PDF report:', err);
-      setError('Failed to download the PDF report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to download the PDF report. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -65,7 +66,7 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
       // Success is handled by the downloadDOCX function (it triggers the browser download)
     } catch (err) {
       console.error('Error downloading DOCX report:', err);
-      setError('Failed to download the DOCX report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to download the DOCX report. Please try again.');
     } finally {
       setDocxLoading(false);
     }

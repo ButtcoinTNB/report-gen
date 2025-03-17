@@ -7,7 +7,8 @@ import {
   TextField,
   Divider,
   Stack,
-  CircularProgress
+  CircularProgress,
+  Alert
 } from '@mui/material';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import EditIcon from '@mui/icons-material/Edit';
@@ -30,6 +31,7 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
   const [editing, setEditing] = useState(false);
   const [editedText, setEditedText] = useState(reportText || '');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Update editedText when reportText changes (like when a new report is generated)
   React.useEffect(() => {
@@ -51,11 +53,14 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
     if (!reportId) return;
     
     setLoading(true);
+    setError(null);
+    
     try {
       await formatReport(reportId, true); // true = preview mode
       onPreviewReady();
-    } catch (error) {
-      console.error('Error generating preview:', error);
+    } catch (err) {
+      console.error('Error generating preview:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate preview. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -65,11 +70,14 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
     if (!reportId) return;
     
     setLoading(true);
+    setError(null);
+    
     try {
       await formatReport(reportId, false); // false = final mode
       onPreviewReady();
-    } catch (error) {
-      console.error('Error finalizing report:', error);
+    } catch (err) {
+      console.error('Error finalizing report:', err);
+      setError(err instanceof Error ? err.message : 'Failed to finalize report. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -134,6 +142,12 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
       )}
       
       <Divider sx={{ my: 2 }} />
+      
+      {error && (
+        <Alert severity="error" sx={{ mt: 2, mb: 2 }}>
+          {error}
+        </Alert>
+      )}
       
       <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
         <Button

@@ -59,13 +59,13 @@ const EditPage = () => {
       setIsLoading(true);
       try {
         // Call the API client function to fetch the report
-        const reportData = await getReport(Number(id));
+        const reportData = await getReport(Number(id)) as Report;
         setReport(reportData);
         setTitle(reportData.title);
         setContent(reportData.content);
       } catch (err) {
         console.error('Error fetching report:', err);
-        setError('Failed to load report. Please try again.');
+        setError(err instanceof Error ? err.message : 'Failed to load report. Please try again.');
       } finally {
         setIsLoading(false);
       }
@@ -88,13 +88,13 @@ const EditPage = () => {
         title,
         content,
         is_finalized: false
-      });
+      }) as Report;
       
       setReport(updatedReport);
       setSuccess('Report saved successfully!');
     } catch (err) {
       console.error('Error saving report:', err);
-      setError('Failed to save report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to save report. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -109,7 +109,7 @@ const EditPage = () => {
     
     try {
       // Call the API client function for AI refinement
-      const refinedReport = await refineReport(report.id, aiInstructions);
+      const refinedReport = await refineReport(report.id, aiInstructions) as Report;
       
       setReport(refinedReport);
       setContent(refinedReport.content);
@@ -117,7 +117,7 @@ const EditPage = () => {
       setAiInstructions(''); // Clear the instructions field
     } catch (err) {
       console.error('Error refining report:', err);
-      setError('Failed to refine report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to refine report. Please try again.');
     } finally {
       setIsRefining(false);
     }
@@ -145,7 +145,7 @@ const EditPage = () => {
       }, 1500);
     } catch (err) {
       console.error('Error finalizing report:', err);
-      setError('Failed to finalize report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to finalize report. Please try again.');
     } finally {
       setIsLoading(false);
     }
