@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Box, 
   Button, 
@@ -10,10 +10,39 @@ import {
   Stepper,
   Step,
   StepLabel,
-  LinearProgress
+  LinearProgress,
+  keyframes,
+  Fade
 } from '@mui/material';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import DescriptionIcon from '@mui/icons-material/Description';
+import SchemaIcon from '@mui/icons-material/Schema';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { generateReport } from '../api/generate'; // Import the API function
+
+// Define a subtle pulsing animation for the progress bar
+const pulse = keyframes`
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 1;
+  }
+`;
+
+// Define a shimmer animation for the loading button
+const shimmer = keyframes`
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+`;
 
 // Define interfaces for the types
 interface ReportGeneratorProps {
@@ -34,10 +63,10 @@ interface ReportResponse {
 
 // Define the processing steps
 const PROCESSING_STEPS = [
-  { label: "Extracting content 📄", value: 30 },
-  { label: "Understanding document structure 📊", value: 60 },
-  { label: "Generating report with AI 🤖", value: 90 },
-  { label: "Done! Reviewing your report... ✅", value: 100 }
+  { label: "Extracting content 📄", value: 30, icon: <DescriptionIcon /> },
+  { label: "Understanding document structure 📊", value: 60, icon: <SchemaIcon /> },
+  { label: "Generating report with AI 🤖", value: 90, icon: <SmartToyIcon /> },
+  { label: "Done! Reviewing your report... ✅", value: 100, icon: <CheckCircleIcon /> }
 ];
 
 const ReportGenerator: React.FC<ReportGeneratorProps> = ({ 
@@ -50,6 +79,10 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
   const [progress, setProgress] = useState(0);
   const [processingTime, setProcessingTime] = useState(0);
   const [showLongProcessingMessage, setShowLongProcessingMessage] = useState(false);
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [displayStep, setDisplayStep] = useState(0);
+  const [stepTransition, setStepTransition] = useState(false);
+  const actualProgressRef = useRef(0);
 
   // Effect to handle processing time and long processing message
   useEffect(() => {
@@ -97,6 +130,38 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
     }
   }, [loading, currentStep]);
 
+  // Effect to animate the progress counter smoothly
+  useEffect(() => {
+    actualProgressRef.current = progress;
+    
+    const animateProgress = () => {
+      setDisplayProgress(prev => {
+        if (prev < actualProgressRef.current) {
+          return prev + 1;
+        }
+        return prev;
+      });
+    };
+    
+    const progressAnimationInterval = setInterval(animateProgress, 50);
+    
+    return () => {
+      clearInterval(progressAnimationInterval);
+    };
+  }, [progress]);
+
+  // Effect to handle step transitions with animation
+  useEffect(() => {
+    if (currentStep !== displayStep) {
+      setStepTransition(true);
+      const timer = setTimeout(() => {
+        setDisplayStep(currentStep);
+        setStepTransition(false);
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [currentStep, displayStep]);
+
   const handleGenerateReport = async () => {
     if (!reportId) {
       setError('No document has been uploaded');
@@ -107,9 +172,16 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
     setLoading(true);
     setError(null);
     setCurrentStep(0);
-    setProgress(0);
+    setDisplayStep(0);
+    setProgress(5); // Start with a small progress indicator immediately
+    setDisplayProgress(5);
     setProcessingTime(0);
     setShowLongProcessingMessage(false);
+    setStepTransition(false);
+
+    // Add a small artificial delay with increasing progress to provide immediate feedback
+    setTimeout(() => setProgress(10), 300);
+    setTimeout(() => setProgress(20), 600);
 
     try {
       // Use the API function with progress callback
@@ -185,39 +257,134 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         size="large"
         onClick={handleGenerateReport}
         disabled={loading || !reportId}
-        startIcon={!loading && <AutoAwesomeIcon />}
+        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <AutoAwesomeIcon />}
         fullWidth
-        sx={{ mb: 2 }}
+        sx={{ 
+          mb: 2,
+          position: 'relative',
+          '&:disabled': {
+            bgcolor: loading ? 'secondary.main' : 'action.disabledBackground',
+            color: loading ? 'secondary.contrastText' : 'action.disabled',
+            opacity: loading ? 0.8 : 0.7
+          },
+          transition: 'all 0.3s ease',
+          overflow: 'hidden',
+          ...(loading && {
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)',
+              backgroundSize: '200% 100%',
+              animation: `${shimmer} 2s infinite`,
+              zIndex: 0
+            }
+          })
+        }}
       >
-        {loading ? 'Processing...' : 'Generate AI Report'}
+        {loading ? 'Generating Report...' : 'Generate AI Report'}
+        {loading && (
+          <Box 
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.05)',
+              borderRadius: 'inherit'
+            }}
+          />
+        )}
       </Button>
       
       {loading && (
         <Box sx={{ mt: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <Typography variant="body2" sx={{ flexGrow: 1 }}>
-              {PROCESSING_STEPS[currentStep].label}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {progress}%
-            </Typography>
-          </Box>
+          <Stepper activeStep={displayStep} alternativeLabel sx={{ mb: 3 }}>
+            {PROCESSING_STEPS.map((step, index) => (
+              <Step key={index} completed={index < displayStep}>
+                <StepLabel StepIconProps={{ 
+                  icon: step.icon || index + 1,
+                  sx: { 
+                    transition: 'transform 0.3s ease, color 0.3s ease',
+                    ...(displayStep === index && {
+                      transform: 'scale(1.2)',
+                      color: 'secondary.main'
+                    })
+                  }
+                }}>
+                  {step.label.split(' ')[0]}
+                </StepLabel>
+              </Step>
+            ))}
+          </Stepper>
           
-          <LinearProgress 
-            variant="determinate" 
-            value={progress} 
-            sx={{ height: 8, borderRadius: 4, mb: 2 }} 
-          />
-          
-          <Typography variant="body2" color="text.secondary" align="center">
-            {processingTime < 20 ? (
-              `Processing time: ${processingTime} seconds (typically takes 10-15 seconds)`
-            ) : showLongProcessingMessage ? (
-              "Still working on it... AI is carefully reviewing your documents."
-            ) : (
-              `Processing time: ${processingTime} seconds`
-            )}
-          </Typography>
+          <Fade in={!stepTransition} timeout={400}>
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Typography variant="body2" sx={{ 
+                  flexGrow: 1, 
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1
+                }}>
+                  <Box component="span" sx={{ 
+                    display: 'inline-flex',
+                    bgcolor: 'secondary.light',
+                    color: 'secondary.contrastText',
+                    p: 0.5,
+                    borderRadius: 1,
+                    fontSize: '1rem'
+                  }}>
+                    {PROCESSING_STEPS[displayStep].icon}
+                  </Box>
+                  {PROCESSING_STEPS[displayStep].label}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{
+                  minWidth: '36px',
+                  textAlign: 'right'
+                }}>
+                  {displayProgress}%
+                </Typography>
+              </Box>
+              
+              <LinearProgress 
+                variant="determinate" 
+                value={progress} 
+                sx={{ 
+                  height: 8, 
+                  borderRadius: 4, 
+                  mb: 2,
+                  animation: `${pulse} 1.5s ease-in-out infinite`,
+                  '& .MuiLinearProgress-bar': {
+                    transition: 'transform 0.3s ease'
+                  } 
+                }} 
+                color="secondary"
+              />
+              
+              <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
+                {processingTime < 20 ? (
+                  `Processing time: ${processingTime} seconds (typically takes 10-15 seconds)`
+                ) : showLongProcessingMessage ? (
+                  <Fade in={true}>
+                    <Box sx={{ fontWeight: 'medium', color: 'warning.main' }}>
+                      Still working on it... AI is carefully reviewing your documents.
+                    </Box>
+                  </Fade>
+                ) : (
+                  `Processing time: ${processingTime} seconds`
+                )}
+              </Typography>
+            </Box>
+          </Fade>
         </Box>
       )}
       

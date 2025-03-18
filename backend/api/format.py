@@ -13,6 +13,10 @@ from supabase import create_client, Client
 from utils.id_mapper import ensure_id_is_int
 import json
 import datetime
+import hashlib
+
+# Export key functions for other modules
+__all__ = ['format_report_as_pdf', 'get_reference_metadata', 'update_report_file_path', 'format_final']
 
 router = APIRouter()
 
@@ -258,7 +262,6 @@ async def format_final(data: Dict = Body(...)):
             print(f"Working with UUID report_id directly: {report_id}")
             try:
                 # Use a hash of the UUID as an integer ID for filename purposes
-                import hashlib
                 db_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
             except Exception:
                 # Last resort fallback
@@ -360,20 +363,26 @@ This error occurs when the system cannot locate the report content in the databa
                     try:
                         with open(metadata_path, "r") as f:
                             metadata = json.load(f)
-                    except:
-                        pass
+                    except Exception as read_err:
+                        print(f"Error reading metadata file: {str(read_err)}")
+                        # Initialize with empty dict if reading fails
+                        metadata = {}
                 
+                # Always save both the path and content in metadata
                 metadata["pdf_path"] = absolute_pdf_path
                 metadata["is_finalized"] = True
+                metadata["report_content"] = report_content  # Save the content directly in metadata
+                metadata["last_updated"] = datetime.datetime.now().isoformat()
                 
                 with open(metadata_path, "w") as f:
                     json.dump(metadata, f)
+                print(f"Saved report metadata with content to: {metadata_path}")
                     
-                # Also save content.txt if we have content
-                if report_content and "report_content" not in metadata:
-                    content_path = os.path.join(report_dir, "content.txt")
-                    with open(content_path, "w") as f:
-                        f.write(report_content)
+                # Always save content.txt regardless of metadata status
+                content_path = os.path.join(report_dir, "content.txt")
+                with open(content_path, "w") as f:
+                    f.write(report_content)
+                print(f"Saved report content to: {content_path}")
                         
             except Exception as e:
                 print(f"Error updating metadata for UUID {report_id}: {str(e)}")

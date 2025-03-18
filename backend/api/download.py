@@ -7,8 +7,96 @@ from supabase import create_client, Client
 from config import settings
 from utils.id_mapper import ensure_id_is_int
 import traceback
+import hashlib
+from datetime import datetime
+
+# Import format functions to avoid circular imports later
+try:
+    from api.format import format_final, update_report_file_path, get_reference_metadata
+    from services.pdf_formatter import format_report_as_pdf
+except ImportError:
+    # This allows for cleaner error handling if imports fail
+    print("Warning: Could not import formatting functions, will import when needed")
 
 router = APIRouter()
+
+
+def get_report_content(report_id: str):
+    """
+    Retrieve the actual report content (markdown text) from any available source.
+    This is a more thorough content retrieval function that checks all possible storage locations.
+    
+    Args:
+        report_id: The ID of the report (either UUID or integer)
+        
+    Returns:
+        The report content as text, or None if not found
+    """
+    print(f"Attempting to retrieve content for report ID: {report_id}")
+    report_content = None
+    
+    # First, check if this is a UUID with a directory in uploads
+    is_uuid = False
+    if "-" in report_id:
+        is_uuid = True
+        report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+        
+        if os.path.exists(report_dir) and os.path.isdir(report_dir):
+            # Try metadata.json first (our most reliable source after changes)
+            metadata_path = os.path.join(report_dir, "metadata.json")
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, "r") as f:
+                        metadata = json.load(f)
+                        if "report_content" in metadata:
+                            report_content = metadata["report_content"]
+                            print(f"Successfully retrieved content from metadata.json for {report_id}")
+                            return report_content
+                except Exception as e:
+                    print(f"Error reading metadata.json: {str(e)}")
+            
+            # Try content.txt next
+            content_path = os.path.join(report_dir, "content.txt")
+            if os.path.exists(content_path):
+                try:
+                    with open(content_path, "r") as f:
+                        report_content = f.read()
+                        print(f"Successfully retrieved content from content.txt for {report_id}")
+                        return report_content
+                except Exception as e:
+                    print(f"Error reading content.txt: {str(e)}")
+    
+    # If not found locally, try Supabase
+    try:
+        # Try to convert to integer for database lookup
+        try:
+            db_id = ensure_id_is_int(report_id)
+        except ValueError:
+            db_id = None
+        
+        if db_id is not None:
+            # Initialize Supabase client
+            supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+            
+            # Try to find by ID first - specifically select content
+            print(f"Looking for report content in database with ID: {db_id}")
+            response = supabase.table("reports").select("content").eq("id", db_id).execute()
+            
+            # If not found by ID and it's a UUID format, try searching by UUID too
+            if (not response.data or not response.data[0]) and is_uuid:
+                print(f"Report content not found by ID {db_id}, trying UUID: {report_id}")
+                response = supabase.table("reports").select("content").eq("uuid", report_id).execute()
+            
+            if response.data and response.data[0] and "content" in response.data[0]:
+                report_content = response.data[0]["content"]
+                print(f"Successfully retrieved content from database for {report_id}")
+                return report_content
+    except Exception as e:
+        print(f"Error retrieving content from database: {str(e)}")
+    
+    # If we still don't have content, return None
+    print(f"Could not find content for report {report_id} in any location")
+    return None
 
 
 def fetch_report_path_from_supabase(report_id: str):
@@ -195,15 +283,64 @@ async def download_report(report_id: str):
         file_path = fetch_report_path_from_supabase(report_id)
         
         if not file_path:
-            print(f"No file path found in database for report ID: {report_id}, generating error PDF")
-            # Generate an error PDF that will be visible and helpful to the user
-            from api.format import format_final
-            error_response = await format_final({"report_id": report_id})
-            if "file_path" in error_response and os.path.exists(error_response["file_path"]):
-                print(f"Using error PDF: {error_response['file_path']}")
-                file_path = error_response["file_path"]
+            print(f"No file path found in database for report ID: {report_id}, attempting to regenerate PDF")
+            
+            # First try to get the report content directly - this is our new function
+            report_content = get_report_content(report_id)
+            
+            if report_content:
+                print(f"Successfully retrieved report content, generating PDF")
+                # Generate the PDF with the content we found
+                from api.format import format_report_as_pdf, get_reference_metadata
+                
+                # Create a hash-based filename
+                try:
+                    db_id = ensure_id_is_int(report_id)
+                except ValueError:
+                    # Use a hash of the UUID as an integer ID for filename purposes
+                    db_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
+                
+                # Get metadata for formatting
+                reference_metadata = get_reference_metadata()
+                if f"Report #{db_id}" not in reference_metadata["headers"]:
+                    reference_metadata["headers"].append(f"Report #{db_id}")
+                
+                # Generate the PDF
+                pdf_filename = f"report_{db_id}.pdf"
+                pdf_path = await format_report_as_pdf(
+                    report_content,
+                    reference_metadata,
+                    is_preview=False,
+                    filename=pdf_filename
+                )
+                
+                # Update the file path in the database
+                try:
+                    update_report_file_path(report_id, pdf_path)
+                except Exception as update_e:
+                    print(f"Warning: Failed to update file path in database: {str(update_e)}")
+                
+                # Use the newly generated PDF
+                if os.path.exists(pdf_path):
+                    file_path = pdf_path
+                else:
+                    # Fall back to error PDF if generation failed
+                    from api.format import format_final
+                    error_response = await format_final({"report_id": report_id})
+                    if "file_path" in error_response and os.path.exists(error_response["file_path"]):
+                        print(f"Using error PDF: {error_response['file_path']}")
+                        file_path = error_response["file_path"]
+                    else:
+                        raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
             else:
-                raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
+                # If we couldn't find content, fall back to error PDF
+                from api.format import format_final
+                error_response = await format_final({"report_id": report_id})
+                if "file_path" in error_response and os.path.exists(error_response["file_path"]):
+                    print(f"Using error PDF: {error_response['file_path']}")
+                    file_path = error_response["file_path"]
+                else:
+                    raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
             
         if not os.path.exists(file_path):
             print(f"File path from database doesn't exist: {file_path}")
@@ -213,18 +350,58 @@ async def download_report(report_id: str):
                 print(f"Using fallback path: {fallback_path}")
                 file_path = fallback_path
             else:
-                # Generate an error PDF that will be visible and helpful to the user
-                from api.format import format_final
-                error_response = await format_final({"report_id": report_id})
-                if "file_path" in error_response and os.path.exists(error_response["file_path"]):
-                    print(f"Using error PDF: {error_response['file_path']}")
-                    file_path = error_response["file_path"]
+                # Try to regenerate the PDF using content we can find
+                report_content = get_report_content(report_id)
+                
+                if report_content:
+                    print(f"Retrieved content to regenerate missing PDF")
+                    from api.format import format_report_as_pdf, get_reference_metadata
+                    
+                    # Create a hash-based filename
+                    try:
+                        db_id = ensure_id_is_int(report_id)
+                    except ValueError:
+                        # Use a hash of the UUID as an integer ID for filename purposes
+                        db_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
+                    
+                    # Get metadata for formatting
+                    reference_metadata = get_reference_metadata()
+                    if f"Report #{db_id}" not in reference_metadata["headers"]:
+                        reference_metadata["headers"].append(f"Report #{db_id}")
+                    
+                    # Generate the PDF
+                    pdf_filename = f"report_{db_id}_regenerated.pdf"
+                    pdf_path = await format_report_as_pdf(
+                        report_content,
+                        reference_metadata,
+                        is_preview=False,
+                        filename=pdf_filename
+                    )
+                    
+                    if os.path.exists(pdf_path):
+                        file_path = pdf_path
+                    else:
+                        # Generate an error PDF that will be visible and helpful to the user
+                        from api.format import format_final
+                        error_response = await format_final({"report_id": report_id})
+                        if "file_path" in error_response and os.path.exists(error_response["file_path"]):
+                            print(f"Using error PDF: {error_response['file_path']}")
+                            file_path = error_response["file_path"]
+                        else:
+                            raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
                 else:
-                    raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
+                    # Generate an error PDF that will be visible and helpful to the user
+                    from api.format import format_final
+                    error_response = await format_final({"report_id": report_id})
+                    if "file_path" in error_response and os.path.exists(error_response["file_path"]):
+                        print(f"Using error PDF: {error_response['file_path']}")
+                        file_path = error_response["file_path"]
+                    else:
+                        raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
             
         # Return the PDF file as an attachment
         filename = os.path.basename(file_path)
-        print(f"Returning file from database path: {file_path}")
+        print(f"Returning file from path: {file_path}")
         return FileResponse(
             file_path,
             media_type="application/pdf",
@@ -235,8 +412,43 @@ async def download_report(report_id: str):
     except HTTPException:
         # If database lookup fails for a UUID, make one more attempt to find any report
         if is_uuid:
-            # Generate a hash-based filename as a last resort
-            import hashlib
+            # Try to get the report content directly
+            report_content = get_report_content(report_id)
+            
+            if report_content:
+                print("Found report content, generating PDF")
+                # Generate the PDF with the content we found
+                from api.format import format_report_as_pdf, get_reference_metadata
+                
+                # Create a hash-based filename
+                hash_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
+                
+                # Get metadata for formatting
+                reference_metadata = get_reference_metadata()
+                reference_metadata["headers"].append(f"Report #{hash_id}")
+                
+                # Generate the PDF as a last resort
+                pdf_filename = f"report_{hash_id}_recovered.pdf"
+                try:
+                    pdf_path = await format_report_as_pdf(
+                        report_content,
+                        reference_metadata,
+                        is_preview=False,
+                        filename=pdf_filename
+                    )
+                    
+                    if os.path.exists(pdf_path):
+                        filename = os.path.basename(pdf_path)
+                        return FileResponse(
+                            pdf_path,
+                            media_type="application/pdf",
+                            filename=filename,
+                            headers={"Content-Disposition": f"attachment; filename={filename}"}
+                        )
+                except Exception as pdf_e:
+                    print(f"Error generating recovered PDF: {str(pdf_e)}")
+            
+            # Generate a hash-based filename as a last resort for finding existing files
             hash_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
             last_resort_filename = f"report_{hash_id}.pdf"
             

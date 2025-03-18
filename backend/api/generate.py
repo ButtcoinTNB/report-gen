@@ -1,25 +1,32 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 import requests
 import os
 import json
 from config import settings
 from typing import Dict, Any, List, Optional
 from services.pdf_extractor import extract_text_from_files, extract_text_from_file
-from services.ai_service import generate_case_summary
+from services.ai_service import generate_case_summary, generate_report_text, extract_template_variables, refine_report_text
+from services.docx_formatter import format_report_as_docx
 from utils.id_mapper import ensure_id_is_int
 import time
 import re
-from fastapi import BackgroundTasks, Depends
+from fastapi import Depends
 from sqlalchemy.orm import Session
 from models import Report, File, User
-from utils.error_handler import logger
+from utils.error_handler import logger, handle_exception
 from utils.auth import get_current_user
 from utils.db import get_db
 from pydantic import BaseModel
-from services.ai_service import call_openrouter_api, generate_report_text
 import uuid
+from api.schemas import GenerateReportRequest, AdditionalInfoRequest
+from services.storage import get_document_path
+import logging
+from services.docx_service import docx_service
+from services.preview_service import preview_service
+from pathlib import Path
 
-router = APIRouter(tags=["AI Processing"])
+router = APIRouter(tags=["Report Generation"])
+logger = logging.getLogger(__name__)
 
 
 class StructureReportRequest(BaseModel):
@@ -27,6 +34,20 @@ class StructureReportRequest(BaseModel):
     document_ids: List[int]
     title: Optional[str] = None
     structure: Optional[str] = None
+
+
+class AnalyzeRequest(BaseModel):
+    document_ids: List[str]
+    additional_info: str = ""
+
+
+class GenerateRequest(BaseModel):
+    document_ids: List[str]
+    additional_info: str = ""
+
+
+class RefineRequest(BaseModel):
+    instructions: str
 
 
 def fetch_reference_reports():
@@ -266,309 +287,63 @@ async def generate_report(text: dict):
 
 @router.post("/from-id")
 async def generate_report_from_id(data: Dict[str, Any]):
-    """
-    Generate a report based on uploaded files identified by report_id
-    
-    Args:
-        data: A dictionary containing report_id
-        
-    Returns:
-        Generated report content
-    """
-    report_id = data.get("report_id")
-    
-    if not report_id:
-        raise HTTPException(status_code=400, detail="report_id is required")
-    
-    print(f"Received report generation request with ID: {report_id}")
-    
+    """Generate a report from uploaded document IDs"""
     try:
-        # If report_id is a UUID, the files will be in a directory named with the UUID
-        # This relies on files being stored using the UUID as a directory name
-        report_files = get_report_files(report_id)
+        document_ids = data.get("document_ids", [])
+        if not document_ids:
+            raise HTTPException(status_code=400, detail="No document IDs provided")
+            
+        # Get the report directory
+        report_id = str(uuid.uuid4())
+        report_dir = get_report_directory(report_id)
         
-        if not report_files:
+        # Get document paths
+        document_paths = []
+        for doc_id in document_ids:
+            # Convert string IDs to integers if needed
+            doc_id = ensure_id_is_int(doc_id)
+            if not doc_id:
+                continue
+                
+            # Get document info
+            doc_info = get_report_files(str(doc_id))
+            if not doc_info:
+                continue
+                
+            # Add document paths
+            for file_info in doc_info:
+                file_path = file_info.get("path")
+                if file_path and os.path.exists(file_path):
+                    document_paths.append(file_path)
+        
+        if not document_paths:
             raise HTTPException(
-                status_code=404, 
-                detail=f"No files found for report ID: {report_id}"
+                status_code=400,
+                detail="No valid documents found for the provided IDs"
             )
+            
+        # Generate the report content
+        result = await generate_report_text(document_paths)
         
-        # Log file information for debugging purposes
-        print(f"Found {len(report_files)} files for report ID {report_id}:")
-        for idx, file in enumerate(report_files):
-            print(f"  File {idx+1}: {file['filename']} ({file['type']}) at {file['path']}")
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
             
-            # Check if files actually exist
-            if not os.path.exists(file['path']):
-                print(f"WARNING: File path doesn't exist: {file['path']}")
-        
-        # Extract text from all files
-        file_paths = [file["path"] for file in report_files]
-        extraction_start_time = time.time()
-        print(f"Starting text extraction from {len(file_paths)} files...")
-        
-        try:
-            file_contents = extract_text_from_files(file_paths)
-            extraction_time = time.time() - extraction_start_time
-            print(f"Text extraction completed in {extraction_time:.2f} seconds")
-            
-            # Check if multimodal extraction was used
-            used_multimodal = "[Extracted using AI Vision technology]" in file_contents
-            
-            # Check for specific OCR markers that indicate image-based documents
-            ocr_markers = ["[OCR failed", "No readable text detected in image", "Image file detected"]
-            has_ocr_content = any(marker in file_contents for marker in ocr_markers)
-            
-            # Check if the extraction returned an error message
-            if file_contents.startswith("Error:") or "Error extracting text" in file_contents:
-                is_protected_file = any(
-                    msg in file_contents for msg in 
-                    ["password-protected", "encrypted", "protected", "binary format"]
-                )
-                
-                if is_protected_file:
-                    error_msg = "One or more files appear to be password-protected or in an unsupported format."
-                    return {
-                        "content": f"## Document Access Error\n\n{error_msg}\n\nPlease try uploading the document again after removing any password protection, or convert it to a more compatible format like PDF or plain DOCX without encryption.\n\n**Technical Details:**\n\n{file_contents}",
-                        "extraction_error": error_msg
-                    }
-                else:
-                    error_msg = "An error occurred while extracting text from your documents"
-                    return {
-                        "content": f"## Document Processing Error\n\n{error_msg}\n\nPlease check your documents and try again with a different format.\n\n**Technical Details:**\n\n{file_contents}",
-                        "extraction_error": error_msg
-                    }
-            
-            # If we only have OCR content (from images) but very little actual text
-            if has_ocr_content and len(file_contents.strip()) < 500 and not used_multimodal:
-                print("WARNING: Document appears to be primarily image-based with little text")
-                return {
-                    "content": f"## Image-Based Document Detected\n\nYour document appears to be primarily image-based. While we've attempted to extract text using OCR technology, the results may be limited. For best results, please consider uploading a text-based document.\n\n### OCR Results:\n\n{file_contents}\n\nIf the text above is incomplete or inaccurate, please try providing a text-based document version instead.",
-                    "ocr_limited": True
-                }
-            
-        except Exception as extract_error:
-            error_msg = f"Error extracting text from files: {str(extract_error)}"
-            print(error_msg)
-            import traceback
-            print(traceback.format_exc())
-            return {
-                "content": f"## Error Extracting Text\n\nWe encountered a problem extracting text from your documents: {str(extract_error)}\n\nPlease try again with a different file format or contact support.",
-                "extraction_error": str(extract_error)
-            }
-        
-        # If we have very little content and multimodal wasn't used, provide a detailed message
-        if len(file_contents.strip()) < 100 and not used_multimodal:
-            print("WARNING: Extracted less than 100 characters of text")
-            file_statuses = []
-            for file in report_files:
-                path = file["path"]
-                exists = os.path.exists(path)
-                size = os.path.getsize(path) if exists else 0
-                file_statuses.append(f"{file['filename']}: Exists={exists}, Size={size} bytes")
-            
-            # Add file status information to the extracted content for debugging
-            file_status_text = "\n\nFile Status:\n" + "\n".join(file_statuses)
-            
-            if file_contents.strip() == "":
-                print("ERROR: No text extracted from any files")
-                return {
-                    "content": f"## Error: No Text Extracted\n\nWe couldn't extract any text from your documents. This might be because:\n\n- The files contain only images without OCR\n- The files are password protected\n- The files are in a format we can't read\n- The files are corrupted\n\nPlease try again with different documents or convert them to a different format.{file_status_text}",
-                    "extraction_error": "No text extracted from files"
-                }
-            
-            # Check if there's a meaningful error message in the extracted content
-            if "Error:" in file_contents or "Warning:" in file_contents:
-                print(f"WARNING: Error messages found in extracted content: {file_contents}")
-                return {
-                    "content": f"## Document Processing Issue\n\nWe had some issues processing your documents:\n\n```\n{file_contents}\n```\n\nPlease consider:\n\n1. Converting your documents to PDF\n2. Removing any password protection\n3. Using files that contain actual text content (not just images)\n\n{file_status_text}",
-                    "extraction_error": "Error messages in extracted content"
-                }
-            
-            file_contents += file_status_text
-            
-        print(f"Extracted {len(file_contents)} characters of text from {len(file_paths)} files")
-        
-        # Add a note if multimodal extraction was used
-        multimodal_note = ""
-        if used_multimodal:
-            multimodal_note = "\n\nNote: Advanced AI Vision technology was used to analyze your document directly."
-        
-        # Get reference reports to use as style templates
-        reference_reports = fetch_reference_reports()
-        
-        # Extract format-only template without reference content
-        report_sections = []
-        
-        # Check if we have any reference reports
-        if not reference_reports:
-            format_template = """
-## RIEPILOGO SINISTRO
-[Format placeholder for claim summary]
-
-## INFORMAZIONI SUL RICHIEDENTE
-[Format placeholder for claimant information]
-
-## DETTAGLI INCIDENTE
-[Format placeholder for incident details]
-
-## ANALISI COPERTURA
-[Format placeholder for coverage analysis]
-
-## DANNI/FERITE
-[Format placeholder for damages/injuries]
-
-## RISULTATI INVESTIGAZIONE
-[Format placeholder for investigation findings]
-
-## VALUTAZIONE RESPONSABILITÀ
-[Format placeholder for liability assessment]
-
-## RACCOMANDAZIONE RISARCIMENTO
-[Format placeholder for settlement recommendation]
-"""
-            print("WARNING: No reference reports found, using default format template.")
-        else:
-            print(f"Using {len(reference_reports)} reference reports for formatting guidance.")
-            
-            # Extract section headers from reference reports
-            for report in reference_reports[:2]:  # Limit to 2 reference reports
-                report_text = report.get("extracted_text", "")
-                if report_text.strip():
-                    # Extract just the section headers and layout structure
-                    sections = re.findall(r'^([A-Z][A-Z\s/]+)(?::|\n)', report_text, re.MULTILINE)
-                    if sections:
-                        report_sections.extend(sections)
-                
-            # Remove duplicates
-            report_sections = list(dict.fromkeys(report_sections))
-            
-            # Create a template with placeholders
-            format_template = ""
-            for section in report_sections:
-                format_template += f"## {section}\n[Format placeholder for {section}]\n\n"
-                
-            # If we couldn't extract sections, use default template
-            if not format_template:
-                format_template = """
-## RIEPILOGO SINISTRO
-[Format placeholder for claim summary]
-
-## INFORMAZIONI SUL RICHIEDENTE
-[Format placeholder for claimant information]
-
-## DETTAGLI INCIDENTE
-[Format placeholder for incident details]
-
-## ANALISI COPERTURA
-[Format placeholder for coverage analysis]
-
-## DANNI/FERITE
-[Format placeholder for damages/injuries]
-
-## RISULTATI INVESTIGAZIONE
-[Format placeholder for investigation findings]
-
-## VALUTAZIONE RESPONSABILITÀ
-[Format placeholder for liability assessment]
-
-## RACCOMANDAZIONE RISARCIMENTO
-[Format placeholder for settlement recommendation]
-"""
-            
-        # Call the OpenRouter API with strong instructions about using only user content
-        prompt = (
-            "Sei un esperto redattore di relazioni assicurative incaricato di creare una relazione formale assicurativa.\n\n"
-            "ISTRUZIONI RIGOROSE - SEGUI CON PRECISIONE:\n"
-            "1. SOLO FORMATO: Utilizza la struttura del formato per organizzare la tua relazione in modo professionale.\n"
-            "2. SOLO CONTENUTO UTENTE: Il contenuto della tua relazione DEVE provenire ESCLUSIVAMENTE dai documenti dell'utente.\n"
-            "3. NESSUNA INVENZIONE: Non aggiungere ALCUNA informazione non esplicitamente presente nei documenti dell'utente.\n"
-            "4. LINGUA ITALIANA: Scrivi la relazione SEMPRE in italiano, indipendentemente dalla lingua dei documenti dell'utente.\n"
-            "5. INFORMAZIONI MANCANTI: Se mancano informazioni chiave, indica 'Non fornito nei documenti' anziché inventarle.\n"
-            "6. NESSUNA CREATIVITÀ: Questo è un documento assicurativo fattuale - attieniti strettamente alle informazioni nei documenti dell'utente.\n"
-            "7. CONSAPEVOLEZZA OCR: Alcuni contenuti potrebbero provenire dall'OCR di immagini e potrebbero contenere errori - concentrati sulle informazioni più affidabili."
-            f"{multimodal_note}\n\n"
-            f"MODELLO DI FORMATO (usa SOLO per la struttura):\n{format_template}\n\n"
-            f"DOCUMENTI DELL'UTENTE (UNICA FONTE PER IL CONTENUTO):\n{file_contents}\n\n"
-            "Genera una relazione strutturata di sinistro assicurativo che segue il formato del modello ma "
-            "utilizza SOLO fatti dai documenti dell'utente. Includi sezioni appropriate in base alle informazioni disponibili.\n\n"
-            "FONDAMENTALE: NON inventare ALCUNA informazione. Utilizza solo fatti esplicitamente dichiarati nei documenti dell'utente."
+        # Format the report as DOCX using template variables
+        docx_result = await format_report_as_docx(
+            report_content=result["report_text"],
+            template_variables=result["template_variables"],
+            filename=f"report_{report_id}.docx"
         )
         
-        try:
-            api_start_time = time.time()
-            print(f"Calling OpenRouter API with prompt length {len(prompt)} characters...")
-            
-            response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                json={
-                    "model": settings.DEFAULT_MODEL,
-                    "messages": [
-                        {
-                            "role": "system", 
-                            "content": "Sei un esperto redattore di relazioni assicurative. DEVI utilizzare SOLO fatti esplicitamente dichiarati nei documenti dell'utente. Non inventare, presumere o allucinare ALCUNA informazione non esplicitamente fornita. Rimani strettamente fattuale. NON utilizzare ALCUNA informazione dal modello di formato per il contenuto - serve SOLO per la struttura. Scrivi SEMPRE in italiano, indipendentemente dalla lingua di input."
-                        },
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.2  # Lower temperature for more factual output
-                },
-                headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"}
-            )
-            
-            api_time = time.time() - api_start_time
-            print(f"OpenRouter API call completed in {api_time:.2f} seconds")
-            
-            # Extract the generated content from the response
-            response_data = response.json()
-            print(f"OpenRouter API response status: {response.status_code}")
-            
-            if "choices" in response_data and len(response_data["choices"]) > 0:
-                generated_text = response_data["choices"][0]["message"]["content"]
-                
-                # Add a note about multimodal processing if it was used
-                if used_multimodal:
-                    generated_text = (
-                        "**Note: Advanced AI Vision technology was used to analyze your document directly.**\n\n" 
-                        + generated_text
-                    )
-                    
-                return {
-                    "content": generated_text,
-                    "used_multimodal": used_multimodal
-                }
-            else:
-                # Fallback if API response is unexpected
-                error_text = (
-                    "## Error Generating Report\n\n"
-                    "The AI model was unable to generate a report from your documents.\n\n"
-                    "### Document Contents:\n\n"
-                    f"{file_contents[:500]}...\n\n"
-                    "### API Response:\n\n"
-                    f"{json.dumps(response_data, indent=2)}"
-                )
-                print("ERROR: Unexpected API response format")
-                print(json.dumps(response_data, indent=2))
-                return {"content": error_text, "api_error": response_data}
-        
-        except Exception as api_error:
-            error_msg = f"Error calling OpenRouter API: {str(api_error)}"
-            print(error_msg)
-            import traceback
-            print(traceback.format_exc())
-            
-            return {
-                "content": f"## Error Generating Report\n\nWe encountered a problem while generating your report: {str(api_error)}\n\nText was successfully extracted from your documents, but the AI service encountered an error.",
-                "api_error": str(api_error)
-            }
-        
-    except Exception as e:
-        print(f"Error generating report: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
         return {
-            "content": f"## Error Generating Report\n\nWe encountered a problem: {str(e)}.\n\nPlease try again or contact support.",
-            "error": str(e)
+            "report_id": report_id,
+            "docx_path": docx_result["docx_path"],
+            "filename": docx_result["filename"]
         }
+            
+    except Exception as e:
+        logger.error(f"Error generating report: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Very simple test endpoint to check routing
@@ -973,3 +748,117 @@ async def _generate_and_save_report(
             db.commit()
         except Exception as db_error:
             logger.error(f"Database error when updating status: {str(db_error)}")
+
+
+@router.post("/analyze")
+async def analyze_documents(request: AnalyzeRequest):
+    """Analyze uploaded documents and extract variables."""
+    try:
+        # Get document paths
+        document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
+        
+        # Extract variables from documents
+        result = await extract_template_variables(
+            "\n".join([str(path) for path in document_paths]),
+            request.additional_info
+        )
+        
+        return {
+            "status": "success",
+            "extracted_variables": result["variables"],
+            "fields_needing_attention": result.get("fields_needing_attention", [])
+        }
+        
+    except Exception as e:
+        handle_exception(e, "Document analysis")
+        raise
+
+
+@router.post("/generate")
+async def generate_report(request: GenerateRequest, background_tasks: BackgroundTasks):
+    """Generate a DOCX report and return preview/download URLs."""
+    try:
+        # Get document paths
+        document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
+        
+        # Generate report content
+        result = await generate_report_text(document_paths, request.additional_info)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Generate DOCX report
+        report_id = docx_service.generate_report(
+            template_variables={
+                **result["template_variables"],
+                "content": result["report_text"]
+            }
+        )
+        
+        # Generate preview asynchronously
+        background_tasks.add_task(preview_service.generate_preview, report_id)
+        
+        # Get URLs for preview and download
+        urls = get_file_urls(report_id)
+        
+        return {
+            "status": "success",
+            "report_id": report_id,
+            "preview_url": urls["preview_url"],
+            "download_url": urls["download_url"],
+            "fields_needing_attention": result.get("fields_needing_attention", [])
+        }
+        
+    except Exception as e:
+        handle_exception(e, "Report generation")
+        raise
+
+
+@router.post("/reports/{report_id}/refine")
+async def refine_report(report_id: str, request: RefineRequest, background_tasks: BackgroundTasks):
+    """Refine an existing report based on user instructions."""
+    try:
+        # Get the original report path
+        original_path = docx_service.get_report_path(report_id)
+        
+        # Refine the report text based on instructions
+        refined_text = await refine_report_text(str(original_path), request.instructions)
+        
+        # Generate new report with refined text
+        new_report_id = docx_service.modify_report(report_id, {
+            "content": refined_text
+        })
+        
+        # Generate preview asynchronously
+        background_tasks.add_task(preview_service.generate_preview, new_report_id)
+        
+        # Get URLs for preview and download
+        urls = get_file_urls(new_report_id)
+        
+        return {
+            "status": "success",
+            "report_id": new_report_id,
+            "preview_url": urls["preview_url"],
+            "download_url": urls["download_url"]
+        }
+        
+    except Exception as e:
+        handle_exception(e, "Report refinement")
+        raise
+
+
+def get_file_urls(report_id: str) -> dict:
+    """Generate preview and download URLs for a report."""
+    base_url = "http://localhost:8000/files"  # Update for production
+    return {
+        "preview_url": f"{base_url}/previews/{report_id}.html",
+        "download_url": f"{base_url}/reports/{report_id}.docx"
+    }
+
+
+# Cleanup task to run periodically
+@router.on_event("startup")
+@router.on_event("shutdown")
+async def cleanup_old_files():
+    """Clean up old preview files on startup and shutdown."""
+    preview_service.cleanup_old_previews()

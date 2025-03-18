@@ -103,7 +103,38 @@ def process_inline_formatting(paragraph, text):
         run.italic = italic
 
 
-def generate_docx(report_text, output_filename, reference_metadata=None):
+def replace_template_variables(doc, variables):
+    """
+    Replace all {{ variable }} placeholders in the document with their values.
+    
+    Args:
+        doc: The Document object
+        variables: Dictionary containing variable names and their values
+    """
+    for paragraph in doc.paragraphs:
+        for run in paragraph.runs:
+            text = run.text
+            for var_name, value in variables.items():
+                placeholder = f"{{{{ {var_name} }}}}"
+                if placeholder in text:
+                    text = text.replace(placeholder, str(value))
+            run.text = text
+    
+    # Also replace variables in tables
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        text = run.text
+                        for var_name, value in variables.items():
+                            placeholder = f"{{{{ {var_name} }}}}"
+                            if placeholder in text:
+                                text = text.replace(placeholder, str(value))
+                        run.text = text
+
+
+def generate_docx(report_text, output_filename, reference_metadata=None, template_variables=None):
     """
     Creates a DOCX with AI-generated report text.
     
@@ -111,6 +142,7 @@ def generate_docx(report_text, output_filename, reference_metadata=None):
         report_text: The content of the report
         output_filename: The filename for the output DOCX
         reference_metadata: Dictionary containing format information (optional)
+        template_variables: Dictionary containing variables to replace in the template (optional)
         
     Returns:
         The full path to the generated DOCX
@@ -129,33 +161,21 @@ def generate_docx(report_text, output_filename, reference_metadata=None):
             # Use the template if it exists
             doc = Document(template_path)
             
-            # Clear existing content while preserving styles and structure
-            # Remove all paragraphs except the first one (to maintain document properties)
-            if len(doc.paragraphs) > 0:
-                # Keep track of the first paragraph to preserve document properties
-                first_para = doc.paragraphs[0]
-                
-                # Remove all content from all paragraphs
-                for i in range(len(doc.paragraphs)):
-                    if i < len(doc.paragraphs):  # Check again as length may change
-                        # Clear text but keep the paragraph
-                        p = doc.paragraphs[i]
-                        p.clear()
-                
-                # Also clear all tables
-                for table in doc.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            for paragraph in cell.paragraphs:
-                                paragraph.clear()
+            # If template variables are provided, replace them in the template
+            if template_variables:
+                replace_template_variables(doc, template_variables)
+            
+            # If there's additional report text, append it to the document
+            if report_text:
+                doc.add_paragraph()  # Add a blank line for separation
+                parse_markdown(doc, report_text)
         else:
             # Create a new document if no template exists
             doc = Document()
             # Add a title
             doc.add_heading('Report', 0)
-        
-        # Parse markdown formatting in the report text
-        parse_markdown(doc, report_text)
+            # Add the report content
+            parse_markdown(doc, report_text)
         
         # Save the document
         doc.save(output_path)
@@ -166,7 +186,7 @@ def generate_docx(report_text, output_filename, reference_metadata=None):
         raise e
 
 
-async def format_report_as_docx(report_content, reference_metadata=None, filename=None):
+async def format_report_as_docx(report_content, reference_metadata=None, filename=None, template_variables=None):
     """
     Formats the report content as a DOCX document.
     
@@ -174,6 +194,7 @@ async def format_report_as_docx(report_content, reference_metadata=None, filenam
         report_content: The text content of the report
         reference_metadata: Dictionary containing format information (optional)
         filename: Custom filename (optional)
+        template_variables: Dictionary containing variables to replace in the template (optional)
         
     Returns:
         Dictionary with the path to the generated DOCX
@@ -182,7 +203,7 @@ async def format_report_as_docx(report_content, reference_metadata=None, filenam
         filename = f"report_{uuid.uuid4().hex}.docx"
     
     # Generate the DOCX
-    docx_path = generate_docx(report_content, filename, reference_metadata)
+    docx_path = generate_docx(report_content, filename, reference_metadata, template_variables)
     
     return {
         "docx_path": docx_path,
