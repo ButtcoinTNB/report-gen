@@ -28,6 +28,21 @@ const nextConfig = {
   },
   // Output standalone build for better deployment performance
   output: 'standalone',
+  
+  // Add headers to prevent caching during development
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'no-store, max-age=0',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = withBundleAnalyzer(nextConfig); 
