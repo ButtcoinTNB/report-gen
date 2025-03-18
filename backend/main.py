@@ -82,9 +82,10 @@ async def debug():
     except ImportError as e:
         import_results["from_models"] = f"Error: {str(e)}"
         
-    # Try import with backend prefix
+    # Try import with backend prefix - commenting this out for consistency
     try:
-        from backend.models import Report, File, User
+        # Using consistent import pattern instead of 'from models'
+        from models import Report, File, User
         import_results["from_backend_models"] = "Success"
     except ImportError as e:
         import_results["from_backend_models"] = f"Error: {str(e)}"

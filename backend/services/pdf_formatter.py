@@ -72,9 +72,40 @@ async def format_report_as_pdf(report_text, reference_metadata=None, is_preview=
             spaceBefore=24,
             textColor=colors.darkblue
         )
+
+        # Add error styles for better visibility of error messages
+        error_title_style = ParagraphStyle(
+            name='ErrorTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=12,
+            spaceBefore=24,
+            textColor=colors.red,
+            alignment=TA_CENTER
+        )
+        
+        error_heading_style = ParagraphStyle(
+            name='ErrorHeading',
+            parent=styles['Heading2'],
+            fontSize=12,
+            spaceAfter=8,
+            spaceBefore=12,
+            textColor=colors.darkred
+        )
+        
+        error_text_style = ParagraphStyle(
+            name='ErrorText',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=10,
+            textColor=colors.black
+        )
         
         normal_style = styles["Normal"]
         normal_style.spaceAfter = 10
+        
+        # Check if this is an error report
+        is_error_report = "ERROR: COULD NOT RETRIEVE REPORT CONTENT" in report_text
         
         # Parse markdown and convert to Platypus elements
         sections = report_text.split('\n# ')
@@ -93,14 +124,61 @@ async def format_report_as_pdf(report_text, reference_metadata=None, is_preview=
             
             # Add section title
             section_title = section_parts[0].strip()
-            story.append(Paragraph(section_title, heading1_style))
+            
+            # Use error styling for error reports
+            if is_error_report and i == 1:  # First section title in error report
+                story.append(Paragraph(section_title, error_title_style))
+                # Add a visible horizontal line
+                story.append(Spacer(1, 0.1 * inch))
+            else:
+                story.append(Paragraph(section_title, heading1_style))
             
             # Process section content if any
             if len(section_parts) > 1:
                 section_content = section_parts[1].strip()
-                for paragraph in section_content.split('\n\n'):
-                    if paragraph.strip():
-                        story.append(Paragraph(paragraph, normal_style))
+                
+                # Handle subsections (## headings)
+                if '## ' in section_content and is_error_report:
+                    subsections = section_content.split('\n## ')
+                    
+                    # Process first part if any
+                    if subsections[0] and not subsections[0].startswith('## '):
+                        for paragraph in subsections[0].split('\n\n'):
+                            if paragraph.strip():
+                                story.append(Paragraph(paragraph, error_text_style if is_error_report else normal_style))
+                    
+                    # Process subsections
+                    for j in range(1 if subsections[0].strip() else 0, len(subsections)):
+                        subsection = subsections[j]
+                        subsection_parts = subsection.split('\n', 1)
+                        
+                        # Add subsection title
+                        subsection_title = subsection_parts[0].strip()
+                        story.append(Paragraph(subsection_title, error_heading_style if is_error_report else styles['Heading2']))
+                        
+                        # Add subsection content
+                        if len(subsection_parts) > 1:
+                            subsection_content = subsection_parts[1].strip()
+                            for paragraph in subsection_content.split('\n\n'):
+                                if paragraph.strip():
+                                    # Detect bullet points
+                                    if paragraph.startswith('- ') or paragraph.startswith('* '):
+                                        for line in paragraph.split('\n'):
+                                            if line.strip():
+                                                story.append(Paragraph(line, error_text_style if is_error_report else normal_style))
+                                    else:
+                                        story.append(Paragraph(paragraph, error_text_style if is_error_report else normal_style))
+                else:
+                    # No subsections, process content normally
+                    for paragraph in section_content.split('\n\n'):
+                        if paragraph.strip():
+                            # Detect bullet points
+                            if paragraph.startswith('- ') or paragraph.startswith('* '):
+                                for line in paragraph.split('\n'):
+                                    if line.strip():
+                                        story.append(Paragraph(line, error_text_style if is_error_report else normal_style))
+                            else:
+                                story.append(Paragraph(paragraph, error_text_style if is_error_report else normal_style))
         
         # Build the PDF
         doc.build(story)

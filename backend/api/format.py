@@ -12,6 +12,7 @@ import glob
 from supabase import create_client, Client
 from utils.id_mapper import ensure_id_is_int
 import json
+import datetime
 
 router = APIRouter()
 
@@ -304,8 +305,23 @@ async def format_final(data: Dict = Body(...)):
                             print(f"Error reading content.txt: {str(read_err)}")
                     
                     if not report_content:
-                        # Create a minimal report indicating the error
-                        report_content = f"# Error: Could not retrieve report content\n\nReport ID: {report_id}\n\nThe system was unable to retrieve the content for this report. Please regenerate the report or contact support."
+                        # Create a more detailed and well-formatted error report
+                        report_content = f"""# ERROR: COULD NOT RETRIEVE REPORT CONTENT
+
+## Report Details
+- Report ID: {report_id}
+- Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+## Error Information
+The system was unable to retrieve the content for this report.
+
+## What You Can Do
+1. Try regenerating the report from the original documents
+2. Contact support if this problem persists
+3. Verify that your report was saved correctly
+
+## Technical Information
+This error occurs when the system cannot locate the report content in the database or in local storage."""
                 else:
                     # For non-UUID reports, propagate the original error
                     raise e

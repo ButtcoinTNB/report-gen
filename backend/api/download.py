@@ -195,7 +195,15 @@ async def download_report(report_id: str):
         file_path = fetch_report_path_from_supabase(report_id)
         
         if not file_path:
-            raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
+            print(f"No file path found in database for report ID: {report_id}, generating error PDF")
+            # Generate an error PDF that will be visible and helpful to the user
+            from api.format import format_final
+            error_response = await format_final({"report_id": report_id})
+            if "file_path" in error_response and os.path.exists(error_response["file_path"]):
+                print(f"Using error PDF: {error_response['file_path']}")
+                file_path = error_response["file_path"]
+            else:
+                raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
             
         if not os.path.exists(file_path):
             print(f"File path from database doesn't exist: {file_path}")
@@ -205,7 +213,14 @@ async def download_report(report_id: str):
                 print(f"Using fallback path: {fallback_path}")
                 file_path = fallback_path
             else:
-                raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
+                # Generate an error PDF that will be visible and helpful to the user
+                from api.format import format_final
+                error_response = await format_final({"report_id": report_id})
+                if "file_path" in error_response and os.path.exists(error_response["file_path"]):
+                    print(f"Using error PDF: {error_response['file_path']}")
+                    file_path = error_response["file_path"]
+                else:
+                    raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
             
         # Return the PDF file as an attachment
         filename = os.path.basename(file_path)
@@ -241,6 +256,21 @@ async def download_report(report_id: str):
                         filename=filename,
                         headers={"Content-Disposition": f"attachment; filename={filename}"}
                     )
+            
+            # Generate an error PDF as absolute last resort
+            try:
+                from api.format import format_final
+                error_response = await format_final({"report_id": report_id})
+                if "file_path" in error_response and os.path.exists(error_response["file_path"]):
+                    print(f"Using generated error PDF: {error_response['file_path']}")
+                    return FileResponse(
+                        error_response["file_path"],
+                        media_type="application/pdf",
+                        filename=f"report_error_{report_id}.pdf",
+                        headers={"Content-Disposition": f"attachment; filename=report_error_{report_id}.pdf"}
+                    )
+            except Exception as error_gen_e:
+                print(f"Failed to generate error PDF: {str(error_gen_e)}")
             
             # If all else fails, return a more helpful error message
             raise HTTPException(
