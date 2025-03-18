@@ -4,8 +4,8 @@ import uvicorn
 import os
 
 # Import API route modules
-from api import upload, generate, format, edit, download
-from config import settings
+from backend.api import upload, generate, format, edit, download
+from backend.config import settings
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

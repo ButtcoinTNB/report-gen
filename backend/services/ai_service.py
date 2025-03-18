@@ -2,8 +2,8 @@ import httpx
 from typing import List, Dict, Any, Callable
 import os
 import asyncio
-from config import settings
-from utils.error_handler import handle_exception, logger, retry_operation
+from backend.config import settings
+from backend.utils.error_handler import handle_exception, logger, retry_operation
 import re
 
 
@@ -119,7 +119,7 @@ async def generate_case_summary(document_paths: List[str], ocr_context: str = ""
         logger.info(f"Generating case summary for {len(document_paths)} documents")
         
         # Use our improved extractor to handle different file types including images
-        from services.pdf_extractor import extract_text_from_files
+        from backend.services.pdf_extractor import extract_text_from_files
         
         # Extract text from all documents at once with better file handling
         extracted_content = extract_text_from_files(document_paths)
@@ -238,7 +238,7 @@ async def generate_report_text(
     """
     try:
         # Extract text from input documents
-        from services.pdf_extractor import extract_text_from_files
+        from backend.services.pdf_extractor import extract_text_from_files
         document_text = extract_text_from_files(document_paths)
         
         if not document_text or len(document_text.strip()) < 10:

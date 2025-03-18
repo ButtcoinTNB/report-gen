@@ -2,23 +2,21 @@ from fastapi import APIRouter, HTTPException
 import requests
 import os
 import json
-from config import settings
+from backend.config import settings
 from typing import Dict, Any, List, Optional
-from services.pdf_extractor import extract_text_from_files, extract_text_from_file
-from services.ai_service import generate_case_summary
-from utils.id_mapper import ensure_id_is_int
+from backend.services.pdf_extractor import extract_text_from_files, extract_text_from_file
+from backend.services.ai_service import generate_case_summary
+from backend.utils.id_mapper import ensure_id_is_int
 import time
 import re
 from fastapi import BackgroundTasks, Depends
 from sqlalchemy.orm import Session
-from models.report import Report
-from models.file import File
-from models.user import User
-from utils.logger import logger
-from utils.auth import get_current_user
-from utils.db import get_db
+from backend.models import Report, File, User
+from backend.utils.error_handler import logger
+from backend.utils.auth import get_current_user
+from backend.utils.db import get_db
 from pydantic import BaseModel
-from services.ai_service import call_openrouter_api, generate_report_text
+from backend.services.ai_service import call_openrouter_api, generate_report_text
 import uuid
 
 router = APIRouter(tags=["AI Processing"])
@@ -779,7 +777,7 @@ async def generate_from_structure(
         
         # Extract text from documents
         logger.info("Extracting text from documents...")
-        from services.pdf_extractor import extract_text_from_files
+        from backend.services.pdf_extractor import extract_text_from_files
         document_text = extract_text_from_files(document_paths)
         
         # Get the structure to use
@@ -939,8 +937,6 @@ async def _generate_and_save_report(
                 logger.info(f"Updated report record for ID: {report_id}")
             except Exception as db_error:
                 logger.error(f"Database error: {str(db_error)}")
-            finally:
-                db.close()
                 
         else:
             logger.error(f"Unexpected API response format: {response}")
@@ -958,8 +954,6 @@ async def _generate_and_save_report(
                 db.commit()
             except Exception as db_error:
                 logger.error(f"Database error: {str(db_error)}")
-            finally:
-                db.close()
                 
     except Exception as e:
         logger.error(f"Error in _generate_and_save_report: {str(e)}")
@@ -977,6 +971,5 @@ async def _generate_and_save_report(
             
             db.query(Report).filter(Report.id == report_id).update({"status": "failed"})
             db.commit()
-            db.close()
         except Exception as db_error:
             logger.error(f"Database error when updating status: {str(db_error)}")
