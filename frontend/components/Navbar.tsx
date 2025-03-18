@@ -37,30 +37,6 @@ const Navbar: React.FC = () => {
                 Home
               </Button>
             </Link>
-            <Link href="/edit" passHref>
-              <Button 
-                color="primary"
-                variant={isActive('/edit') ? "contained" : "text"}
-                sx={{ 
-                  color: isActive('/edit') ? '#fff' : 'text.primary',
-                  fontWeight: 500
-                }}
-              >
-                Edit
-              </Button>
-            </Link>
-            <Link href="/download" passHref>
-              <Button 
-                color="primary"
-                variant={isActive('/download') ? "contained" : "text"}
-                sx={{ 
-                  color: isActive('/download') ? '#fff' : 'text.primary',
-                  fontWeight: 500
-                }}
-              >
-                Download
-              </Button>
-            </Link>
           </Box>
         </Toolbar>
       </Container>
