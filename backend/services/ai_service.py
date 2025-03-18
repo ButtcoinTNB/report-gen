@@ -582,29 +582,34 @@ async def analyze_reference_reports(reference_paths: List[str]) -> Dict[str, Any
             re.search(r'\{[\s\S]*\}', result["choices"][0]["message"]["content"]).group(0)
         )
         
-        # Create a prompt template for report generation
+        # Store style guide values in separate variables to avoid f-string issues
+        style_guide_json = json.dumps(style_guide, indent=2, ensure_ascii=False)
+        
+        # Create a prompt template for report generation using standard string formatting
+        # to avoid any f-string backslash issues
         prompt_template = (
             "GUIDA DI STILE E FORMATO:\n"
-            f"{json.dumps(style_guide, indent=2, ensure_ascii=False)}\n\n"
+            "{style_guide_json}\n\n"
             "ISTRUZIONI PRECISE:\n"
             "1. Usa ESATTAMENTE la struttura delle sezioni fornita, nell'ordine specificato\n"
-            "2. Mantieni il livello di formalità indicato (%(livello_formalita)s)\n"
+            "2. Mantieni il livello di formalità indicato ({livello_formalita})\n"
             "3. Utilizza le frasi comuni fornite per apertura, chiusura e transizioni\n"
             "4. Segui ESATTAMENTE i pattern di formattazione per:\n"
-            "   - Date: %(date)s\n"
-            "   - Importi: %(importi)s\n"
-            "   - Riferimenti: %(riferimenti)s\n"
+            "   - Date: {date}\n"
+            "   - Importi: {importi}\n"
+            "   - Riferimenti: {riferimenti}\n"
             "5. Usa i pattern sintattici e il tono forniti negli esempi\n\n"
             "CONTENUTO DA ELABORARE:\n"
-            "%(content)s\n\n"
+            "{content}\n\n"
             "INFORMAZIONI AGGIUNTIVE:\n"
-            "%(additional_info)s\n\n"
+            "{additional_info}\n\n"
             "Genera un report che segue ESATTAMENTE questo stile e formato, utilizzando il contenuto fornito."
         )
         
         analysis_result = {
             "style_guide": style_guide,
-            "prompt_template": prompt_template
+            "prompt_template": prompt_template,
+            "style_guide_json": style_guide_json  # Store for later use
         }
         
         # Cache the result
@@ -673,14 +678,16 @@ async def generate_report_text(
         logger.info("Successfully extracted template variables")
         
         # Create the generation prompt using the template from style analysis
-        generation_prompt = style_analysis["prompt_template"] % {
-            "content": document_text,
-            "additional_info": additional_info,
-            "livello_formalita": style_analysis["style_guide"]["stile"]["livello_formalita"],
-            "date": style_analysis["style_guide"]["formattazione"]["date"],
-            "importi": style_analysis["style_guide"]["formattazione"]["importi"],
-            "riferimenti": style_analysis["style_guide"]["formattazione"]["riferimenti"]
-        }
+        # Use standard string format to avoid any f-string backslash issues
+        generation_prompt = style_analysis["prompt_template"].format(
+            style_guide_json=style_analysis["style_guide_json"],  # Use pre-dumped JSON
+            content=document_text,
+            additional_info=additional_info,
+            livello_formalita=style_analysis["style_guide"]["stile"]["livello_formalita"],
+            date=style_analysis["style_guide"]["formattazione"]["date"],
+            importi=style_analysis["style_guide"]["formattazione"]["importi"],
+            riferimenti=style_analysis["style_guide"]["formattazione"]["riferimenti"]
+        )
         
         # Generate the report content
         result = await call_openrouter_api(
