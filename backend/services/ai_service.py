@@ -588,17 +588,17 @@ async def analyze_reference_reports(reference_paths: List[str]) -> Dict[str, Any
             f"{json.dumps(style_guide, indent=2, ensure_ascii=False)}\n\n"
             "ISTRUZIONI PRECISE:\n"
             "1. Usa ESATTAMENTE la struttura delle sezioni fornita, nell'ordine specificato\n"
-            "2. Mantieni il livello di formalità indicato ({stile[livello_formalita]})\n"
+            "2. Mantieni il livello di formalità indicato (%(livello_formalita)s)\n"
             "3. Utilizza le frasi comuni fornite per apertura, chiusura e transizioni\n"
             "4. Segui ESATTAMENTE i pattern di formattazione per:\n"
-            "   - Date: {formattazione[date]}\n"
-            "   - Importi: {formattazione[importi]}\n"
-            "   - Riferimenti: {formattazione[riferimenti]}\n"
+            "   - Date: %(date)s\n"
+            "   - Importi: %(importi)s\n"
+            "   - Riferimenti: %(riferimenti)s\n"
             "5. Usa i pattern sintattici e il tono forniti negli esempi\n\n"
             "CONTENUTO DA ELABORARE:\n"
-            "{content}\n\n"
+            "%(content)s\n\n"
             "INFORMAZIONI AGGIUNTIVE:\n"
-            "{additional_info}\n\n"
+            "%(additional_info)s\n\n"
             "Genera un report che segue ESATTAMENTE questo stile e formato, utilizzando il contenuto fornito."
         )
         
@@ -673,10 +673,14 @@ async def generate_report_text(
         logger.info("Successfully extracted template variables")
         
         # Create the generation prompt using the template from style analysis
-        generation_prompt = style_analysis["prompt_template"].format(
-            content=document_text,
-            additional_info=additional_info
-        )
+        generation_prompt = style_analysis["prompt_template"] % {
+            "content": document_text,
+            "additional_info": additional_info,
+            "livello_formalita": style_analysis["style_guide"]["stile"]["livello_formalita"],
+            "date": style_analysis["style_guide"]["formattazione"]["date"],
+            "importi": style_analysis["style_guide"]["formattazione"]["importi"],
+            "riferimenti": style_analysis["style_guide"]["formattazione"]["riferimenti"]
+        }
         
         # Generate the report content
         result = await call_openrouter_api(
