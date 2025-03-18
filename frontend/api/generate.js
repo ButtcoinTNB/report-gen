@@ -3,6 +3,89 @@ import { config } from "../config";
 import { handleApiError, formatApiError } from "../utils/errorHandler";
 
 /**
+ * Analyze uploaded documents to extract information
+ * 
+ * @param {string|number} reportId - ID of the report to analyze
+ * @param {string} additionalInfo - Additional information for the analysis
+ * @returns {Promise<Object>} Analysis results with extracted variables
+ */
+export async function analyzeDocuments(reportId, additionalInfo = "") {
+  try {
+    console.log("Analyzing documents for report ID:", reportId);
+    
+    const payload = { 
+      document_ids: [reportId],
+      additional_info: additionalInfo
+    };
+    
+    const response = await axios.post(`${config.endpoints.generate}/analyze`, payload);
+    
+    console.log("Analysis API response:", response.data);
+    
+    return response.data;
+  } catch (error) {
+    console.error("Error analyzing documents:", error);
+    
+    if (error?.isAxiosError && error.response) {
+      console.error("Server error response:", error.response.data);
+    }
+    
+    const errorMessage = formatApiError(error, "Error analyzing documents");
+    throw new Error(errorMessage);
+  }
+}
+
+/**
+ * Generate a report from uploaded documents with additional information
+ * 
+ * @param {string|number} reportId - ID of the report to generate
+ * @param {string} additionalInfo - Additional information for the report
+ * @param {Function} onProgress - Optional callback for progress updates
+ * @returns {Promise<Object>} Generated report with preview and download URLs
+ */
+export async function generateReportWithInfo(reportId, additionalInfo = "", onProgress) {
+  try {
+    console.log("Generating report with ID:", reportId);
+    
+    if (onProgress) {
+      onProgress({ 
+        step: 0, 
+        message: "Analyzing documents 📄", 
+        progress: 30
+      });
+    }
+    
+    const payload = {
+      document_ids: [reportId],
+      additional_info: additionalInfo
+    };
+    
+    const response = await axios.post(`${config.endpoints.generate}/generate`, payload);
+    
+    console.log("Generate API response:", response.data);
+    
+    if (onProgress) {
+      onProgress({ 
+        step: 1, 
+        message: "Report generated successfully ✅", 
+        progress: 100
+      });
+    }
+    
+    return response.data;
+  } catch (error) {
+    console.error("Error generating report:", error);
+    
+    if (error?.isAxiosError && error.response) {
+      console.error("Server error response:", error.response.data);
+    }
+    
+    const errorMessage = formatApiError(error, "Error generating report");
+    throw new Error(errorMessage);
+  }
+}
+
+/**
  * Get a brief AI summary of uploaded documents
  * 
  * @param {number} reportId - ID of the report to summarize
@@ -165,8 +248,7 @@ export async function refineReport(reportId, instructions, onProgress) {
       });
     }
     
-    const response = await axios.post(`${config.endpoints.generate}/refine`, {
-      report_id: reportId,
+    const response = await axios.post(`${config.endpoints.generate}/reports/${reportId}/refine`, {
       instructions: instructions
     });
     
