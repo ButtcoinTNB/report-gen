@@ -2,6 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
+import sys
+
+# Import rootpath utility to ensure proper module imports
+from backend.rootpath import ensure_root_in_path
+project_root, backend_dir = ensure_root_in_path()
 
 # Import API route modules
 from backend.api import upload, generate, format, edit, download
