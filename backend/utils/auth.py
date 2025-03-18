@@ -5,9 +5,9 @@ Authentication utility functions for the FastAPI application.
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from backend.utils.error_handler import logger
-from backend.utils.db import get_db
-from backend.models import User
+from utils.error_handler import logger
+from utils.db import get_db
+from models import User
 from typing import Optional
 
 # OAuth2 scheme for token authentication

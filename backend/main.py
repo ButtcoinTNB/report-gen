@@ -12,6 +12,9 @@ project_root, backend_dir = ensure_root_in_path()
 from api import upload, generate, format, edit, download
 from config import settings
 
+# Debug imports
+import traceback
+
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
@@ -58,6 +61,59 @@ app.include_router(download.router, prefix="/api/download", tags=["Download"])
 @app.get("/", tags=["Root"])
 async def root():
     return {"message": "Welcome to the Scrittore Automatico di Perizie API"}
+
+
+@app.get("/debug", tags=["Debug"])
+async def debug():
+    """Debug endpoint to check environment and imports"""
+    result = {
+        "cwd": os.getcwd(),
+        "python_path": sys.path,
+        "dir_contents": os.listdir("."),
+    }
+    
+    # Test imports
+    import_results = {}
+    
+    # Try relative import
+    try:
+        from models import Report, File, User
+        import_results["from_models"] = "Success"
+    except ImportError as e:
+        import_results["from_models"] = f"Error: {str(e)}"
+        
+    # Try import with backend prefix
+    try:
+        from backend.models import Report, File, User
+        import_results["from_backend_models"] = "Success"
+    except ImportError as e:
+        import_results["from_backend_models"] = f"Error: {str(e)}"
+    
+    # Check file existence
+    file_checks = {
+        "models.py_exists": os.path.exists("models.py"),
+        "backend_models.py_exists": os.path.exists("backend/models.py"),
+        "api_generate.py_exists": os.path.exists("api/generate.py"),
+    }
+    
+    # Check file contents
+    file_contents = {}
+    try:
+        if os.path.exists("api/generate.py"):
+            with open("api/generate.py", "r") as f:
+                for i, line in enumerate(f, 1):
+                    if "from " in line and "models" in line and "import" in line:
+                        file_contents[f"generate.py_line_{i}"] = line.strip()
+                        if i >= 20:  # Only check first 20 lines
+                            break
+    except Exception as e:
+        file_contents["error"] = str(e)
+    
+    result["import_results"] = import_results
+    result["file_checks"] = file_checks
+    result["file_contents"] = file_contents
+    
+    return result
 
 
 if __name__ == "__main__":

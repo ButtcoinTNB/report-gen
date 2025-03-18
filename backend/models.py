@@ -29,6 +29,18 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class File(Base):
+    __tablename__ = "files"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String, index=True)
+    file_path = Column(String)
+    file_type = Column(String)
+    file_size = Column(Integer)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class TemplateDB(Base):
     __tablename__ = "templates"
 

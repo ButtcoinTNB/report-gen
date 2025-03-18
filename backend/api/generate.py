@@ -2,21 +2,21 @@ from fastapi import APIRouter, HTTPException
 import requests
 import os
 import json
-from backend.config import settings
+from config import settings
 from typing import Dict, Any, List, Optional
-from backend.services.pdf_extractor import extract_text_from_files, extract_text_from_file
-from backend.services.ai_service import generate_case_summary
-from backend.utils.id_mapper import ensure_id_is_int
+from services.pdf_extractor import extract_text_from_files, extract_text_from_file
+from services.ai_service import generate_case_summary
+from utils.id_mapper import ensure_id_is_int
 import time
 import re
 from fastapi import BackgroundTasks, Depends
 from sqlalchemy.orm import Session
-from backend.models import Report, File, User
-from backend.utils.error_handler import logger
-from backend.utils.auth import get_current_user
-from backend.utils.db import get_db
+from models import Report, File, User
+from utils.error_handler import logger
+from utils.auth import get_current_user
+from utils.db import get_db
 from pydantic import BaseModel
-from backend.services.ai_service import call_openrouter_api, generate_report_text
+from services.ai_service import call_openrouter_api, generate_report_text
 import uuid
 
 router = APIRouter(tags=["AI Processing"])
@@ -777,7 +777,7 @@ async def generate_from_structure(
         
         # Extract text from documents
         logger.info("Extracting text from documents...")
-        from backend.services.pdf_extractor import extract_text_from_files
+        from services.pdf_extractor import extract_text_from_files
         document_text = extract_text_from_files(document_paths)
         
         # Get the structure to use
