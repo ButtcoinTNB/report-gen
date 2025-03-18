@@ -5,12 +5,12 @@ import os
 import sys
 
 # Import rootpath utility to ensure proper module imports
-from backend.rootpath import ensure_root_in_path
+from rootpath import ensure_root_in_path
 project_root, backend_dir = ensure_root_in_path()
 
 # Import API route modules
-from backend.api import upload, generate, format, edit, download
-from backend.config import settings
+from api import upload, generate, format, edit, download
+from config import settings
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
