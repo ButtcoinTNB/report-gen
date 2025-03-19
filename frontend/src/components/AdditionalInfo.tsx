@@ -110,6 +110,13 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
             L'AI ha analizzato i documenti caricati. Rivedi le informazioni estratte e aggiungi eventuali dettagli mancanti o da correggere.
           </Typography>
 
+          <Alert severity="info" sx={{ mb: 3 }}>
+            <Typography variant="body2">
+              <strong>Informazione sulla privacy:</strong> Tutte le informazioni mostrate sono state estratte <strong>esclusivamente</strong> dai documenti che hai caricato.
+              Il sistema non utilizza contenuti di altri documenti nel tuo report finale. I documenti caricati vengono eliminati automaticamente dopo il download del report.
+            </Typography>
+          </Alert>
+
           {fieldsNeedingAttention.length > 0 && (
             <Accordion
               expanded={expandedSection === 'needs-attention'}

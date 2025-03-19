@@ -6,6 +6,10 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Set longer timeouts for large file uploads
+  timeout: 600000, // 10 minutes
+  maxContentLength: 1073741824, // 1GB
+  maxBodyLength: 1073741824, // 1GB
 });
 
 interface AnalysisDetails {

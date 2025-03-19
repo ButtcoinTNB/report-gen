@@ -242,3 +242,119 @@ cd backend
 pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ``` 
+
+# Insurance Report Generator - Template System
+
+This system uses AI to dynamically generate insurance reports in DOCX format based on uploaded documents and user inputs.
+
+## Key Features
+
+- **Dynamic Variable Extraction**: Automatically extracts key information from uploaded documents using AI and OCR.
+- **Rich Text Formatting**: Supports bullet points, bold, italic, and other formatting in the generated reports.
+- **Template-Based Generation**: Uses DOCX templates with variable placeholders that are filled by the AI.
+- **Preview and Refinement**: Allows users to preview and refine generated reports before final download.
+
+## How It Works
+
+1. **Upload Documents**: Users upload PDFs, images, DOCX files, or text files containing relevant information.
+2. **OCR Processing**: The system extracts text from all documents, including images and scanned PDFs.
+3. **AI Analysis**: An AI model (via OpenRouter API) extracts structured data from the text.
+4. **Template Filling**: The extracted data is used to fill a DOCX template with placeholders.
+5. **Refinement**: Users can provide instructions to refine the report content.
+6. **Download**: The final DOCX report is generated for download.
+
+## Templates
+
+Templates are DOCX files with Jinja2-style variables using the syntax `{{ variable_name }}`. For example:
+
+```
+Nome azienda: {{ nome_azienda }}
+Indirizzo: {{ indirizzo_azienda }}, {{ cap }} {{ city }}
+Data: {{ data_oggi }}
+
+Riferimento cliente: {{ vs_rif }}
+Numero polizza: {{ polizza }}
+
+Dinamica degli eventi:
+{{ dinamica_eventi_accertamenti }}
+```
+
+### Variable Types
+
+The system supports various variable types:
+
+- **Text fields**: Basic text replacement (`{{ nome_azienda }}`)
+- **Rich text fields**: Fields that support formatting like bullet points (`{{ dinamica_eventi_accertamenti }}`)
+- **Date fields**: Automatically formatted in Italian style (`{{ data_oggi }}`)
+- **Monetary fields**: Properly formatted with euro symbol (`{{ totale_danno }}`)
+
+### Common Variables
+
+These are the most commonly used variables in templates:
+
+- `nome_azienda`: Company name
+- `indirizzo_azienda`: Company address
+- `cap`: Postal code
+- `city`: City
+- `data_oggi`: Current date in Italian format (e.g., "18 Marzo 2025")
+- `vs_rif`: Customer reference
+- `rif_broker`: Broker reference
+- `polizza`: Policy number
+- `ns_rif`: Internal reference
+- `oggetto_polizza`: Policy object
+- `assicurato`: Insured name
+- `data_sinistro`: Date of incident
+- `titolo_breve`: Brief description
+- `luogo_sinistro`: Location of incident
+- `dinamica_eventi_accertamenti`: Detailed description of events (with bullet points)
+- `totale_danno`: Total damage amount
+- `causa_danno`: Cause of damage
+- `lista_allegati`: List of attachments (with bullet points)
+
+## Testing Templates
+
+You can test templates with the provided script:
+
+```bash
+python test_template_processing.py --template templates/template.docx --output output.docx
+```
+
+This will generate a sample report using example data.
+
+## Integration
+
+The template system is integrated into the main API through these endpoints:
+
+- `POST /api/generate`: Generates a report from uploaded documents
+- `POST /api/reports/{report_id}/refine`: Refines an existing report based on user instructions
+
+## Requirements
+
+- Python 3.8+
+- Tesseract OCR
+- Required Python packages listed in `requirements.txt`
+
+## Installation
+
+1. Install required dependencies:
+   ```bash
+   pip install -r backend/requirements.txt
+   ```
+
+2. Install Tesseract OCR:
+   ```bash
+   # On macOS
+   brew install tesseract
+   
+   # On Ubuntu/Debian
+   apt-get install tesseract-ocr
+   ```
+
+3. Place your template.docx in the templates directory.
+
+4. Configure environment variables in `.env`.
+
+5. Run the API server:
+   ```bash
+   uvicorn backend.main:app --reload
+   ``` 

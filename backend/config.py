@@ -26,9 +26,14 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = os.path.abspath(os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(BASE_DIR), "uploads")))
     GENERATED_REPORTS_DIR: str = os.path.abspath(os.getenv("GENERATED_REPORTS_DIR", os.path.join(os.path.dirname(BASE_DIR), "generated_reports")))
     MAX_UPLOAD_SIZE: int = int(
-        os.getenv("MAX_UPLOAD_SIZE", "104857600")
-    )  # 100MB default
+        os.getenv("MAX_UPLOAD_SIZE", "1073741824")
+    )  # 1GB default
 
+    # Data retention settings - how long to keep files before auto-deletion
+    DATA_RETENTION_HOURS: int = int(
+        os.getenv("DATA_RETENTION_HOURS", "2")
+    )  # Default to 2 hours
+    
     # API Settings
     API_RATE_LIMIT: int = int(
         os.getenv("API_RATE_LIMIT", "100")
@@ -60,3 +65,4 @@ os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
 
 print(f"Config loaded. Upload dir: {settings.UPLOAD_DIR}, Generated reports dir: {settings.GENERATED_REPORTS_DIR}")
+print(f"Data retention period: {settings.DATA_RETENTION_HOURS} hours")

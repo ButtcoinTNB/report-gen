@@ -187,9 +187,9 @@ async def upload_documents(
                 
                 # Check file type
                 file_extension = os.path.splitext(file.filename)[1].lower()
-                if not file.filename.lower().endswith(
-                    (".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png")
-                ):
+                allowed_extensions = [".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png"]
+                
+                if not any(file_extension.endswith(ext) for ext in allowed_extensions):
                     error_msg = f"Unsupported file type: {file_extension}. Only PDF, Word, text files and images are accepted"
                     file_processing_log.append(f"ERROR: {error_msg}")
                     raise HTTPException(
@@ -410,15 +410,15 @@ async def upload_document(
     if not any(file_ext.endswith(ext) for ext in allowed_extensions):
         raise HTTPException(
             status_code=400, 
-            detail="Only document and image files are allowed"
+            detail="Unsupported file type. Only PDF, Word, text files and images are accepted"
         )
     
     # Check file size
     if file.size > settings.MAX_UPLOAD_SIZE:
-        max_size_mb = settings.MAX_UPLOAD_SIZE / (1024 * 1024)
+        max_size_gb = settings.MAX_UPLOAD_SIZE / (1024 * 1024 * 1024)
         raise HTTPException(
             status_code=400,
-            detail=f"File size exceeds the {max_size_mb:.1f} MB limit"
+            detail=f"File size exceeds the {max_size_gb:.2f} GB limit"
         )
     
     # Create unique filename
@@ -464,6 +464,14 @@ async def upload_template_docx(file: UploadFile = File(...)):
             raise HTTPException(
                 status_code=400,
                 detail="File must be a DOCX document"
+            )
+        
+        # Check file size
+        if file.size > settings.MAX_UPLOAD_SIZE:
+            max_size_gb = settings.MAX_UPLOAD_SIZE / (1024 * 1024 * 1024)
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds the {max_size_gb:.2f} GB limit"
             )
         
         # Ensure the reference_reports directory exists

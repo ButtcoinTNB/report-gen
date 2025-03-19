@@ -129,7 +129,7 @@ def fetch_report_path_from_supabase(report_id: str):
         except Exception as e:
             # If database query fails, try to find the file locally
             print(f"Database error: {str(e)}")
-            local_path = find_report_file_locally(report_id)
+            local_path = find_docx_file_locally(report_id)
             if local_path:
                 return local_path
             raise HTTPException(status_code=500, detail="Database error when retrieving report")
@@ -148,13 +148,24 @@ def fetch_report_path_from_supabase(report_id: str):
         elif report_data.get("file_path") and os.path.exists(report_data["file_path"]):
             file_path = report_data["file_path"]
         
+        # Ensure the file is a DOCX file
+        if file_path and not file_path.lower().endswith('.docx'):
+            # Try to find a DOCX version of the file
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            docx_path = os.path.join(settings.GENERATED_REPORTS_DIR, f"{base_name}.docx")
+            
+            if os.path.exists(docx_path):
+                file_path = docx_path
+            else:
+                file_path = None  # File exists but not as DOCX
+        
         # If no valid path found in the database, fall back to local search
         if not file_path:
-            print(f"No valid file path found in database, searching locally for: {report_id}")
-            local_path = find_report_file_locally(report_id)
+            print(f"No valid DOCX file path found in database, searching locally for: {report_id}")
+            local_path = find_docx_file_locally(report_id)
             if local_path:
                 return local_path
-            raise HTTPException(status_code=404, detail=f"Report file not found for ID: {report_id}")
+            raise HTTPException(status_code=404, detail=f"DOCX report file not found for ID: {report_id}")
             
         return file_path
     except Exception as e:
@@ -250,258 +261,102 @@ def find_report_file_locally(report_id: str):
     return None
 
 
+def find_docx_file_locally(report_id: str):
+    """
+    Find a report DOCX file locally based on UUID.
+    
+    Args:
+        report_id: UUID of the report
+        
+    Returns:
+        Path to the report DOCX file or None if not found
+    """
+    # Check if this ID corresponds to a directory in uploads
+    report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+    
+    if os.path.exists(report_dir) and os.path.isdir(report_dir):
+        # First check metadata.json for the DOCX path
+        metadata_path = os.path.join(report_dir, "metadata.json")
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, "r") as f:
+                    metadata = json.load(f)
+                    if "docx_path" in metadata and os.path.exists(metadata["docx_path"]):
+                        return metadata["docx_path"]
+            except Exception as e:
+                print(f"Error reading metadata for {report_id}: {str(e)}")
+        
+        # If metadata doesn't have the path, search for DOCX files in the report directory
+        docx_files = glob.glob(os.path.join(report_dir, "*.docx"))
+        if docx_files:
+            # Use the most recently modified DOCX file
+            return max(docx_files, key=os.path.getmtime)
+        
+        # If no DOCXs in report directory, check the reports directory
+        import hashlib
+        hash_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
+        report_filename = f"report_{hash_id}.docx"
+        
+        # Check in the generated reports directory
+        generated_reports_dir = settings.GENERATED_REPORTS_DIR
+        if not os.path.isabs(generated_reports_dir):
+            # If it's a relative path, make it absolute
+            generated_reports_dir = os.path.abspath(generated_reports_dir)
+            
+        report_path = os.path.join(generated_reports_dir, report_filename)
+        if os.path.exists(report_path):
+            return report_path
+            
+        # Check for any file that contains the report ID in various directories
+        search_dirs = [
+            generated_reports_dir,
+            os.path.join(os.getcwd(), "generated_reports"),
+            os.path.join(os.getcwd(), "backend", "generated_reports"),
+            "./generated_reports",
+            "../generated_reports",
+            "/tmp/generated_reports"
+        ]
+        
+        for search_dir in search_dirs:
+            if os.path.exists(search_dir) and os.path.isdir(search_dir):
+                # Look for any DOCX file with matching ID or hash in name
+                docx_files = glob.glob(os.path.join(search_dir, "*.docx"))
+                for docx_file in docx_files:
+                    filename = os.path.basename(docx_file)
+                    if report_id in filename or str(hash_id) in filename:
+                        print(f"Found matching report DOCX: {docx_file}")
+                        return docx_file
+    
+    # If still not found, try searching all DOCXs in the generated reports directory
+    try:
+        print(f"Looking for any DOCXs related to report ID: {report_id}")
+        
+        # Check if generated reports directory exists
+        if os.path.exists(settings.GENERATED_REPORTS_DIR) and os.path.isdir(settings.GENERATED_REPORTS_DIR):
+            all_docxs = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, "*.docx"))
+            all_docxs.extend(glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, "**", "*.docx")))
+            
+            if all_docxs:
+                print(f"Found {len(all_docxs)} DOCXs to check")
+                # Return the most recently modified DOCX as a last resort
+                newest_docx = max(all_docxs, key=os.path.getmtime)
+                print(f"Using most recent DOCX: {newest_docx}")
+                return newest_docx
+    except Exception as e:
+        print(f"Error during extended DOCX search: {str(e)}")
+    
+    return None
+
+
 @router.get("/{report_id}")
 async def download_report(report_id: str):
     """
-    Download a finalized report PDF.
+    Download a finalized report (DOCX only).
+    Redirects to the DOCX download endpoint.
     """
-    print(f"Received download request for report ID: {report_id}")
-    
-    # First check if this is a UUID that exists locally
-    is_uuid = False
-    local_path = None
-    
-    if "-" in report_id:
-        is_uuid = True
-        local_path = find_report_file_locally(report_id)
-        print(f"UUID detected, local path search result: {local_path}")
-    
-    # If found locally, return the file
-    if local_path and os.path.exists(local_path):
-        filename = os.path.basename(local_path)
-        print(f"Returning local file: {local_path}")
-        return FileResponse(
-            local_path,
-            media_type="application/pdf",
-            filename=filename,
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-    
-    # If not found locally or not a UUID, try the database
-    try:
-        print(f"Looking up file path in database for report ID: {report_id}")
-        file_path = fetch_report_path_from_supabase(report_id)
-        
-        if not file_path:
-            print(f"No file path found in database for report ID: {report_id}, attempting to regenerate PDF")
-            
-            # First try to get the report content directly - this is our new function
-            report_content = get_report_content(report_id)
-            
-            if report_content:
-                print(f"Successfully retrieved report content, generating PDF")
-                # Generate the PDF with the content we found
-                from api.format import format_report_as_pdf, get_reference_metadata
-                
-                # Create a hash-based filename
-                try:
-                    db_id = ensure_id_is_int(report_id)
-                except ValueError:
-                    # Use a hash of the UUID as an integer ID for filename purposes
-                    db_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
-                
-                # Get metadata for formatting
-                reference_metadata = get_reference_metadata()
-                if f"Report #{db_id}" not in reference_metadata["headers"]:
-                    reference_metadata["headers"].append(f"Report #{db_id}")
-                
-                # Generate the PDF
-                pdf_filename = f"report_{db_id}.pdf"
-                pdf_path = await format_report_as_pdf(
-                    report_content,
-                    reference_metadata,
-                    is_preview=False,
-                    filename=pdf_filename
-                )
-                
-                # Update the file path in the database
-                try:
-                    update_report_file_path(report_id, pdf_path)
-                except Exception as update_e:
-                    print(f"Warning: Failed to update file path in database: {str(update_e)}")
-                
-                # Use the newly generated PDF
-                if os.path.exists(pdf_path):
-                    file_path = pdf_path
-                else:
-                    # Fall back to error PDF if generation failed
-                    from api.format import format_final
-                    error_response = await format_final({"report_id": report_id})
-                    if "file_path" in error_response and os.path.exists(error_response["file_path"]):
-                        print(f"Using error PDF: {error_response['file_path']}")
-                        file_path = error_response["file_path"]
-                    else:
-                        raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
-            else:
-                # If we couldn't find content, fall back to error PDF
-                from api.format import format_final
-                error_response = await format_final({"report_id": report_id})
-                if "file_path" in error_response and os.path.exists(error_response["file_path"]):
-                    print(f"Using error PDF: {error_response['file_path']}")
-                    file_path = error_response["file_path"]
-                else:
-                    raise HTTPException(status_code=404, detail=f"No file found for report with ID {report_id}")
-            
-        if not os.path.exists(file_path):
-            print(f"File path from database doesn't exist: {file_path}")
-            # Try to find locally one more time as a fallback
-            fallback_path = find_report_file_locally(report_id)
-            if fallback_path and os.path.exists(fallback_path):
-                print(f"Using fallback path: {fallback_path}")
-                file_path = fallback_path
-            else:
-                # Try to regenerate the PDF using content we can find
-                report_content = get_report_content(report_id)
-                
-                if report_content:
-                    print(f"Retrieved content to regenerate missing PDF")
-                    from api.format import format_report_as_pdf, get_reference_metadata
-                    
-                    # Create a hash-based filename
-                    try:
-                        db_id = ensure_id_is_int(report_id)
-                    except ValueError:
-                        # Use a hash of the UUID as an integer ID for filename purposes
-                        db_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
-                    
-                    # Get metadata for formatting
-                    reference_metadata = get_reference_metadata()
-                    if f"Report #{db_id}" not in reference_metadata["headers"]:
-                        reference_metadata["headers"].append(f"Report #{db_id}")
-                    
-                    # Generate the PDF
-                    pdf_filename = f"report_{db_id}_regenerated.pdf"
-                    pdf_path = await format_report_as_pdf(
-                        report_content,
-                        reference_metadata,
-                        is_preview=False,
-                        filename=pdf_filename
-                    )
-                    
-                    if os.path.exists(pdf_path):
-                        file_path = pdf_path
-                    else:
-                        # Generate an error PDF that will be visible and helpful to the user
-                        from api.format import format_final
-                        error_response = await format_final({"report_id": report_id})
-                        if "file_path" in error_response and os.path.exists(error_response["file_path"]):
-                            print(f"Using error PDF: {error_response['file_path']}")
-                            file_path = error_response["file_path"]
-                        else:
-                            raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
-                else:
-                    # Generate an error PDF that will be visible and helpful to the user
-                    from api.format import format_final
-                    error_response = await format_final({"report_id": report_id})
-                    if "file_path" in error_response and os.path.exists(error_response["file_path"]):
-                        print(f"Using error PDF: {error_response['file_path']}")
-                        file_path = error_response["file_path"]
-                    else:
-                        raise HTTPException(status_code=404, detail=f"File not found at path: {file_path}")
-            
-        # Return the PDF file as an attachment
-        filename = os.path.basename(file_path)
-        print(f"Returning file from path: {file_path}")
-        return FileResponse(
-            file_path,
-            media_type="application/pdf",
-            filename=filename,
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-            
-    except HTTPException:
-        # If database lookup fails for a UUID, make one more attempt to find any report
-        if is_uuid:
-            # Try to get the report content directly
-            report_content = get_report_content(report_id)
-            
-            if report_content:
-                print("Found report content, generating PDF")
-                # Generate the PDF with the content we found
-                from api.format import format_report_as_pdf, get_reference_metadata
-                
-                # Create a hash-based filename
-                hash_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
-                
-                # Get metadata for formatting
-                reference_metadata = get_reference_metadata()
-                reference_metadata["headers"].append(f"Report #{hash_id}")
-                
-                # Generate the PDF as a last resort
-                pdf_filename = f"report_{hash_id}_recovered.pdf"
-                try:
-                    pdf_path = await format_report_as_pdf(
-                        report_content,
-                        reference_metadata,
-                        is_preview=False,
-                        filename=pdf_filename
-                    )
-                    
-                    if os.path.exists(pdf_path):
-                        filename = os.path.basename(pdf_path)
-                        return FileResponse(
-                            pdf_path,
-                            media_type="application/pdf",
-                            filename=filename,
-                            headers={"Content-Disposition": f"attachment; filename={filename}"}
-                        )
-                except Exception as pdf_e:
-                    print(f"Error generating recovered PDF: {str(pdf_e)}")
-            
-            # Generate a hash-based filename as a last resort for finding existing files
-            hash_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
-            last_resort_filename = f"report_{hash_id}.pdf"
-            
-            # Check all possible locations
-            possible_paths = [
-                os.path.join(settings.GENERATED_REPORTS_DIR, last_resort_filename),
-                os.path.join(settings.UPLOAD_DIR, report_id, last_resort_filename),
-                os.path.join("reports", last_resort_filename),
-            ]
-            
-            for path in possible_paths:
-                if os.path.exists(path):
-                    filename = os.path.basename(path)
-                    return FileResponse(
-                        path,
-                        media_type="application/pdf",
-                        filename=filename,
-                        headers={"Content-Disposition": f"attachment; filename={filename}"}
-                    )
-            
-            # Generate an error PDF as absolute last resort
-            try:
-                from api.format import format_final
-                error_response = await format_final({"report_id": report_id})
-                if "file_path" in error_response and os.path.exists(error_response["file_path"]):
-                    print(f"Using generated error PDF: {error_response['file_path']}")
-                    return FileResponse(
-                        error_response["file_path"],
-                        media_type="application/pdf",
-                        filename=f"report_error_{report_id}.pdf",
-                        headers={"Content-Disposition": f"attachment; filename=report_error_{report_id}.pdf"}
-                    )
-            except Exception as error_gen_e:
-                print(f"Failed to generate error PDF: {str(error_gen_e)}")
-            
-            # If all else fails, return a more helpful error message
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Could not find any report file for ID {report_id}. "
-                       f"Please try regenerating the report."
-            )
-        else:
-            # For non-UUID IDs, re-raise the original exception
-            raise
-            
-    except Exception as e:
-        # Return a generic error for any other exception
-        print(f"Error downloading report: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error downloading report: {str(e)}"
-        )
+    # Redirect to the DOCX download endpoint
+    print(f"Redirecting download request for report ID: {report_id} to DOCX endpoint")
+    return await download_docx_report(report_id)
 
 
 @router.get("/file/{report_id}")
@@ -537,8 +392,58 @@ async def cleanup_report_files(report_id: str):
     """
     # Define paths for report files
     report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+    deleted_files = []
     
     try:
+        # First, let's get any file path from the database to make sure we delete the final DOCX
+        docx_path = None
+        try:
+            # Try to find the path in Supabase
+            db_id = ensure_id_is_int(report_id)
+            supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+            response = supabase.table("reports").select("formatted_file_path,file_path").eq("id", db_id).execute()
+            
+            if response.data and response.data[0]:
+                if response.data[0].get("formatted_file_path") and os.path.exists(response.data[0]["formatted_file_path"]):
+                    docx_path = response.data[0]["formatted_file_path"]
+                elif response.data[0].get("file_path") and os.path.exists(response.data[0]["file_path"]):
+                    docx_path = response.data[0]["file_path"]
+        except Exception as e:
+            print(f"Error retrieving file path from database: {str(e)}")
+        
+        # If we found a file path in the database, delete that file
+        if docx_path and os.path.exists(docx_path):
+            try:
+                os.remove(docx_path)
+                deleted_files.append(docx_path)
+                print(f"Deleted final DOCX file: {docx_path}")
+            except Exception as e:
+                print(f"Error deleting final DOCX file: {str(e)}")
+        
+        # Check for report-related DOCX files in the generated_reports directory
+        try:
+            # Create a hash-based pattern for filenames
+            hash_id = str(int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000)
+            # Patterns to match different types of report files
+            patterns = [
+                f"report_{report_id}*.docx",
+                f"report_{hash_id}*.docx",
+                f"*{report_id}*.docx"
+            ]
+            
+            for pattern in patterns:
+                matching_files = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, pattern))
+                for file_path in matching_files:
+                    try:
+                        os.remove(file_path)
+                        deleted_files.append(file_path)
+                        print(f"Deleted generated DOCX file: {file_path}")
+                    except Exception as e:
+                        print(f"Error deleting generated file {file_path}: {str(e)}")
+        except Exception as e:
+            print(f"Error cleaning up generated files: {str(e)}")
+        
+        # Delete the upload directory and its contents
         if os.path.exists(report_dir) and os.path.isdir(report_dir):
             # Get list of files before deletion for logging
             files_to_delete = os.listdir(report_dir)
@@ -548,35 +453,29 @@ async def cleanup_report_files(report_id: str):
                 file_path = os.path.join(report_dir, filename)
                 if os.path.isfile(file_path):
                     os.remove(file_path)
-                    print(f"Deleted file: {file_path}")
+                    deleted_files.append(file_path)
+                    print(f"Deleted uploaded file: {file_path}")
                     
             # Remove the directory itself
             os.rmdir(report_dir)
             print(f"Deleted directory: {report_dir}")
+        
+        # Update database status if using Supabase
+        try:
+            # Initialize Supabase client
+            supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
             
-            # Update database status if using Supabase
-            try:
-                from supabase import create_client, Client
-                
-                # Initialize Supabase client
-                supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-                
-                # Mark report as cleaned up in database
-                supabase.table("reports").update({"files_cleaned": True}).eq("id", report_id).execute()
-                print(f"Updated database for report {report_id}: files_cleaned=True")
-                
-            except Exception as e:
-                print(f"Error updating database status: {str(e)}")
+            # Mark report as cleaned up in database
+            supabase.table("reports").update({"files_cleaned": True}).eq("id", report_id).execute()
+            print(f"Updated database for report {report_id}: files_cleaned=True")
             
-            return {
-                "status": "success",
-                "message": f"Successfully cleaned up {len(files_to_delete)} files for report {report_id}"
-            }
-        else:
-            return {
-                "status": "warning",
-                "message": f"Report directory not found: {report_dir}"
-            }
+        except Exception as e:
+            print(f"Error updating database status: {str(e)}")
+        
+        return {
+            "status": "success",
+            "message": f"Successfully cleaned up {len(deleted_files)} files for report {report_id}"
+        }
     except Exception as e:
         print(f"Error cleaning up report files: {str(e)}")
         return {
@@ -619,13 +518,21 @@ async def download_docx_report(report_id: str):
                     detail="DOCX version of this report not found. Please generate it first."
                 )
             file_path = docx_path
-            
-        # Return the file as a download
-        return FileResponse(
+        
+        # Prepare the FileResponse
+        response = FileResponse(
             path=file_path,
             filename=f"report_{report_id}.docx",
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+        
+        # Schedule cleanup to run after the response is sent (in background)
+        # We use asyncio.create_task to run this in the background without awaiting it
+        import asyncio
+        asyncio.create_task(cleanup_report_files(report_id))
+        print(f"Scheduled cleanup for report {report_id} after download")
+        
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error downloading report: {str(e)}")
 

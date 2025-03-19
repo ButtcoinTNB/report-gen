@@ -7,6 +7,9 @@ from utils.error_handler import handle_exception, logger, retry_operation
 import re
 import json
 from pathlib import Path
+import time
+import requests
+from datetime import datetime
 
 
 async def call_openrouter_api(
@@ -108,10 +111,12 @@ async def call_openrouter_api(
 
 async def extract_template_variables(document_text: str, additional_info: str = "") -> Dict[str, Any]:
     """
-    Extract variables needed for the report template from document text and additional user information.
-    The function performs a two-step analysis:
-    1. First analyzes documents to extract initial information
-    2. Then incorporates user's additional information, giving it priority
+    Extract variables from document text for use in templates.
+    
+    This function analyzes the document text and additional information to extract
+    variables needed for report templates. It performs a two-step analysis: 
+    1. First it analyzes the document to extract initial information
+    2. Then it incorporates the user-provided information (which takes priority)
     
     Args:
         document_text: Text extracted from uploaded documents
@@ -121,210 +126,309 @@ async def extract_template_variables(document_text: str, additional_info: str = 
         Dictionary containing template variables and analysis results
     """
     try:
-        # Step 1: Initial document analysis
-        initial_prompt = (
-            "Sei un esperto analista di documenti assicurativi. Analizza il seguente testo per estrarre "
-            "informazioni rilevanti per un report assicurativo. Per ogni campo, indica anche il livello "
-            "di confidenza dell'informazione estratta (ALTA/MEDIA/BASSA) e se sono necessarie ulteriori informazioni.\n\n"
-            "DOCUMENTI ORIGINALI:\n" +
-            document_text + "\n\n"
-            "Estrai le seguenti informazioni nel formato JSON:\n"
-            "{\n"
-            '  "nome_azienda": {"valore": "Nome dell\'azienda", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "indirizzo_azienda": {"valore": "Indirizzo", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "cap": {"valore": "CAP", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "city": {"valore": "Città", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "vs_rif": {"valore": "Riferimento cliente", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "rif_broker": {"valore": "Riferimento broker", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "polizza": {"valore": "Numero polizza", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "ns_rif": {"valore": "Riferimento interno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "dinamica_eventi_accertamenti": {"valore": "Descrizione eventi", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "foto_intervento": {"valore": "Descrizione foto", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "causa_danno": {"valore": "Causa del danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "item1": {"valore": "Prima voce danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "totale_item1": {"valore": "Importo primo danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "item2": {"valore": "Seconda voce danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "totale_item2": {"valore": "Importo secondo danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "item3": {"valore": "Terza voce danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "totale_item3": {"valore": "Importo terzo danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "item4": {"valore": "Quarta voce danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "totale_item4": {"valore": "Importo quarto danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "item5": {"valore": "Quinta voce danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "totale_item5": {"valore": "Importo quinto danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "item6": {"valore": "Sesta voce danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "totale_item6": {"valore": "Importo sesto danno", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "totale_danno": {"valore": "Totale danni", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false},\n'
-            '  "lista_allegati": {"valore": "Elenco allegati", "confidenza": "ALTA/MEDIA/BASSA", "richiede_verifica": true/false}\n'
-            "}\n\n"
-            "ISTRUZIONI IMPORTANTI:\n"
-            "1. ANALISI ACCURATA: Analizza attentamente il contenuto per trovare le informazioni rilevanti\n"
-            "2. LIVELLO CONFIDENZA: Indica ALTA se l'informazione è chiaramente presente e affidabile, "
-            "MEDIA se è deducibile ma non esplicita, BASSA se è incerta o poco chiara\n"
-            "3. RICHIEDE VERIFICA: Indica true se l'informazione necessita di verifica o completamento\n"
-            "4. FORMATO IMPORTI: Converti tutti gli importi in formato numerico (es. '1250.00')\n"
-            "5. NO INVENZIONI: Se un'informazione non è presente, usa 'Non fornito' come valore"
-        )
-
-        # Call API for initial analysis
-        initial_result = await call_openrouter_api(
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Sei un esperto analista di documenti assicurativi specializzato nell'estrazione "
-                              "di informazioni con valutazione della confidenza. Analizza attentamente i documenti "
-                              "e indica quali informazioni necessitano di verifica o completamento."
-                },
-                {"role": "user", "content": initial_prompt}
-            ],
-            timeout=45.0
-        )
-
-        # Process initial analysis
-        if not (
-            initial_result
-            and "choices" in initial_result
-            and len(initial_result["choices"]) > 0
-            and "message" in initial_result["choices"][0]
-            and "content" in initial_result["choices"][0]["message"]
-        ):
-            logger.error("Unexpected API response format in initial analysis: " + str(initial_result))
-            return {}
-
-        # Extract initial variables with confidence levels
-        initial_analysis = json.loads(
-            re.search(r'\{[\s\S]*\}', initial_result["choices"][0]["message"]["content"]).group(0)
-        )
-
-        # Step 2: If additional info is provided, incorporate it
-        if additional_info.strip():
-            initial_analysis_json = json.dumps(initial_analysis, indent=2, ensure_ascii=False)
-            merge_prompt = (
-                "Sei un esperto analista di documenti assicurativi. Hai già analizzato i documenti originali "
-                "e ora devi incorporare le informazioni aggiuntive fornite dall'utente. Le informazioni dell'utente "
-                "hanno priorità sui dati estratti dai documenti.\n\n"
-                "ANALISI INIZIALE:\n" +
-                initial_analysis_json + "\n\n"
-                "INFORMAZIONI AGGIUNTIVE DELL'UTENTE:\n" +
-                additional_info + "\n\n"
-                "Fornisci il JSON finale aggiornato mantenendo la stessa struttura ma:\n"
-                "1. Aggiorna i valori con le informazioni dell'utente dove fornite\n"
-                "2. Imposta confidenza=ALTA per i campi forniti dall'utente\n"
-                "3. Imposta richiede_verifica=false per i campi forniti dall'utente\n"
-                "4. Mantieni i valori originali per i campi non menzionati dall'utente"
-            )
-
-            # Call API for merging information
-            merge_result = await call_openrouter_api(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Sei un esperto analista incaricato di combinare l'analisi iniziale "
-                                  "con le informazioni aggiuntive dell'utente, dando priorità a queste ultime."
-                    },
-                    {"role": "user", "content": merge_prompt}
-                ],
-                timeout=45.0
-            )
-
-            if (
-                merge_result
-                and "choices" in merge_result
-                and len(merge_result["choices"]) > 0
-                and "message" in merge_result["choices"][0]
-                and "content" in merge_result["choices"][0]["message"]
-            ):
-                try:
-                    merged_analysis = json.loads(
-                        re.search(r'\{[\s\S]*\}', merge_result["choices"][0]["message"]["content"]).group(0)
-                    )
-                    initial_analysis = merged_analysis
-                except Exception as e:
-                    logger.error("Error parsing merged analysis: " + str(e))
-
-        # Post-process the variables
-        final_variables = {}
-        fields_needing_attention = []
+        logger.info("Extracting template variables from document text")
         
-        # Add current date
-        from datetime import datetime
-        final_variables["data_oggi"] = datetime.now().strftime("%d/%m/%Y")
-
-        # Process each field
-        for field, data in initial_analysis.items():
-            value = data["valore"]
-            confidence = data["confidenza"]
-            needs_verification = data["richiede_verifica"]
-
-            # Handle amount fields
-            if field.startswith("totale_") and value != "Non fornito":
-                try:
-                    # Handle different number formats
-                    amount_str = str(value).replace('€', '').strip()
-                    if ',' in amount_str and '.' in amount_str:
-                        if amount_str.index('.') < amount_str.index(','):
-                            amount_str = amount_str.replace('.', '').replace(',', '.')
-                        else:
-                            amount_str = amount_str.replace(',', '')
-                    elif ',' in amount_str:
-                        amount_str = amount_str.replace(',', '.')
-                    
-                    amount = float(amount_str)
-                    final_variables[field] = "{:.2f}".format(amount)
-                except (ValueError, TypeError):
-                    final_variables[field] = "0.00"
-                    if confidence != "ALTA":
-                        fields_needing_attention.append("Verifica importo per " + field)
-            else:
-                final_variables[field] = value
-
-            # Track fields needing attention
-            if needs_verification or confidence in ["BASSA", "MEDIA"]:
-                fields_needing_attention.append(
-                    "Verifica " + field + ": confidenza " + confidence.lower()
-                )
-
-        # Calculate total if needed
-        if final_variables["totale_danno"] == "Non fornito" or final_variables["totale_danno"] == "0.00":
-            total = 0.0
-            has_items = False
-            for i in range(1, 7):
-                item_key = "totale_item" + str(i)
-                if item_key in final_variables:
-                    item_total = final_variables[item_key]
-                    if item_total != "Non fornito":
-                        try:
-                            # Handle the case where item_total might be an object or non-string
-                            item_total_str = str(item_total)
-                            # Clean the string and convert to float
-                            amount_str = item_total_str.replace('€', '').strip()
-                            if ',' in amount_str and '.' in amount_str:
-                                if amount_str.index('.') < amount_str.index(','):
-                                    amount_str = amount_str.replace('.', '').replace(',', '.')
-                                else:
-                                    amount_str = amount_str.replace(',', '')
-                            elif ',' in amount_str:
-                                amount_str = amount_str.replace(',', '.')
-                            
-                            total += float(amount_str)
-                            has_items = True
-                        except (ValueError, TypeError) as e:
-                            logger.warning(f"Could not convert {item_key} value '{item_total}' to float: {str(e)}")
-                            continue
-            if has_items:
-                final_variables["totale_danno"] = "{:.2f}".format(total)
-
-        return {
-            "variables": final_variables,
-            "fields_needing_attention": fields_needing_attention,
-            "analysis_details": initial_analysis  # Include full analysis for UI feedback
+        # First, try to extract structured data using pattern matching
+        from services.pdf_extractor import extract_structured_data_from_text
+        extracted_data = extract_structured_data_from_text(document_text)
+        logger.info(f"Pattern matching extracted {len(extracted_data)} fields")
+        
+        # Build system prompt for AI extraction
+        system_prompt = """
+        Sei un assistente specializzato nell'analisi di documenti assicurativi e nell'estrazione di informazioni strutturate. 
+        Il tuo compito è estrarre tutte le variabili rilevanti dai documenti forniti per popolare un template DOCX.
+        
+        ISTRUZIONI IMPORTANTI:
+        1. Analizza attentamente il testo ed estrai TUTTE le informazioni che potrebbero essere utili per un report assicurativo.
+        2. Se una informazione non è presente nel testo, indica "Non fornito" come valore.
+        3. Riconosci e estrai informazioni come: numeri di polizza, date, nomi di aziende, indirizzi, descrizioni di sinistri, ecc.
+        4. Fornisci i dati in formato JSON secondo lo schema specificato.
+        5. Le variabili del template seguono il formato {{ nome_variabile }} e devono essere tutte popolate.
+        6. Assicurati di estrarre correttamente nomi di aziende, indirizzi completi e informazioni finanziarie.
+        
+        SCHEMA DI OUTPUT:
+        {
+            "variables": {
+                "nome_azienda": "Nome dell'azienda assicurata",
+                "indirizzo_azienda": "Indirizzo completo dell'azienda",
+                "cap": "Codice postale",
+                "city": "Città",
+                "data_oggi": "Data del giorno in formato italiano (es. 18 Marzo 2025)",
+                "vs_rif": "Riferimento cliente",
+                "rif_broker": "Riferimento broker",
+                "polizza": "Numero polizza",
+                "ns_rif": "Riferimento interno",
+                "oggetto_polizza": "Oggetto della polizza",
+                "assicurato": "Nome dell'assicurato",
+                "data_sinistro": "Data del sinistro (formato GG/MM/AAAA)",
+                "titolo_breve": "Breve descrizione del sinistro",
+                "luogo_sinistro": "Luogo dove è avvenuto il sinistro",
+                "merce": "Descrizione della merce coinvolta",
+                "peso_merce": "Peso della merce",
+                "doc_peso": "Documento attestante il peso",
+                "valore_merce": "Valore della merce in formato monetario",
+                "num_fattura": "Numero fattura",
+                "data_fattura": "Data fattura",
+                "data_luogo_intervento": "Data e luogo dell'intervento peritale",
+                "dinamica_eventi": "Descrizione dettagliata della dinamica degli eventi",
+                "foto_intervento": "Riferimento alle foto dell'intervento",
+                "item1": "Prima voce di danno",
+                "totale_item1": "Importo prima voce",
+                "item2": "Seconda voce di danno",
+                "totale_item2": "Importo seconda voce",
+                "item3": "Terza voce di danno",
+                "totale_item3": "Importo terza voce",
+                "item4": "Quarta voce di danno",
+                "totale_item4": "Importo quarta voce",
+                "item5": "Quinta voce di danno",
+                "totale_item5": "Importo quinta voce",
+                "item6": "Sesta voce di danno",
+                "totale_item6": "Importo sesta voce",
+                "totale_danno": "Totale danno in formato monetario",
+                "causa_danno": "Descrizione dettagliata della causa del danno",
+                "lista_allegati": "Elenco degli allegati"
+            },
+            "fields_needing_attention": [
+                "nome_campo1",
+                "nome_campo2"
+            ],
+            "confidence": {
+                "nome_campo1": 0.9,
+                "nome_campo2": 0.5
+            },
+            "verification_needed": [
+                "nome_campo1",
+                "nome_campo2"
+            ]
         }
-
-    except Exception as e:
-        logger.error("Error extracting template variables: " + str(e))
+        """
+        
+        # User prompt with the document and additional info
+        user_prompt = f"""
+        Analizza il seguente testo estratto da documenti assicurativi ed estrai tutte le variabili necessarie per un template di perizia.
+        
+        TESTO DEI DOCUMENTI:
+        {document_text}
+        
+        INFORMAZIONI AGGIUNTIVE FORNITE DALL'UTENTE:
+        {additional_info}
+        
+        Estrai tutte le variabili secondo lo schema richiesto. Per i campi non presenti inserisci "Non fornito" o un valore ragionevole basato sul contesto.
+        Per le date mancanti, usa la data di oggi ({datetime.now().strftime('%d/%m/%Y')}) quando appropriato.
+        Per i campi numerici mancanti, usa '0,00' o 'N/A' a seconda del contesto.
+        Assicurati di distinguere tra informazioni estratte dai documenti e informazioni derivate o ipotizzate.
+        """
+        
+        # Call OpenRouter API
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        response = await call_openrouter_api(messages)
+        
+        if response and "choices" in response and len(response["choices"]) > 0:
+            # Extract the generated response
+            ai_response = response["choices"][0]["message"]["content"]
+            
+            # Parse the JSON from the response
+            try:
+                # Try to find and extract JSON from the response
+                json_match = re.search(r'```(?:json)?(.*?)```', ai_response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1).strip()
+                else:
+                    # If no code block, try to find JSON directly
+                    json_str = ai_response.strip()
+                    
+                # Remove any markdown or text before or after the JSON
+                start_idx = json_str.find('{')
+                end_idx = json_str.rfind('}') + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = json_str[start_idx:end_idx]
+                
+                extracted_data_ai = json.loads(json_str)
+                
+                # Make sure we have the expected structure
+                if "variables" not in extracted_data_ai:
+                    # If the AI returned a flat structure, wrap it
+                    if isinstance(extracted_data_ai, dict):
+                        extracted_data_ai = {"variables": extracted_data_ai}
+                    else:
+                        extracted_data_ai = {"variables": {}}
+                        
+                logger.info(f"AI extraction successful with {len(extracted_data_ai['variables'])} variables")
+                
+                # Merge pattern-matched data with AI-extracted data
+                # Pattern-matched data takes precedence for specific fields
+                for key, value in extracted_data.items():
+                    if key not in extracted_data_ai["variables"] or not extracted_data_ai["variables"][key]:
+                        extracted_data_ai["variables"][key] = value
+                
+                # Ensure all required template variables exist
+                # This is the complete list of variables from the template
+                required_variables = [
+                    "nome_azienda", "indirizzo_azienda", "cap", "city", "data_oggi",
+                    "vs_rif", "rif_broker", "polizza", "ns_rif", "oggetto_polizza",
+                    "assicurato", "data_sinistro", "titolo_breve", "luogo_sinistro",
+                    "merce", "peso_merce", "doc_peso", "valore_merce", "num_fattura",
+                    "data_fattura", "data_luogo_intervento", "dinamica_eventi", 
+                    "foto_intervento", "item1", "totale_item1", "item2", "totale_item2",
+                    "item3", "totale_item3", "item4", "totale_item4", "item5", 
+                    "totale_item5", "item6", "totale_item6", "totale_danno", 
+                    "causa_danno", "lista_allegati"
+                ]
+                
+                # Fill in any missing variables with default values
+                for var in required_variables:
+                    if var not in extracted_data_ai["variables"] or not extracted_data_ai["variables"][var]:
+                        if "data" in var:
+                            extracted_data_ai["variables"][var] = datetime.now().strftime("%d/%m/%Y")
+                        elif "totale" in var:
+                            extracted_data_ai["variables"][var] = "€ 0,00"
+                        elif "item" in var:
+                            extracted_data_ai["variables"][var] = "N/A"
+                        else:
+                            extracted_data_ai["variables"][var] = "Non fornito"
+                
+                # Add dynamically formatted date fields
+                today = datetime.now()
+                if "data_oggi" not in extracted_data_ai["variables"] or extracted_data_ai["variables"]["data_oggi"] == "Non fornito":
+                    # Format date as "18 Marzo 2025"
+                    months_italian = [
+                        "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+                        "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
+                    ]
+                    extracted_data_ai["variables"]["data_oggi"] = f"{today.day} {months_italian[today.month-1]} {today.year}"
+                
+                # Add a clean version of dynamic events for markdown parsing
+                if "dinamica_eventi" in extracted_data_ai["variables"]:
+                    events_text = extracted_data_ai["variables"]["dinamica_eventi"]
+                    # Format as bullet points if not already
+                    if not events_text.strip().startswith("- "):
+                        lines = events_text.split("\n")
+                        formatted_lines = []
+                        for line in lines:
+                            if line.strip():
+                                formatted_lines.append(f"- {line.strip()}")
+                        extracted_data_ai["variables"]["dinamica_eventi_accertamenti"] = "\n".join(formatted_lines)
+                    else:
+                        extracted_data_ai["variables"]["dinamica_eventi_accertamenti"] = events_text
+                
+                # Same for list of attachments
+                if "lista_allegati" in extracted_data_ai["variables"]:
+                    attachments_text = extracted_data_ai["variables"]["lista_allegati"]
+                    if not attachments_text.strip().startswith("- "):
+                        lines = attachments_text.split("\n")
+                        formatted_lines = []
+                        for line in lines:
+                            if line.strip():
+                                formatted_lines.append(f"- {line.strip()}")
+                        extracted_data_ai["variables"]["lista_allegati"] = "\n".join(formatted_lines)
+                
+                return extracted_data_ai
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing JSON from AI response: {str(e)}")
+                logger.error(f"Response was: {ai_response}")
+                # Fallback to a basic template with default values
+                variables = {var: "Non fornito" for var in required_variables}
+                return {"variables": variables, "fields_needing_attention": required_variables}
+        
+        logger.error("Failed to get usable response from OpenRouter API")
+        # Return a basic set of variables
         return {
-            "variables": {},
-            "fields_needing_attention": ["Errore nell'analisi dei documenti"],
-            "analysis_details": {}
+            "variables": {
+                "nome_azienda": "Non fornito",
+                "indirizzo_azienda": "Non fornito",
+                "cap": "Non fornito",
+                "city": "Non fornito",
+                "data_oggi": datetime.now().strftime("%d/%m/%Y"),
+                "vs_rif": "Non fornito",
+                "rif_broker": "Non fornito",
+                "polizza": "Non fornito",
+                "ns_rif": "Non fornito",
+                "oggetto_polizza": "Non fornito",
+                "assicurato": "Non fornito",
+                "data_sinistro": "Non fornito",
+                "titolo_breve": "Non fornito",
+                "luogo_sinistro": "Non fornito",
+                "merce": "Non fornito",
+                "peso_merce": "Non fornito",
+                "doc_peso": "Non fornito",
+                "valore_merce": "Non fornito",
+                "num_fattura": "Non fornito",
+                "data_fattura": "Non fornito",
+                "data_luogo_intervento": "Non fornito",
+                "dinamica_eventi": "Non fornito",
+                "dinamica_eventi_accertamenti": "- Non fornito",
+                "foto_intervento": "Non fornito",
+                "item1": "Non fornito",
+                "totale_item1": "€ 0,00",
+                "item2": "Non fornito",
+                "totale_item2": "€ 0,00",
+                "item3": "Non fornito",
+                "totale_item3": "€ 0,00",
+                "item4": "Non fornito",
+                "totale_item4": "€ 0,00",
+                "item5": "Non fornito",
+                "totale_item5": "€ 0,00",
+                "item6": "Non fornito",
+                "totale_item6": "€ 0,00",
+                "totale_danno": "€ 0,00",
+                "causa_danno": "Non fornito",
+                "lista_allegati": "- Non fornito"
+            },
+            "fields_needing_attention": []
+        }
+        
+    except Exception as e:
+        handle_exception(e, "Template variable extraction")
+        # Return a basic set of variables on error
+        return {
+            "variables": {
+                "nome_azienda": "Non fornito",
+                "indirizzo_azienda": "Non fornito",
+                "cap": "Non fornito",
+                "city": "Non fornito",
+                "data_oggi": datetime.now().strftime("%d/%m/%Y"),
+                "vs_rif": "Non fornito",
+                "rif_broker": "Non fornito",
+                "polizza": "Non fornito",
+                "ns_rif": "Non fornito",
+                "oggetto_polizza": "Non fornito",
+                "assicurato": "Non fornito",
+                "data_sinistro": "Non fornito",
+                "titolo_breve": "Non fornito",
+                "luogo_sinistro": "Non fornito",
+                "merce": "Non fornito",
+                "peso_merce": "Non fornito",
+                "doc_peso": "Non fornito",
+                "valore_merce": "Non fornito",
+                "num_fattura": "Non fornito",
+                "data_fattura": "Non fornito",
+                "data_luogo_intervento": "Non fornito",
+                "dinamica_eventi": "Non fornito",
+                "dinamica_eventi_accertamenti": "- Non fornito",
+                "foto_intervento": "Non fornito",
+                "item1": "Non fornito",
+                "totale_item1": "€ 0,00",
+                "item2": "Non fornito",
+                "totale_item2": "€ 0,00",
+                "item3": "Non fornito",
+                "totale_item3": "€ 0,00",
+                "item4": "Non fornito",
+                "totale_item4": "€ 0,00",
+                "item5": "Non fornito",
+                "totale_item5": "€ 0,00",
+                "item6": "Non fornito",
+                "totale_item6": "€ 0,00",
+                "totale_danno": "€ 0,00",
+                "causa_danno": "Non fornito",
+                "lista_allegati": "- Non fornito"
+            },
+            "error": str(e),
+            "fields_needing_attention": []
         }
 
 
@@ -408,7 +512,7 @@ async def analyze_reference_reports(reference_paths: List[str]) -> Dict[str, Any
         
         if not reference_texts:
             raise ValueError("No valid reference reports found for analysis")
-        
+            
         # Create prompt for analyzing style and format
         # Avoid f-strings entirely for this section - concatenate parts safely
         joined_reports = "\n\n".join(["=== Report " + str(i+1) + " ===\n" + text for i, text in enumerate(reference_texts)])

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form
 import requests
 import os
 import json
@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional
 from services.pdf_extractor import extract_text_from_files, extract_text_from_file
 from services.ai_service import generate_report_text, extract_template_variables, refine_report_text
 from services.docx_formatter import format_report_as_docx
+from services.template_processor import template_processor
 from utils.id_mapper import ensure_id_is_int
 import time
 import re
@@ -24,6 +25,7 @@ import logging
 from services.docx_service import docx_service
 from services.preview_service import preview_service
 from pathlib import Path
+import asyncio
 
 router = APIRouter(tags=["Report Generation"])
 logger = logging.getLogger(__name__)
@@ -632,38 +634,106 @@ async def _generate_and_save_report(
 
 
 @router.post("/generate")
-async def generate_report(request: GenerateRequest, background_tasks: BackgroundTasks):
-    """Generate a DOCX report and return preview/download URLs."""
+async def generate_report(
+    report_id: str = Form(...),
+    additional_info: Optional[str] = Form(None),
+    template_name: Optional[str] = Form("template.docx")
+) -> Dict[str, Any]:
+    """
+    Generate a report from uploaded documents and additional information.
+    
+    Args:
+        report_id: ID of the report to generate
+        additional_info: Optional additional information to include
+        template_name: Optional name of the template to use
+        
+    Returns:
+        Dictionary containing report ID and URLs for preview and download
+    """
     try:
-        # Get document paths
-        document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
+        # Get document paths from database
+        from services.supabase_service import supabase
+        result = supabase.table("reports").select("file_paths").eq("report_id", report_id).execute()
         
-        # Generate report content
-        result = await generate_report_text(document_paths, request.additional_info)
-        
-        if "error" in result:
-            raise HTTPException(status_code=400, detail=result["error"])
-        
-        # Generate DOCX report
-        report_id = docx_service.generate_report(
-            template_variables={
-                **result["template_variables"],
-                "content": result["report_text"]
-            }
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Report not found")
+            
+        file_paths = result.data[0].get("file_paths", [])
+        if not file_paths:
+            raise HTTPException(status_code=400, detail="No documents found for report")
+            
+        # Extract text from documents
+        document_texts = []
+        for file_path in file_paths:
+            full_path = Path(settings.UPLOAD_DIR) / file_path
+            if not full_path.exists():
+                logger.warning(f"File not found: {full_path}")
+                continue
+                
+            # Use the enhanced PDF extractor
+            extracted_text = extract_text_from_file(str(full_path))
+            if not extracted_text.startswith("Error:"):
+                document_texts.append(extracted_text)
+                
+        if not document_texts:
+            raise HTTPException(status_code=400, detail="No readable documents found")
+            
+        # Extract template variables from documents
+        template_variables_result = await extract_template_variables(
+            "\n\n".join(document_texts),
+            additional_info or ""
         )
         
-        # Generate preview asynchronously
-        background_tasks.add_task(preview_service.generate_preview, report_id)
+        # Get the variables
+        template_variables = template_variables_result.get("variables", {})
         
-        # Get URLs for preview and download
-        urls = get_file_urls(report_id)
+        # Check which variables the template requires
+        template_required_vars = template_processor.analyze_template(template_name)
+        
+        # Ensure all required variables exist
+        for var in template_required_vars:
+            if var not in template_variables or not template_variables[var]:
+                if var == "data_oggi":
+                    # Set current date in Italian format
+                    from datetime import datetime
+                    months_italian = [
+                        "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+                        "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
+                    ]
+                    today = datetime.now()
+                    template_variables[var] = f"{today.day} {months_italian[today.month-1]} {today.year}"
+                elif var.startswith("totale_"):
+                    template_variables[var] = "€ 0,00"
+                else:
+                    template_variables[var] = "Non fornito" 
+        
+        # Generate the report using the template processor
+        output_path = template_processor.render_template(
+            template_name=template_name,
+            variables=template_variables
+        )
+        
+        # Extract report ID from the output path
+        output_filename = os.path.basename(output_path)
+        new_report_id = output_filename.replace("report_", "").replace(".docx", "")
+        
+        # Generate preview
+        preview_task = asyncio.create_task(generate_preview(new_report_id, Path(output_path)))
+        
+        # Update database with file path
+        supabase.table("reports").update({
+            "file_path": output_path,
+            "formatted_file_path": output_path,  # Use the same path for both fields
+            "status": "completed",
+            "template_variables": json.dumps(template_variables)  # Store variables for future reference
+        }).eq("report_id", report_id).execute()
         
         return {
+            "report_id": new_report_id,
+            "preview_url": f"/api/preview/{new_report_id}",
+            "download_url": f"/api/download/docx/{new_report_id}",
             "status": "success",
-            "report_id": report_id,
-            "preview_url": urls["preview_url"],
-            "download_url": urls["download_url"],
-            "fields_needing_attention": result.get("fields_needing_attention", [])
+            "fields_needing_attention": template_variables_result.get("fields_needing_attention", [])
         }
         
     except Exception as e:
@@ -671,32 +741,80 @@ async def generate_report(request: GenerateRequest, background_tasks: Background
         raise
 
 
+async def generate_preview(report_id: str, report_path: Path) -> None:
+    """
+    Generate a preview of the report.
+    
+    Args:
+        report_id: ID of the report
+        report_path: Path to the report file
+    """
+    try:
+        # Get preview path
+        preview_path = docx_service.get_preview_path(report_id)
+        
+        # Convert DOCX to HTML preview
+        from services.docx_service import convert_docx_to_html
+        await convert_docx_to_html(report_path, preview_path)
+        
+    except Exception as e:
+        logger.error(f"Error generating preview: {str(e)}")
+        # Don't raise the exception as this is a background task
+
+
 @router.post("/reports/{report_id}/refine")
 async def refine_report(report_id: str, request: RefineRequest, background_tasks: BackgroundTasks):
     """Refine an existing report based on user instructions."""
     try:
         # Get the original report path
-        original_path = docx_service.get_report_path(report_id)
+        report_data = supabase.table("reports").select("file_path,template_variables").eq("report_id", report_id).execute()
+        
+        if not report_data.data:
+            raise HTTPException(status_code=404, detail="Report not found")
+            
+        original_path = report_data.data[0].get("file_path")
+        if not original_path:
+            raise HTTPException(status_code=400, detail="Report file path not found")
+            
+        # Get the original template variables if available
+        template_variables = {}
+        if report_data.data[0].get("template_variables"):
+            try:
+                template_variables = json.loads(report_data.data[0].get("template_variables"))
+            except:
+                logger.warning(f"Could not parse template variables for report {report_id}")
         
         # Refine the report text based on instructions
-        refined_text = await refine_report_text(str(original_path), request.instructions)
+        refined_variables = await refine_template_variables(template_variables, request.instructions)
         
-        # Generate new report with refined text
-        new_report_id = docx_service.modify_report(report_id, {
-            "content": refined_text
-        })
+        # Generate new report with refined variables
+        output_path = template_processor.render_template(
+            template_name="template.docx",  # Assuming we use the default template
+            variables=refined_variables
+        )
+        
+        # Extract report ID from the output path
+        output_filename = os.path.basename(output_path)
+        new_report_id = output_filename.replace("report_", "").replace(".docx", "")
         
         # Generate preview asynchronously
         background_tasks.add_task(preview_service.generate_preview, new_report_id)
         
-        # Get URLs for preview and download
-        urls = get_file_urls(new_report_id)
+        # Update database with new report info
+        supabase.table("reports").insert({
+            "report_id": new_report_id,
+            "parent_report_id": report_id,
+            "file_path": output_path,
+            "formatted_file_path": output_path,
+            "status": "completed",
+            "template_variables": json.dumps(refined_variables)
+        }).execute()
         
         return {
             "status": "success",
             "report_id": new_report_id,
-            "preview_url": urls["preview_url"],
-            "download_url": urls["download_url"]
+            "preview_url": f"/api/preview/{new_report_id}",
+            "download_url": f"/api/download/docx/{new_report_id}"
         }
         
     except Exception as e:
@@ -704,13 +822,94 @@ async def refine_report(report_id: str, request: RefineRequest, background_tasks
         raise
 
 
-def get_file_urls(report_id: str) -> dict:
-    """Generate preview and download URLs for a report."""
-    base_url = "http://localhost:8000/files"  # Update for production
-    return {
-        "preview_url": f"{base_url}/previews/{report_id}.html",
-        "download_url": f"{base_url}/reports/{report_id}.docx"
-    }
+async def refine_template_variables(original_variables: Dict[str, Any], instructions: str) -> Dict[str, Any]:
+    """
+    Refine template variables based on user instructions.
+    
+    Args:
+        original_variables: Original template variables
+        instructions: User instructions for refinement
+        
+    Returns:
+        Dictionary of refined template variables
+    """
+    try:
+        # Build system prompt for AI extraction
+        system_prompt = """
+        Sei un assistente specializzato nella modifica di report assicurativi.
+        Il tuo compito è aggiornare le variabili di un template DOCX in base alle istruzioni dell'utente.
+        
+        ISTRUZIONI IMPORTANTI:
+        1. Analizza attentamente le istruzioni dell'utente e modifica SOLO ciò che viene richiesto.
+        2. Assicurati di mantenere tutte le variabili originali che non devono essere modificate.
+        3. Rispetta sempre il formato dei valori (date, importi, elenchi puntati, ecc.).
+        4. Fornisci il risultato in formato JSON.
+        """
+        
+        # User prompt with the document and additional info
+        user_prompt = f"""
+        Ecco le variabili attuali del template:
+        {json.dumps(original_variables, indent=2, ensure_ascii=False)}
+        
+        L'utente ha richiesto le seguenti modifiche:
+        {instructions}
+        
+        Aggiorna le variabili in base alle istruzioni e mantieni inalterate tutte le altre.
+        Assicurati che il formato sia corretto per ogni tipo di variabile (date, importi, elenchi puntati, ecc.).
+        """
+        
+        # Call OpenRouter API
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        response = await call_openrouter_api(messages)
+        
+        if response and "choices" in response and len(response["choices"]) > 0:
+            # Extract the generated response
+            ai_response = response["choices"][0]["message"]["content"]
+            
+            # Parse the JSON from the response
+            try:
+                # Try to find and extract JSON from the response
+                json_match = re.search(r'```(?:json)?(.*?)```', ai_response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1).strip()
+                else:
+                    # If no code block, try to find JSON directly
+                    json_str = ai_response.strip()
+                    
+                # Remove any markdown or text before or after the JSON
+                start_idx = json_str.find('{')
+                end_idx = json_str.rfind('}') + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = json_str[start_idx:end_idx]
+                
+                refined_variables = json.loads(json_str)
+                logger.info(f"Successfully refined variables")
+                
+                # If the response doesn't have the correct structure, ensure it does
+                if not isinstance(refined_variables, dict):
+                    refined_variables = {"variables": original_variables}
+                
+                # Check if 'variables' key exists, if not, it's a flat structure
+                if "variables" in refined_variables:
+                    refined_variables = refined_variables["variables"]
+                    
+                return refined_variables
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing JSON from AI response: {str(e)}")
+                logger.error(f"Response was: {ai_response}")
+                return original_variables
+        
+        logger.error("Failed to get usable response from OpenRouter API")
+        return original_variables
+        
+    except Exception as e:
+        handle_exception(e, "Template variable refinement")
+        return original_variables
 
 
 # Cleanup task to run periodically

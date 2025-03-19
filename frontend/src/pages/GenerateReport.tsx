@@ -117,7 +117,23 @@ const GenerateReport: React.FC = () => {
 
   const handleDownload = () => {
     if (reportPreview?.downloadUrl) {
-      window.location.href = reportPreview.downloadUrl;
+      // Ensure we're using the DOCX endpoint
+      let downloadUrl = reportPreview.downloadUrl;
+      
+      // Check if the URL already contains '/docx/'
+      if (!downloadUrl.includes('/docx/')) {
+        // Insert 'docx/' before the report ID in the URL
+        const parts = downloadUrl.split('/');
+        const lastPart = parts[parts.length - 1];
+        downloadUrl = downloadUrl.replace(lastPart, `docx/${lastPart}`);
+      }
+      
+      window.location.href = downloadUrl;
+      
+      // Show a notice that the report will be removed after download
+      setTimeout(() => {
+        alert('Nota: Tutti i file caricati sono stati eliminati dal server dopo il download.');
+      }, 2000); // Show the alert 2 seconds after initiating download
     }
   };
 
