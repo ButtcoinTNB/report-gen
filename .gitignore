@@ -73,6 +73,15 @@ preview_files/
 *.log
 logs/
 
+# Deployment
+.render/
+.netlify/
+.dockerignore
+Dockerfile
+docker-compose*.yml
+*.pid
+*.socket
+
 # Supabase local dev
 supabase/
 
