@@ -333,14 +333,14 @@ async def generate_report_from_id(data: Dict[str, Any]):
             report_content=result["report_text"],
             template_variables=result["template_variables"],
             filename=f"report_{report_id}.docx"
-        )
-        
+                    )
+                    
         return {
             "report_id": report_id,
             "docx_path": docx_result["docx_path"],
             "filename": docx_result["filename"]
-        }
-            
+            }
+        
     except Exception as e:
         logger.error(f"Error generating report: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -457,8 +457,8 @@ async def analyze_reference_reports(reference_paths: List[str]) -> Dict[str, Any
         # Get style analysis from AI
         result = await call_openrouter_api(
             messages=[
-                {
-                    "role": "system",
+            {
+                "role": "system", 
                     "content": "Sei un esperto analista di stile e formato di documenti assicurativi. "
                               "Analizza i documenti di riferimento per estrarre pattern di stile precisi, "
                               "NON contenuto specifico. Fornisci esempi concreti e pattern esatti."
@@ -669,12 +669,12 @@ async def refine_report_text(report_path: str, instructions: str) -> str:
         # Call OpenRouter API
         result = await call_openrouter_api(
             messages=[
-                {
-                    "role": "system",
+            {
+                "role": "system", 
                     "content": "Sei un esperto redattore di relazioni assicurative. Modifica i documenti secondo le "
                               "istruzioni mantenendo accuratezza e professionalità. Non inventare nuovi fatti."
-                },
-                {"role": "user", "content": prompt}
+            },
+            {"role": "user", "content": prompt}
             ],
             timeout=45.0
         )
