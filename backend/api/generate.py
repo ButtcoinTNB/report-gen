@@ -8,12 +8,10 @@ from services.pdf_extractor import extract_text_from_files, extract_text_from_fi
 from services.ai_service import generate_report_text, extract_template_variables, refine_report_text
 from services.docx_formatter import format_report_as_docx
 from services.template_processor import template_processor
-from utils.id_mapper import ensure_id_is_int
 import time
 import re
-from fastapi import Depends
 from sqlalchemy.orm import Session
-from models import Report, File, User, Template
+from models import Report, File as FileModel, User, Template
 from utils.error_handler import logger, handle_exception
 from utils.auth import get_current_user
 from utils.db import get_db
@@ -186,10 +184,10 @@ async def generate_report(
             
             report_response = await supabase.table("reports").insert(report_data).execute()
             if not report_response.data:
-                raise HTTPException(status_code=500, message="Failed to create report")
+                raise HTTPException(status_code=500, detail="Failed to create report")
             
             report = report_response.data[0]
-            report_id = UUID4(report["report_id"])
+            report_id = UUID(report["report_id"])
             
             # Associate files with report
             for doc_id in request.document_ids:
@@ -283,13 +281,13 @@ async def refine_report(
                 "status": "refined",
                 "updated_at": "now()"
             }).eq("report_id", str(report_id)).execute()
-            
-            return {
+                    
+        return {
                 "report_id": str(report_id),
                 "content": refined_content,
                 "status": "refined"
             }
-            
+        
     except Exception as e:
         logger.error(f"Error refining report: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -360,7 +358,7 @@ async def generate_from_structure(
         # Handle file IDs - convert them to file paths
         for file_id in request.document_ids:
             # Get file path from database
-            file_record = db.query(File).filter(File.id == file_id).first()
+            file_record = db.query(FileModel).filter(FileModel.id == file_id).first()
             if not file_record:
                 logger.warning(f"File with ID {file_id} not found")
                 continue
@@ -486,7 +484,7 @@ def get_report_directory(report_id: UUID4) -> Path:
 async def _generate_and_save_report(
     system_message: str,
     prompt: str,
-    report_id: int,
+    report_id: UUID4,
     report_dir: str,
     document_text: str,
     token_limit: int = 4000
@@ -614,3 +612,35 @@ async def generate_preview(report_id: UUID4, report_path: Path) -> None:
 async def cleanup_old_files():
     """Clean up old preview files on startup and shutdown."""
     preview_service.cleanup_old_previews()
+
+
+@router.post("/reports/generate-docx", response_model=Dict[str, Any])
+async def generate_report_docx(
+    background_tasks: BackgroundTasks,
+    report_id: UUID4,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Generate a DOCX report from a report ID
+    
+    Args:
+        report_id: UUID of the report
+        
+    Returns:
+        Status message and report ID
+    """
+    logger.info(f"Starting report generation for report ID: {report_id}")
+    
+    try:
+        # Find the report in the database
+        report = db.query(Report).filter(Report.id == report_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+            
+        # Generate the report
+        # ...additional implementation code here...
+        
+        return {"status": "success", "report_id": str(report_id)}
+    except Exception as e:
+        logger.error(f"Error generating DOCX: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

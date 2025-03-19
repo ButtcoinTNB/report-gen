@@ -411,11 +411,11 @@ async def refine_report_text(
         ]
         
         response = await call_openrouter_api(messages)
-        
-        return {
+            
+            return {
             "content": response["choices"][0]["message"]["content"]
-        }
-        
+            }
+            
     except Exception as e:
         handle_exception(e, "Report refinement")
         raise
@@ -503,7 +503,7 @@ async def get_template_content(template_id: UUID4) -> str:
             raise ValueError(f"Template {template_id} not found")
             
         return response.data[0]["content"]
-        
+            
     except Exception as e:
         handle_exception(e, "Getting template content")
         raise
