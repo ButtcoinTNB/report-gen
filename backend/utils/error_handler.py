@@ -5,6 +5,7 @@ This ensures consistent error responses and logging throughout the application.
 
 import logging
 import traceback
+import json
 from typing import Dict, Any, Optional, Type, Union
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -62,11 +63,29 @@ def handle_exception(
     status_code = error_info["status_code"]
     error_type = error_info["error_type"]
     
+    # Extract a simple error message string from the exception
+    error_message = str(exception)
+    # If error is a dictionary, try to simplify it to a string
+    if error_message.startswith("{") and error_message.endswith("}"):
+        try:
+            error_dict = json.loads(error_message)
+            if isinstance(error_dict, dict):
+                # Try to extract a simple message from the dictionary
+                if "detail" in error_dict:
+                    error_message = str(error_dict["detail"])
+                elif "message" in error_dict:
+                    error_message = str(error_dict["message"])
+                elif "error" in error_dict:
+                    error_message = str(error_dict["error"])
+        except:
+            # If JSON parsing fails, keep the original message
+            pass
+    
     # Build error response
     error_response = {
         "status": "error",
         "error_type": error_type,
-        "message": str(exception),
+        "message": error_message,
         "operation": operation
     }
     
@@ -74,10 +93,11 @@ def handle_exception(
     if include_traceback:
         error_response["traceback"] = tb
     
-    # Raise HTTPException with the standardized response
+    # Raise HTTPException with a simplified string response if possible
+    # This helps prevent complex objects from causing issues in the frontend
     raise HTTPException(
         status_code=status_code,
-        detail=error_response
+        detail=error_message if len(error_message) < 500 else f"Error during {operation}"
     )
 
 def api_error_handler(func):

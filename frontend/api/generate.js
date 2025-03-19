@@ -86,68 +86,6 @@ export async function generateReportWithInfo(reportId, additionalInfo = "", onPr
 }
 
 /**
- * Get a brief AI summary of uploaded documents
- * 
- * @param {number} reportId - ID of the report to summarize
- * @param {Function} onProgress - Optional callback for progress updates
- * @returns {Promise<Object>} Summary and key facts
- */
-export async function getSummary(reportId, onProgress) {
-  try {
-    console.log("Getting summary for report ID:", reportId);
-    
-    // Let the UI know we're starting
-    if (onProgress) {
-      onProgress({ 
-        step: 0, 
-        message: "Analyzing documents 🔍", 
-        progress: 50 
-      });
-    }
-    
-    const payload = { report_id: reportId };
-    
-    // Use the configured API URL from config
-    const response = await axios.post(`${config.endpoints.generate}/summarize`, payload);
-    
-    console.log("Summary API response:", response.data);
-    
-    // Let the UI know we're completed
-    if (onProgress) {
-      onProgress({ 
-        step: 1, 
-        message: "Analysis complete ✅", 
-        progress: 100 
-      });
-    }
-    
-    // Return the summary data
-    return {
-      summary: response.data.summary || "No summary available",
-      keyFacts: response.data.key_facts || [],
-      error: false
-    };
-  } catch (error) {
-    console.error("Error getting summary:", error);
-    
-    // More detailed logging for API errors
-    if (error?.isAxiosError && error.response) {
-      console.error("Server error response:", error.response.data);
-    }
-    
-    // Create a user-friendly error message
-    const errorMessage = formatApiError(error, "Error analyzing documents");
-    
-    return {
-      summary: "Unable to generate summary. Please try again.",
-      keyFacts: [],
-      error: true,
-      errorMessage
-    };
-  }
-}
-
-/**
  * Generate a report from uploaded documents
  * 
  * @param {number} reportId - ID of the report to generate content for

@@ -106,125 +106,6 @@ async def call_openrouter_api(
     )
 
 
-async def generate_case_summary(document_paths: List[str], ocr_context: str = "") -> Dict[str, str]:
-    """
-    Generate a very brief summary of case documents highlighting key findings.
-    
-    Args:
-        document_paths: List of paths to the uploaded documents
-        ocr_context: Optional context about OCR processing for image-based documents
-        
-    Returns:
-        Dictionary with summary and key_facts
-    """
-    try:
-        logger.info("Generating case summary for " + str(len(document_paths)) + " documents")
-        
-        # Use our improved extractor to handle different file types including images
-        from services.pdf_extractor import extract_text_from_files
-        
-        # Extract text from all documents at once with better file handling
-        extracted_content = extract_text_from_files(document_paths)
-        
-        if not extracted_content or extracted_content.strip() == "":
-            logger.warning("No readable content extracted from documents")
-            return {
-                "summary": "No readable content found in the provided documents.",
-                "key_facts": []
-            }
-            
-        logger.info("Successfully extracted " + str(len(extracted_content)) + " characters from documents")
-        
-        # Add OCR context to the prompt if provided
-        ocr_instruction = ""
-        if ocr_context:
-            logger.info("Including OCR context in prompt: " + ocr_context)
-            ocr_instruction = "\n5. CONSAPEVOLEZZA OCR: " + ocr_context + "\n"
-        
-        # Create prompt for a very brief summary with strict instructions
-        prompt = (
-            "Sei un analista di sinistri assicurativi. Il tuo compito è creare un riassunto estremamente breve "
-            "(1-2 frasi) ed estrarre i fatti chiave dai documenti forniti. Segui queste regole rigorose:\n\n"
-            "1. SOLO FATTI: Utilizza SOLO informazioni esplicitamente dichiarate nei documenti.\n"
-            "2. NESSUNA INVENZIONE: Non aggiungere alcun dettaglio non presente nei documenti.\n"
-            "3. INFORMAZIONI CHIAVE: Concentrati su importo del sinistro, danni alla proprietà, lesioni, dettagli della polizza, "
-            "e data dell'incidente se presenti nei documenti.\n"
-            "4. SE MANCANTE: Se qualsiasi informazione chiave non è nei documenti, indicala come 'non fornita' "
-            "piuttosto che fare supposizioni." +
-            ocr_instruction + "\n"
-            "5. LINGUA ITALIANA: Scrivi SEMPRE in italiano, indipendentemente dalla lingua dei documenti di input.\n\n"
-            "CONTENUTO DEL DOCUMENTO:\n" + extracted_content + "\n\n"
-            "Fornisci la tua risposta in questo formato:\n"
-            "RIASSUNTO: [Un riassunto fattuale di 1-2 frasi basato SOLO sui documenti forniti]\n"
-            "FATTI_CHIAVE: [2-4 punti chiave in formato puntato con importi, date e specifiche SOLO dai documenti]"
-        )
-        
-        # Prepare system message with OCR awareness if needed
-        system_content = "Sei un analista di sinistri assicurativi. Fornisci riassunti estremamente concisi e FATTUALI e fatti chiave. Non inventare dettagli non presenti nei documenti. Scrivi SEMPRE in italiano, indipendentemente dalla lingua dei documenti di input."
-        if ocr_context:
-            system_content += " " + ocr_context
-        
-        # Prepare messages for API call
-        messages = [
-            {
-                "role": "system", 
-                "content": system_content
-            },
-            {"role": "user", "content": prompt}
-        ]
-        
-        # Call OpenRouter API with shorter timeout for better UX
-        result = await call_openrouter_api(messages, timeout=15.0)
-        
-        # Extract the generated text
-        if (
-            result
-            and "choices" in result
-            and len(result["choices"]) > 0
-            and "message" in result["choices"][0]
-            and "content" in result["choices"][0]["message"]
-        ):
-            response_text = result["choices"][0]["message"]["content"]
-            
-            # Extract summary and key facts
-            summary_match = re.search(r'RIASSUNTO:\s*(.+?)(?:\n|$)', response_text, re.DOTALL)
-            summary = summary_match.group(1).strip() if summary_match else "Riassunto non disponibile"
-            
-            # Extract key facts as a list
-            key_facts_section = re.search(r'FATTI_CHIAVE:\s*(.+?)(?:\n\n|$)', response_text, re.DOTALL)
-            key_facts_text = key_facts_section.group(1).strip() if key_facts_section else ""
-            
-            # Convert bullet points to list items
-            key_facts = []
-            for line in key_facts_text.split('\n'):
-                # Remove bullet point markers and clean up
-                cleaned_line = re.sub(r'^[\s•\-\*]+', '', line).strip()
-                if cleaned_line:
-                    key_facts.append(cleaned_line)
-            
-            logger.info("Generated summary with " + str(len(key_facts)) + " key facts")
-            
-            return {
-                "summary": summary,
-                "key_facts": key_facts
-            }
-        else:
-            logger.error("Unexpected API response format: " + str(result))
-            return {
-                "summary": "Impossibile generare un riassunto dai documenti.",
-                "key_facts": []
-            }
-                
-    except Exception as e:
-        logger.error("Error in generate_case_summary: " + str(e))
-        import traceback
-        logger.error(traceback.format_exc())
-        return {
-            "summary": "Impossibile generare il riassunto del caso. Si è verificato un errore.",
-            "key_facts": []
-        }
-
-
 async def extract_template_variables(document_text: str, additional_info: str = "") -> Dict[str, Any]:
     """
     Extract variables needed for the report template from document text and additional user information.
@@ -407,13 +288,28 @@ async def extract_template_variables(document_text: str, additional_info: str = 
             total = 0.0
             has_items = False
             for i in range(1, 7):
-                item_total = final_variables["totale_item" + str(i)]
-                if item_total != "Non fornito":
-                    try:
-                        total += float(str(item_total))
-                        has_items = True
-                    except (ValueError, TypeError):
-                        continue
+                item_key = "totale_item" + str(i)
+                if item_key in final_variables:
+                    item_total = final_variables[item_key]
+                    if item_total != "Non fornito":
+                        try:
+                            # Handle the case where item_total might be an object or non-string
+                            item_total_str = str(item_total)
+                            # Clean the string and convert to float
+                            amount_str = item_total_str.replace('€', '').strip()
+                            if ',' in amount_str and '.' in amount_str:
+                                if amount_str.index('.') < amount_str.index(','):
+                                    amount_str = amount_str.replace('.', '').replace(',', '.')
+                                else:
+                                    amount_str = amount_str.replace(',', '')
+                            elif ',' in amount_str:
+                                amount_str = amount_str.replace(',', '.')
+                            
+                            total += float(amount_str)
+                            has_items = True
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Could not convert {item_key} value '{item_total}' to float: {str(e)}")
+                            continue
             if has_items:
                 final_variables["totale_danno"] = "{:.2f}".format(total)
 

@@ -5,7 +5,7 @@ import json
 from config import settings
 from typing import Dict, Any, List, Optional
 from services.pdf_extractor import extract_text_from_files, extract_text_from_file
-from services.ai_service import generate_case_summary, generate_report_text, extract_template_variables, refine_report_text
+from services.ai_service import generate_report_text, extract_template_variables, refine_report_text
 from services.docx_formatter import format_report_as_docx
 from utils.id_mapper import ensure_id_is_int
 import time
@@ -353,147 +353,28 @@ async def simple_test(data: Dict[str, Any]):
     return {"message": "Simple test endpoint works!", "received": data}
 
 
-@router.post("/summarize")
-async def summarize_documents(data: Dict[str, Any]):
-    """
-    Generate a brief summary of uploaded documents
-    
-    Args:
-        data: A dictionary containing report_id
-        
-    Returns:
-        Brief summary and key facts
-    """
-    report_id = data.get("report_id")
-    
-    if not report_id:
-        raise HTTPException(status_code=400, detail="report_id is required")
-    
-    print(f"Received summary request for ID: {report_id}")
-    
+@router.post("/analyze")
+async def analyze_documents(request: AnalyzeRequest):
+    """Analyze uploaded documents and extract variables."""
     try:
-        # If report_id is a UUID, the files will be in a directory named with the UUID
-        report_files = get_report_files(report_id)
+        # Get document paths
+        document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
         
-        if not report_files:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No files found for report ID: {report_id}"
-            )
+        # Extract variables from documents
+        result = await extract_template_variables(
+            "\n".join([str(path) for path in document_paths]),
+            request.additional_info
+        )
         
-        # Log file information for debugging
-        print(f"Found {len(report_files)} files for report ID {report_id}:")
-        for idx, file in enumerate(report_files):
-            print(f"  File {idx+1}: {file['filename']} ({file['type']}) at {file['path']}")
-            
-            # Check if files actually exist
-            if not os.path.exists(file['path']):
-                print(f"WARNING: File path doesn't exist: {file['path']}")
-        
-        # Extract file paths
-        file_paths = [file["path"] for file in report_files]
-        
-        # Extract text from files first to validate content
-        try:
-            extraction_start_time = time.time()
-            print(f"Starting text extraction from {len(file_paths)} files for summary...")
-            
-            extracted_text = extract_text_from_files(file_paths)
-            extraction_time = time.time() - extraction_start_time
-            print(f"Text extraction completed in {extraction_time:.2f} seconds")
-            
-            # Check for OCR markers or errors
-            ocr_markers = ["[OCR failed", "No readable text detected in image", "Image file detected"]
-            has_ocr_content = any(marker in extracted_text for marker in ocr_markers)
-            has_error = extracted_text.startswith("Error:") or "Error extracting text" in extracted_text
-            
-            # Check if we have an extraction error
-            if has_error:
-                error_msg = "Error extracting text from documents"
-                print(f"WARNING: {error_msg} - {extracted_text}")
-                return {
-                    "summary": f"We encountered an issue processing your documents. {extracted_text.split('.')[0]}.",
-                    "key_facts": [],
-                    "error": extracted_text
-                }
-                
-            # Check for minimal content from OCR
-            if has_ocr_content and len(extracted_text.strip()) < 300:
-                print("WARNING: Document appears to be primarily image-based with little text")
-                return {
-                    "summary": "Your document appears to be primarily image-based. While we've attempted to extract text using OCR technology, the results are too limited for a proper summary. For best results, please consider uploading a text-based document.",
-                    "key_facts": [
-                        "Document is primarily image-based",
-                        "Limited text content could be extracted",
-                        "OCR results may be unreliable",
-                        "Consider providing a text-based document"
-                    ],
-                    "ocr_limited": True
-                }
-                
-            # If very little content overall, return a helpful message
-            if len(extracted_text.strip()) < 100:
-                print("WARNING: Extracted less than 100 characters of text")
-                return {
-                    "summary": "We could only extract a very small amount of text from your documents. This may be because the documents are image-based, password-protected, or in a format we can't fully process.",
-                    "key_facts": [
-                        "Limited text content extracted",
-                        "Document may be primarily graphical",
-                        "Consider providing a text-based version"
-                    ],
-                    "limited_content": True
-                }
-            
-        except Exception as extract_error:
-            error_msg = f"Error during text extraction: {str(extract_error)}"
-            print(error_msg)
-            import traceback
-            print(traceback.format_exc())
-            return {
-                "summary": "Error processing documents. Please try uploading in a different format.",
-                "key_facts": [],
-                "error": str(extract_error)
-            }
-            
-        # Generate the summary using our AI function that includes strict factual instructions
-        try:
-            # Pass additional context if we have OCR content
-            ocr_context = ""
-            if has_ocr_content:
-                ocr_context = "Note: Some content appears to be from OCR of images and may contain errors. Focus on the most reliable information."
-                
-            summary_result = await generate_case_summary(file_paths, ocr_context)
-            
-            print(f"Generated summary: {summary_result['summary']}")
-            print(f"Key facts identified: {len(summary_result['key_facts'])}")
-            
-            # Add a note to the summary if OCR was used
-            if has_ocr_content:
-                summary_result["summary"] = "Note: Your document appears to contain image-based content. Our system used OCR to extract text, which may result in some inaccuracies. " + summary_result["summary"]
-                summary_result["ocr_used"] = True
-                
-            return summary_result
-            
-        except Exception as summary_error:
-            error_msg = f"Error generating summary: {str(summary_error)}"
-            print(error_msg)
-            import traceback
-            print(traceback.format_exc())
-            return {
-                "summary": f"Error generating summary: {str(summary_error)}. Please try again.",
-                "key_facts": [],
-                "error": str(summary_error)
-            }
+        return {
+            "status": "success",
+            "extracted_variables": result["variables"],
+            "fields_needing_attention": result.get("fields_needing_attention", [])
+        }
         
     except Exception as e:
-        print(f"Error in summarize_documents endpoint: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        return {
-            "summary": f"Error processing request: {str(e)}. Please try again.",
-            "key_facts": [],
-            "error": str(e)
-        }
+        handle_exception(e, "Document analysis")
+        raise
 
 
 @router.post("/from-structure")
@@ -748,30 +629,6 @@ async def _generate_and_save_report(
             db.commit()
         except Exception as db_error:
             logger.error(f"Database error when updating status: {str(db_error)}")
-
-
-@router.post("/analyze")
-async def analyze_documents(request: AnalyzeRequest):
-    """Analyze uploaded documents and extract variables."""
-    try:
-        # Get document paths
-        document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
-        
-        # Extract variables from documents
-        result = await extract_template_variables(
-            "\n".join([str(path) for path in document_paths]),
-            request.additional_info
-        )
-        
-        return {
-            "status": "success",
-            "extracted_variables": result["variables"],
-            "fields_needing_attention": result.get("fields_needing_attention", [])
-        }
-        
-    except Exception as e:
-        handle_exception(e, "Document analysis")
-        raise
 
 
 @router.post("/generate")

@@ -15,14 +15,20 @@ import {
   Snackbar,
   Grid,
   Card,
-  CardContent
+  CardContent,
+  Chip,
+  Fade
 } from '@mui/material';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ChatIcon from '@mui/icons-material/Chat';
 import EditIcon from '@mui/icons-material/Edit';
+import ThumbUpIcon from '@mui/icons-material/ThumbUp';
+import ThumbDownIcon from '@mui/icons-material/ThumbDown';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import DownloadIcon from '@mui/icons-material/Download';
 import Navbar from '../components/Navbar';
 import FileUpload from '../components/FileUpload';
-import { generateReport, refineReport } from '../api/generate.js';
+import { generateReport, refineReport, analyzeDocuments } from '../api/generate.js';
 import { finalizeReport, downloadReport } from '../api/report';
 import axios from 'axios';
 import { config } from '../config';
@@ -42,6 +48,11 @@ export default function Home() {
   const [showError, setShowError] = useState(false);
   const [extractedVariables, setExtractedVariables] = useState({});
   const [fieldsNeedingAttention, setFieldsNeedingAttention] = useState([]);
+  const [analysisComplete, setAnalysisComplete] = useState(false);
+  const [analysisInProgress, setAnalysisInProgress] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [analyzeLoading, setAnalyzeLoading] = useState(false);
+  const [infoReady, setInfoReady] = useState(false);
   
   // Updated steps for new workflow
   const steps = [
@@ -51,36 +62,62 @@ export default function Home() {
     'Download'
   ];
 
-  // Handler for upload success
-  const handleUploadSuccess = async (id) => {
-    console.log('Upload success with report ID:', id);
-    setReportId(id);
-    setError(null);
+  const handleUploadSuccess = async (reportId) => {
+    // Update activeStep and reportId
+    setReportId(reportId);
+    setActiveStep(1); // Go directly to InfoForm
     
-    // Move to the Additional Info step
-    setActiveStep(1);
+    // Reset states
+    setAnalysisComplete(false);
+    setAnalysisInProgress(true);
+    setFieldsNeedingAttention([]);
+    setExtractedVariables({});
     
-    // Analyze documents to extract variables
+    // Start the analysis in the background
+    analyzeDocumentsInBackground(reportId);
+  };
+  
+  // Analyze documents in the background
+  const analyzeDocumentsInBackground = async (id) => {
     try {
-      setIsGenerating(true);
-      const response = await axios.post(`${config.endpoints.generate}/analyze`, {
-        document_ids: [id],
-        additional_info: ''
-      });
+      // Use the analyzeDocuments function from the imported API
+      const response = await analyzeDocuments(id);
       
-      console.log('Document analysis result:', response.data);
+      console.log('Document analysis result:', response);
       
-      if (response.data && response.data.extracted_variables) {
-        setExtractedVariables(response.data.extracted_variables);
-        setFieldsNeedingAttention(response.data.fields_needing_attention || []);
+      if (response && response.extracted_variables) {
+        setExtractedVariables(response.extracted_variables);
+        setFieldsNeedingAttention(response.fields_needing_attention || []);
       }
+      
+      setAnalysisComplete(true);
     } catch (err) {
       console.error('Error analyzing documents:', err);
-      setError('Failed to analyze documents. Please try again.');
+      setError('Analysis completed with some issues. You can still proceed.');
       setShowError(true);
     } finally {
-      setIsGenerating(false);
+      setAnalysisInProgress(false);
     }
+  };
+
+  // Helper function to extract error messages from different response formats
+  const extractErrorMessage = (error) => {
+    if (!error) return null;
+    
+    // Handle different error formats
+    if (typeof error === 'string') return error;
+    
+    if (error.response && error.response.data) {
+      const data = error.response.data;
+      
+      if (typeof data === 'string') return data;
+      if (data.detail) return data.detail;
+      if (data.message) return data.message;
+      if (data.error) return typeof data.error === 'string' ? data.error : 'Server error';
+      if (data.errorMessage) return data.errorMessage;
+    }
+    
+    return error.message || 'An unknown error occurred';
   };
 
   // Handler for submitting additional information
@@ -93,6 +130,7 @@ export default function Home() {
     
     setIsGenerating(true);
     setError(null);
+    setShowFeedback(false);
     
     try {
       // Generate report with additional info
@@ -129,11 +167,45 @@ export default function Home() {
       }
     } catch (err) {
       console.error('Error generating report:', err);
-      setError(err.response?.data?.detail || err.message || 'There was an error generating your report. Please try again.');
+      
+      // Improved error handling to extract string message from various error formats
+      let errorMessage = 'There was an error generating your report. Please try again.';
+      
+      if (err.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        if (err.response.data) {
+          const responseData = err.response.data;
+          
+          if (typeof responseData === 'string') {
+            errorMessage = responseData;
+          } else if (responseData.detail) {
+            errorMessage = responseData.detail;
+          } else if (responseData.message) {
+            errorMessage = responseData.message;
+          } else if (responseData.error) {
+            errorMessage = typeof responseData.error === 'string' 
+              ? responseData.error 
+              : 'Server error occurred';
+          }
+        }
+      } else if (err.message) {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
       setShowError(true);
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  // Handle retry after error
+  const handleRetry = () => {
+    setShowError(false);
+    setError(null);
+    handleInfoSubmit();
   };
 
   // Handler for chat interaction
@@ -144,6 +216,7 @@ export default function Home() {
     const userMessage = { role: 'user', content: chatInput };
     setChatMessages(prevMessages => [...prevMessages, userMessage]);
     setChatInput('');
+    setShowFeedback(false);
     
     try {
       setIsGenerating(true);
@@ -169,6 +242,9 @@ export default function Home() {
           const previewResponse = await axios.get(result.preview_url);
           setPreviewHtml(previewResponse.data);
         }
+        
+        // Show feedback request
+        setShowFeedback(true);
       } else {
         // Add error message to chat
         const errorMessage = { 
@@ -181,17 +257,88 @@ export default function Home() {
       console.error('Error refining report:', err);
       
       // Add error message to chat
-      const errorMessage = { 
+      const chatErrorMessage = { 
         role: 'assistant', 
         content: 'Si è verificato un errore durante l\'elaborazione della tua richiesta. Puoi riprovare?' 
       };
-      setChatMessages(prevMessages => [...prevMessages, errorMessage]);
+      setChatMessages(prevMessages => [...prevMessages, chatErrorMessage]);
       
-      setError('Error refining report: ' + (err.message || 'Unknown error'));
+      // Improved error handling similar to handleInfoSubmit
+      let uiErrorMessage = 'Error refining report: Unknown error';
+      
+      if (err.response && err.response.data) {
+        const responseData = err.response.data;
+        if (typeof responseData === 'string') {
+          uiErrorMessage = 'Error refining report: ' + responseData;
+        } else if (responseData.detail) {
+          uiErrorMessage = 'Error refining report: ' + responseData.detail;
+        } else if (responseData.message) {
+          uiErrorMessage = 'Error refining report: ' + responseData.message;
+        } else if (responseData.error) {
+          uiErrorMessage = 'Error refining report: ' + (typeof responseData.error === 'string' 
+            ? responseData.error 
+            : 'Server error occurred');
+        }
+      } else if (err.message) {
+        uiErrorMessage = 'Error refining report: ' + err.message;
+      }
+      
+      setError(uiErrorMessage);
       setShowError(true);
     } finally {
       setIsGenerating(false);
     }
+  };
+  
+  // Handler for the "Approve Report" action
+  const handleApproveReport = () => {
+    handleFinalizeReport();
+  };
+  
+  // Handler for the "Download Current Version" action
+  const handleDownloadCurrentVersion = async () => {
+    if (!reportId) {
+      setError('No report ID found. Please generate a report first.');
+      setShowError(true);
+      return;
+    }
+    
+    try {
+      setIsDownloading(true);
+      const result = await downloadReport(reportId);
+      
+      if (result && result.data && result.data.download_url) {
+        window.open(result.data.download_url, '_blank');
+      } else {
+        throw new Error('Failed to get download URL');
+      }
+    } catch (err) {
+      console.error('Error downloading report:', err);
+      setError('Error downloading report: ' + (err.message || 'Unknown error'));
+      setShowError(true);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+  
+  // Handler for the "Looks Good" feedback
+  const handlePositiveFeedback = () => {
+    setShowFeedback(false);
+    const feedbackMessage = { 
+      role: 'user', 
+      content: 'Le modifiche sembrano buone. Grazie!' 
+    };
+    setChatMessages(prevMessages => [...prevMessages, feedbackMessage]);
+  };
+  
+  // Handler for the "Still Needs Changes" feedback
+  const handleNegativeFeedback = () => {
+    setShowFeedback(false);
+    setChatInput('Le modifiche non sono ancora perfette. Vorrei che tu ');
+    // Focus the chat input
+    setTimeout(() => {
+      document.querySelector('input[type="text"]')?.focus();
+    }, 100);
   };
 
   // Handler for finalizing and downloading the report
@@ -320,9 +467,31 @@ export default function Home() {
             <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
               Informazioni Aggiuntive
             </Typography>
-            <Typography variant="body1" sx={{ mb: 3, color: 'text.secondary' }}>
+            <Typography variant="body1" sx={{ mb: 2, color: 'text.secondary' }}>
               Fornisci eventuali informazioni aggiuntive non presenti nei documenti caricati.
             </Typography>
+            
+            {/* Analysis in progress indicator */}
+            {analyzeLoading && (
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, p: 2, bgcolor: 'rgba(3, 169, 244, 0.05)', borderRadius: 2 }}>
+                <CircularProgress size={24} sx={{ mr: 2 }} />
+                <Typography>
+                  Analisi dei documenti in corso... Puoi iniziare ad aggiungere informazioni nel frattempo.
+                </Typography>
+              </Box>
+            )}
+            
+            {/* Analysis complete notification */}
+            {analysisComplete && (
+              <Fade in={analysisComplete}>
+                <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(76, 175, 80, 0.05)', borderRadius: 2, display: 'flex', alignItems: 'center' }}>
+                  <CheckCircleIcon color="success" sx={{ mr: 2 }} />
+                  <Typography>
+                    Analisi completata! Abbiamo estratto le informazioni dai tuoi documenti.
+                  </Typography>
+                </Box>
+              </Fade>
+            )}
             
             {fieldsNeedingAttention.length > 0 && (
               <Box sx={{ mb: 4 }}>
@@ -432,9 +601,22 @@ export default function Home() {
                     borderRadius: 2
                   }}
                 >
-                  <Typography variant="h6" sx={{ mb: 2 }}>
-                    Anteprima del Report
-                  </Typography>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6">
+                      Anteprima del Report
+                    </Typography>
+                    
+                    {/* Download current version button */}
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<DownloadIcon />}
+                      onClick={handleDownloadCurrentVersion}
+                      disabled={isDownloading || !previewHtml}
+                    >
+                      Scarica Versione Attuale
+                    </Button>
+                  </Box>
                   
                   {previewHtml ? (
                     <Box
@@ -452,6 +634,30 @@ export default function Home() {
                     </Box>
                   )}
                 </Paper>
+                
+                {/* Like/Dislike action buttons */}
+                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 3 }}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    size="large"
+                    startIcon={<ThumbUpIcon />}
+                    onClick={handleApproveReport}
+                    disabled={!previewHtml || isDownloading}
+                  >
+                    Approva Report
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="large"
+                    startIcon={<ThumbDownIcon />}
+                    onClick={handleNegativeFeedback}
+                    disabled={!previewHtml || isGenerating}
+                  >
+                    Richiedi Modifiche
+                  </Button>
+                </Box>
               </Grid>
               
               {/* Chat Panel */}
@@ -499,6 +705,43 @@ export default function Home() {
                         </Typography>
                       </Box>
                     ))}
+                    
+                    {/* Feedback Request */}
+                    {showFeedback && (
+                      <Box 
+                        sx={{
+                          p: 2,
+                          borderRadius: 2,
+                          maxWidth: '85%',
+                          alignSelf: 'flex-start',
+                          bgcolor: 'rgba(3, 169, 244, 0.1)',
+                          mt: 2
+                        }}
+                      >
+                        <Typography variant="body2" gutterBottom>
+                          Cosa ne pensi delle modifiche?
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                          <Button 
+                            size="small" 
+                            variant="outlined"
+                            color="success"
+                            onClick={handlePositiveFeedback}
+                          >
+                            Sembra buono
+                          </Button>
+                          <Button 
+                            size="small" 
+                            variant="outlined"
+                            color="primary"
+                            onClick={handleNegativeFeedback}
+                          >
+                            Servono altre modifiche
+                          </Button>
+                        </Box>
+                      </Box>
+                    )}
+                    
                     {isGenerating && (
                       <Box 
                         sx={{
@@ -542,40 +785,6 @@ export default function Home() {
                 </Paper>
               </Grid>
             </Grid>
-            
-            <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end' }}>
-              <Button
-                variant="contained"
-                color="primary"
-                size="large"
-                onClick={handleFinalizeReport}
-                disabled={isDownloading}
-                startIcon={<CloudDownloadIcon />}
-                sx={{ 
-                  py: 1.5,
-                  px: 4,
-                  position: 'relative'
-                }}
-              >
-                {isDownloading ? (
-                  <>
-                    <CircularProgress
-                      size={24}
-                      sx={{
-                        position: 'absolute',
-                        top: '50%',
-                        left: '50%',
-                        marginTop: '-12px',
-                        marginLeft: '-12px',
-                      }}
-                    />
-                    <span style={{ opacity: 0 }}>Scarica Report</span>
-                  </>
-                ) : (
-                  'Scarica Report'
-                )}
-              </Button>
-            </Box>
           </Paper>
         )}
         
@@ -618,7 +827,20 @@ export default function Home() {
           onClose={handleCloseError}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
-          <Alert onClose={handleCloseError} severity="error" sx={{ width: '100%' }}>
+          <Alert 
+            onClose={handleCloseError} 
+            severity="error" 
+            sx={{ width: '100%' }}
+            action={
+              <Button 
+                color="inherit" 
+                size="small" 
+                onClick={handleRetry}
+              >
+                Riprova
+              </Button>
+            }
+          >
             {error}
           </Alert>
         </Snackbar>
