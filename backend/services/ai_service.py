@@ -411,10 +411,10 @@ async def refine_report_text(
         ]
         
         response = await call_openrouter_api(messages)
-            
-            return {
+        
+        return {
             "content": response["choices"][0]["message"]["content"]
-            }
+        }
             
     except Exception as e:
         handle_exception(e, "Report refinement")

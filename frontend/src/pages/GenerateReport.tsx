@@ -18,15 +18,26 @@ import {
 import DocumentUpload from '../components/DocumentUpload';
 import AdditionalInfo from '../components/AdditionalInfo';
 import { analyzeDocuments, generateReport, refineReport } from '../services/api';
-import { AnalysisResponse, AnalysisDetails, ReportPreview } from '../types';
+import { AnalysisResponse, ReportPreview } from '../types';
+// Define the interface matching the one in AdditionalInfo component
+interface ComponentAnalysisDetails {
+  valore: string;
+  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
+  richiede_verifica: boolean;
+}
+import { AnalysisDetails as GlobalAnalysisDetails } from '../types';
 
 type StepType = 'upload' | 'additional-info' | 'preview';
 
-// Local interfaces that extend the standardized types with Italian-specific fields
-interface LocalAnalysisDetails extends AnalysisDetails {
-  valore?: string;
-  confidenza?: 'ALTA' | 'MEDIA' | 'BASSA';
-  richiede_verifica?: boolean;
+// Local interfaces that map types between global and component-specific types
+interface LocalAnalysisDetails {
+  valore: string;
+  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
+  richiede_verifica: boolean;
+  // Keep original properties for mapping back
+  value: string;
+  confidence: number;
+  source: string;
 }
 
 interface LocalAnalysisResponse {
@@ -34,6 +45,22 @@ interface LocalAnalysisResponse {
   analysisDetails: Record<string, LocalAnalysisDetails>;
   fieldsNeedingAttention: string[];
 }
+
+// Helper function to map global types to component-specific types
+const mapToComponentTypes = (details: Record<string, GlobalAnalysisDetails>): Record<string, ComponentAnalysisDetails> => {
+  const result: Record<string, ComponentAnalysisDetails> = {};
+  
+  Object.entries(details).forEach(([key, detail]) => {
+    result[key] = {
+      valore: detail.value || 'Non fornito',
+      confidenza: detail.confidence > 0.8 ? 'ALTA' : 
+                 detail.confidence > 0.5 ? 'MEDIA' : 'BASSA',
+      richiede_verifica: detail.confidence < 0.7
+    };
+  });
+  
+  return result;
+};
 
 const GenerateReport: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<StepType>('upload');
@@ -61,7 +88,7 @@ const GenerateReport: React.FC = () => {
       Object.entries(response.analysisDetails).forEach(([key, details]) => {
         localResponse.analysisDetails[key] = {
           ...details,
-          valore: details.value,
+          valore: details.value || 'Non fornito',
           confidenza: details.confidence > 0.8 ? 'ALTA' : 
                      details.confidence > 0.5 ? 'MEDIA' : 'BASSA',
           richiede_verifica: details.confidence < 0.7
@@ -190,7 +217,7 @@ const GenerateReport: React.FC = () => {
         <AdditionalInfo
           documentIds={documentIds}
           extractedVariables={analysisResponse.extractedVariables}
-          analysisDetails={analysisResponse.analysisDetails}
+          analysisDetails={mapToComponentTypes(analysisResponse.analysisDetails)}
           fieldsNeedingAttention={analysisResponse.fieldsNeedingAttention}
           onSubmit={handleAdditionalInfo}
           onBack={handleBack}
