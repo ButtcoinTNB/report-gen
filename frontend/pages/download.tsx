@@ -24,19 +24,13 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { downloadReport, getReport } from '../api/report';
+import { Report as ReportType } from '../src/types';
 
-// Types
-interface Report {
-  id: number;
-  report_id: string;  // UUID
-  template_id: number;
-  title: string;
-  content: string;
-  formatted_file_path: string | null;
-  created_at: string;
-  updated_at: string | null;
-  is_finalized: boolean;
+// Local interface that extends the base Report type with additional properties
+interface DownloadPageReport extends ReportType {
   download_url?: string;
+  id?: number;
+  formatted_file_path?: string | null;
 }
 
 // Interface for download response
@@ -53,7 +47,7 @@ const DownloadPage = () => {
   const { id } = router.query; // Get report ID from URL
   
   // State
-  const [report, setReport] = useState<Report | null>(null);
+  const [report, setReport] = useState<DownloadPageReport | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState('');
@@ -66,14 +60,17 @@ const DownloadPage = () => {
       setIsLoading(true);
       try {
         // Call the API client function to fetch the report
-        const reportData = await getReport(id as string) as Report;
+        const reportData = await getReport(id as string) as unknown as DownloadPageReport;
         
-        // Then get the download information
-        const downloadData = await downloadReport(id as string) as DownloadResponse;
+        // Then get the download information - wrap with type assertion since the API returns different types
+        const downloadBlob = await downloadReport(id as string, 'docx');
+        
+        // Create object URL from the blob
+        const url = URL.createObjectURL(downloadBlob);
         
         setReport({
           ...reportData,
-          download_url: downloadData.data.download_url
+          download_url: url
         });
       } catch (err) {
         console.error('Error fetching report:', err);
