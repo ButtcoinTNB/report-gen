@@ -205,6 +205,40 @@ def get_reference_metadata():
     return reference_metadata
 
 
+# Helper function to replace ensure_id_is_int
+def _get_numeric_id(report_id):
+    """
+    Generate a numeric ID from a report_id (which might be a UUID or string)
+    """
+    if isinstance(report_id, int):
+        return report_id
+    
+    # For string or UUID, use a hash to generate a numeric ID
+    try:
+        # Try to convert to UUID if it's a string that looks like a UUID
+        if isinstance(report_id, str) and '-' in report_id:
+            try:
+                uuid_obj = UUID(report_id)
+                # Use the int representation modulo a 32-bit int max value
+                return uuid_obj.int % 2147483647
+            except ValueError:
+                pass
+        
+        # If it's a string that can be converted to int, do so
+        if isinstance(report_id, str):
+            try:
+                return int(report_id)
+            except ValueError:
+                pass
+        
+        # Otherwise use a hash
+        hash_input = str(report_id).encode('utf-8')
+        return int(hashlib.md5(hash_input).hexdigest(), 16) % (10**8)
+    except Exception:
+        # Fallback
+        return 999999
+
+
 @router.post("/final", status_code=200)
 async def format_final(data: Dict = Body(...)):
     """
@@ -227,7 +261,7 @@ async def format_final(data: Dict = Body(...)):
     
     # Try to convert the ID if needed
     try:
-        db_id = ensure_id_is_int(report_id)
+        db_id = _get_numeric_id(report_id)
     except ValueError as e:
         # If this is a UUID but conversion failed, try to work with it directly
         if is_uuid:
@@ -408,9 +442,9 @@ async def format_docx(data: Dict = Body(...)):
         
         # If report_id is provided, fetch content from Supabase
         if report_id and not report_content:
-            # Use the ID mapper utility to handle UUID/integer conversion
+            # Generate a numeric ID from the report_id
             try:
-                db_id = ensure_id_is_int(report_id)
+                db_id = _get_numeric_id(report_id)
             except ValueError as e:
                 raise HTTPException(
                     status_code=400, 

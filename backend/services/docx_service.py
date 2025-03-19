@@ -9,24 +9,24 @@ from config import settings
 
 class DocxService:
     def __init__(self):
-        # Define possible template directories
+        # Define common paths
         self.templates_dirs = [
-            Path("templates"),                     # For local development
-            Path("backend/reference_reports"),     # For template.docx standard location
-            Path("reference_reports"),             # Alternative location
-            Path(settings.UPLOAD_DIR) / "templates"  # User-uploaded templates
+            Path("reference_reports"),
+            Path("backend/reference_reports"),
+            Path("templates")
         ]
-        self.output_dir = Path(settings.GENERATED_REPORTS_DIR) if hasattr(settings, 'GENERATED_REPORTS_DIR') else Path("generated_reports")
+        self.output_dir = Path(settings.GENERATED_REPORTS_DIR)
         self.preview_dir = Path("previews")
         
         # Create necessary directories
         for directory in [self.output_dir, self.preview_dir]:
-            directory.mkdir(exist_ok=True)
+            directory.mkdir(exist_ok=True, parents=True)
         
         # Try to create template directories if they don't exist
         for template_dir in self.templates_dirs:
             try:
-                template_dir.mkdir(exist_ok=True)
+                # Create directory with parents flag to ensure parent directories exist
+                template_dir.mkdir(exist_ok=True, parents=True)
             except Exception as e:
                 logger.warning(f"Could not create template directory {template_dir}: {str(e)}")
     

@@ -7,7 +7,6 @@ from uuid import UUID
 from pydantic import UUID4
 from supabase import create_client, Client
 from config import settings
-from utils.id_mapper import ensure_id_is_int
 import traceback
 import hashlib
 from datetime import datetime
