@@ -9,9 +9,11 @@ import datetime
 from supabase import create_client, Client
 import mimetypes
 import shutil
-from models import Template
+from models import Template, File as FileModel
 from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
 from werkzeug.utils import secure_filename
+from utils.supabase_helper import create_supabase_client, supabase_client_context
+from pydantic import UUID4
 
 router = APIRouter()
 
@@ -20,6 +22,7 @@ router = APIRouter()
 async def upload_template(
     file: UploadFile = File(...),
     name: str = Form(...),
+    version: str = Form("1.0"),
 ):
     """
     Upload a reference PDF template for formatting future reports
@@ -38,112 +41,118 @@ async def upload_template(
             detail=f"File size exceeds the {max_size_mb:.1f} MB limit",
         )
 
-    # Create unique filename
-    filename = f"{uuid.uuid4()}.pdf"
-    file_path = os.path.join(settings.UPLOAD_DIR, filename)
-
-    # Save file temporarily
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error saving file: {str(e)}"
-        )
-    finally:
-        file.file.close()
-
-    # Extract metadata from the PDF
-    try:
-        metadata = extract_pdf_metadata(file_path)
-    except Exception as e:
-        # Remove file if metadata extraction fails
-        os.remove(file_path)
-        raise HTTPException(
-            status_code=500, detail=f"Error extracting metadata: {str(e)}"
-        )
-
-    # Extract text from the PDF for reference
-    extracted_text = extract_text_from_file(file_path)
-
-    # Store template in Supabase Storage
-    try:
-        # Initialize Supabase client
-        supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        
-        # Upload file to Supabase Storage
-        with open(file_path, "rb") as f:
-            file_data = f.read()
+        async with supabase_client_context() as supabase:
+            # Create template record
+            template_data = {
+                "template_id": str(uuid.uuid4()),
+                "name": name,
+                "version": version,
+                "content": "",  # Will be updated after file processing
+                "meta_data": {}
+            }
             
-        storage_path = f"templates/{filename}"
-        response = supabase.storage.from_("reports").upload(
-            path=storage_path,
-            file=file_data,
-            file_options={"content-type": "application/pdf"}
-        )
-        
-        # Get the public URL
-        public_url = supabase.storage.from_("reports").get_public_url(storage_path)
-        
-        # Save template metadata to database
-        template_data = {
-            "name": name,
-            "file_path": storage_path,
-            "public_url": public_url,
-            "metadata": metadata,
-            "extracted_text": extracted_text,
-            "created_at": datetime.datetime.now().isoformat()
-        }
-        
-        response = supabase.table("reference_reports").insert(template_data).execute()
-        
-        # Get the newly created template with ID
-        template = response.data[0] if response.data else template_data
-        
-        # Clean up local file now that it's in Supabase
+            template_response = await supabase.table("templates").insert(template_data).execute()
+            if not template_response.data:
+                raise HTTPException(status_code=500, detail="Failed to create template record")
+            
+            template = template_response.data[0]
+            template_id = UUID4(template["template_id"])
+            
+            # Create unique filename using template_id
+            filename = f"template_{template_id}.pdf"
+            file_path = os.path.join(settings.UPLOAD_DIR, filename)
+            
+            # Save file
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+                
+            # Extract content from PDF
+            content = extract_text_from_file(file_path)
+            
+            # Update template with file info
+            await supabase.table("templates").update({
+                "file_path": file_path,
+                "content": content
+            }).eq("template_id", str(template_id)).execute()
+            
+            return template
+            
+    except Exception as e:
+        # Clean up file if it was created
         if os.path.exists(file_path):
             os.remove(file_path)
-            
-        return template
-        
-    except Exception as e:
-        # Keep the local file as backup if upload fails
-        error_message = f"Error uploading to Supabase: {str(e)}"
-        print(error_message)
-        
-        # If we still have the file locally, we can create a database entry
-        # referencing the local file as a fallback
-        if os.path.exists(file_path):
-            try:
-                # Initialize Supabase client
-                supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/files", status_code=201)
+async def upload_files(
+    files: List[UploadFile] = File(...),
+    report_id: Optional[UUID4] = Form(None)
+) -> Dict[str, Any]:
+    """
+    Upload multiple files and associate them with a report if provided
+    """
+    try:
+        uploaded_files = []
+        async with supabase_client_context() as supabase:
+            for file in files:
+                # Generate file_id
+                file_id = uuid.uuid4()
                 
-                # Create record in database with local file path
-                template_data = {
-                    "name": name,
-                    "file_path": file_path,  # Using local path instead of Supabase URL
-                    "meta_data": metadata,
-                    "created_at": datetime.datetime.now().isoformat()
+                # Create unique filename using file_id
+                original_filename = secure_filename(file.filename)
+                filename = f"{file_id}_{original_filename}"
+                file_path = os.path.join(settings.UPLOAD_DIR, filename)
+                
+                # Save file
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                
+                # Get file info
+                file_size = os.path.getsize(file_path)
+                mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+                
+                # Extract content if it's a text-based file
+                content = None
+                if mime_type in ["text/plain", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
+                    content = extract_text_from_file(file_path)
+                
+                # Create file record
+                file_data = {
+                    "file_id": str(file_id),
+                    "report_id": str(report_id) if report_id else None,
+                    "filename": original_filename,
+                    "file_path": file_path,
+                    "file_type": mime_type,
+                    "mime_type": mime_type,
+                    "file_size": file_size,
+                    "content": content
                 }
                 
-                response = supabase.table("templates").insert(template_data).execute()
+                file_response = await supabase.table("files").insert(file_data).execute()
+                if not file_response.data:
+                    raise HTTPException(status_code=500, detail=f"Failed to create file record for {original_filename}")
                 
-                if response.data and len(response.data) > 0:
-                    return response.data[0]
-            except Exception as db_error:
-                print(f"Error creating fallback database record: {str(db_error)}")
+                uploaded_files.append(file_response.data[0])
         
-        # If all else fails, raise a proper exception
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to upload template to storage: {error_message}"
-        )
+        return {
+            "message": f"Successfully uploaded {len(uploaded_files)} files",
+            "files": uploaded_files
+        }
+        
+    except Exception as e:
+        # Clean up any files that were created
+        for file_info in uploaded_files:
+            if os.path.exists(file_info["file_path"]):
+                os.remove(file_info["file_path"])
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/documents", status_code=201)
 async def upload_documents(
     files: List[UploadFile] = File(...),
-    template_id: int = Form(1),  # Default value of 1, making it optional
+    template_id: Optional[UUID4] = Form(None),
 ):
     """
     Upload case-specific documents to generate a report
@@ -177,7 +186,7 @@ async def upload_documents(
         print(f"Created report directory: {report_dir}")
 
         # Initialize Supabase client
-        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        supabase = create_supabase_client()
         supabase_urls = []
 
         for file in files:
@@ -310,7 +319,7 @@ async def upload_documents(
         # Store report metadata in local JSON file
         metadata_path = os.path.join(report_dir, "metadata.json")
         metadata = {
-            "uuid": report_uuid,  # Store the UUID for external reference
+            "report_id": report_uuid,  # Store the UUID for external reference
             "template_id": template_id,
             "files": uploaded_files,
             "created_at": datetime.datetime.now().isoformat(),
@@ -328,7 +337,7 @@ async def upload_documents(
         # Store metadata in Supabase database
         try:
             print("Saving metadata to Supabase database")
-            # Note: We don't include the 'uuid' field in the database insert
+            # Note: We don't include the 'id' field in the database insert
             # The database will generate its own integer ID
             db_metadata = {
                 "template_id": template_id,
@@ -336,7 +345,7 @@ async def upload_documents(
                 "content": "",
                 "is_finalized": False,
                 "file_count": len(uploaded_files),
-                "report_uuid": report_uuid  # Store the UUID for reference
+                "report_id": report_uuid  # Store the UUID for reference
             }
             response = supabase.table("reports").insert(db_metadata).execute()
             print("Saved report metadata to Supabase:", response)
@@ -347,8 +356,8 @@ async def upload_documents(
                 # Save the mapping between UUID and integer ID
                 mapping_path = os.path.join(report_dir, "id_mapping.json")
                 with open(mapping_path, "w") as f:
-                    json.dump({"uuid": report_uuid, "db_id": db_id}, f, indent=2)
-                print(f"Created ID mapping: UUID {report_uuid} -> Database ID {db_id}")
+                    json.dump({"report_id": report_uuid, "db_id": db_id}, f, indent=2)
+                print(f"Created ID mapping: report_id {report_uuid} -> Database ID {db_id}")
                 
                 # Return the database ID in the response
                 return {
@@ -386,7 +395,7 @@ async def upload_documents(
 @router.post("/document", response_model=dict)
 async def upload_document(
     file: UploadFile = File(...),
-    report_id: int = Form(None),
+    report_id: Optional[UUID4] = Form(None),
     doc_type: str = Form("general"),
 ):
     """
@@ -394,7 +403,7 @@ async def upload_document(
     
     Args:
         file: The document file to upload
-        report_id: Optional report ID to associate with
+        report_id: Optional UUID of the report to associate with
         doc_type: Type of document (default: general)
         
     Returns:

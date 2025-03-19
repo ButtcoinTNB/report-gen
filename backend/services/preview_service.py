@@ -1,6 +1,8 @@
 from pathlib import Path
 import mammoth
 import asyncio
+from uuid import UUID
+from pydantic import UUID4
 from utils.error_handler import handle_exception, logger
 from services.docx_service import docx_service
 
@@ -24,12 +26,12 @@ class PreviewService:
         p[style-name='List Paragraph'] => li
         """
     
-    async def generate_preview(self, report_id: str) -> str:
+    async def generate_preview(self, report_id: UUID4) -> str:
         """
         Generate an enhanced HTML preview of a DOCX report.
         
         Args:
-            report_id: ID of the report to preview
+            report_id: UUID of the report to preview
             
         Returns:
             Path to the HTML preview file

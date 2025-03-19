@@ -27,13 +27,19 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import { uploadFile } from '../api/upload';
 import { useDropzone } from 'react-dropzone';
 
-interface FileUploadProps {
-  onUploadSuccess: (reportId: number) => void;
+interface Props {
+  onUploadSuccess: (reportId: string) => void;  // UUID
+  onError: (error: Error) => void;
 }
 
 interface UploadResponse {
-  report_id: number;
-  [key: string]: any;
+  report_id: string;  // UUID
+  files: Array<{
+    file_id: string;  // UUID
+    filename: string;
+    file_path: string;
+  }>;
+  message: string;
 }
 
 interface ProgressUpdate {
@@ -42,9 +48,9 @@ interface ProgressUpdate {
   progress: number;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
+const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
   const [files, setFiles] = useState<File[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [totalSize, setTotalSize] = useState<number>(0);
   const [sizeWarning, setSizeWarning] = useState<string | null>(null);
@@ -99,65 +105,47 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
     }
   };
   
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    setFiles(prevFiles => [...prevFiles, ...acceptedFiles]);
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
+
+    setUploading(true);
     setError(null);
-  }, []);
+
+    try {
+      const response = await uploadFile(acceptedFiles);
+      const data = response as UploadResponse;
+
+      if (data.report_id) {
+        onUploadSuccess(data.report_id);
+      } else {
+        throw new Error('No report ID received from server');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to upload files';
+      setError(errorMessage);
+      onError(new Error(errorMessage));
+    } finally {
+      setUploading(false);
+    }
+  }, [onUploadSuccess, onError]);
   
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
       'application/pdf': ['.pdf'],
-      'image/*': ['.png', '.jpg', '.jpeg'],
-      'text/plain': ['.txt'],
       'application/msword': ['.doc'],
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
-    }
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'text/plain': ['.txt'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png']
+    },
+    maxSize: 1024 * 1024 * 1024 // 1GB
   });
 
   const handleRemoveFile = (index: number) => {
     setFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (files.length === 0) {
-      setError("Seleziona almeno un file da caricare.");
-      return;
-    }
-    
-    // Double-check size before submitting
-    if (totalSize > MAX_TOTAL_SIZE) {
-      setError("La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      // Pass the files array directly to the uploadFile function
-      const response = await uploadFile(files, templateId) as UploadResponse;
-      console.log("Upload response:", response);
-      
-      // Check for success
-      if (response && response.report_id) {
-        console.log("Upload success with report ID:", response.report_id);
-        
-        // Call onUploadSuccess directly to proceed to the next step
-        onUploadSuccess(response.report_id);
-      } else {
-        setError("Nessun ID report ricevuto dal server.");
-      }
-    } catch (err) {
-      console.error("Error uploading files:", err);
-      setError(err instanceof Error ? err.message : "Impossibile caricare i file. Riprova.");
-    } finally {
-      setLoading(false);
-    }
-  };
-  
   // Calculate size usage percentage
   const sizePercentage = Math.min((totalSize / MAX_TOTAL_SIZE) * 100, 100);
 
@@ -168,7 +156,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
       borderRadius: 3,
       background: 'linear-gradient(145deg, rgba(255,255,255,1) 0%, rgba(249,249,252,1) 100%)'
     }}>
-      <Box component="form" onSubmit={handleSubmit} noValidate>
+      <Box component="form" noValidate>
         <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
           Carica Documenti
         </Typography>
@@ -176,31 +164,33 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
         <Box
           {...getRootProps()}
           sx={{
-            border: '1px dashed',
+            border: '2px dashed',
             borderColor: isDragActive ? 'primary.main' : 'grey.300',
-            borderRadius: 2,
+            borderRadius: 1,
             p: 3,
             textAlign: 'center',
+            backgroundColor: isDragActive ? 'action.hover' : 'background.paper',
             cursor: 'pointer',
-            mb: 3,
-            backgroundColor: isDragActive ? 'rgba(0, 113, 227, 0.05)' : 'transparent',
-            transition: 'all 0.2s ease-in-out',
+            transition: 'all 0.2s ease',
             '&:hover': {
               borderColor: 'primary.main',
-              backgroundColor: 'rgba(0, 113, 227, 0.05)'
+              backgroundColor: 'action.hover'
             }
           }}
         >
           <input {...getInputProps()} />
-          <CloudUploadIcon fontSize="large" color="primary" sx={{ mb: 2, fontSize: 45 }} />
+          <CloudUploadIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
           <Typography variant="h6" gutterBottom>
-            {isDragActive ? 'Rilascia i file qui' : 'Trascina e rilascia i file qui'}
+            {isDragActive ? 'Drop the files here' : 'Drag and drop files here'}
           </Typography>
-          <Typography variant="body2" color="textSecondary">
-            o clicca per sfogliare i file
+          <Typography variant="body2" color="text.secondary">
+            or click to select files
           </Typography>
-          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
-            Supporta file PDF, DOC, DOCX, TXT e immagini
+          <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+            Supported formats: PDF, DOC, DOCX, TXT, JPG, PNG
+          </Typography>
+          <Typography variant="caption" display="block" color="text.secondary">
+            Maximum file size: 1GB
           </Typography>
         </Box>
         
@@ -258,13 +248,18 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
           </Box>
         )}
         
+        {uploading && (
+          <Box sx={{ mt: 2, textAlign: 'center' }}>
+            <CircularProgress size={24} />
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              Uploading files...
+            </Typography>
+          </Box>
+        )}
+        
         {error && (
-          <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
-            {error.includes("select at least one file") ? 
-              "Seleziona almeno un file da caricare." : 
-              error.includes("Total file size exceeds") ? 
-              "La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare." : 
-              error}
+          <Alert severity="error" sx={{ mt: 2 }}>
+            {error}
           </Alert>
         )}
         
@@ -274,14 +269,14 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
           color="primary"
           size="large"
           fullWidth
-          disabled={loading || files.length === 0 || totalSize > MAX_TOTAL_SIZE}
+          disabled={uploading || files.length === 0 || totalSize > MAX_TOTAL_SIZE}
           sx={{ 
             py: 1.5,
             position: 'relative',
             fontWeight: 500
           }}
         >
-          {loading ? (
+          {uploading ? (
             <>
               <CircularProgress 
                 size={24} 

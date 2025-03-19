@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Body
 from fastapi.responses import FileResponse
-from typing import Dict, List
+from typing import Dict, List, Optional
 import os
 import requests
+from uuid import UUID
+from pydantic import UUID4
 from config import settings
 from services.pdf_formatter import format_report_as_pdf
 from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
@@ -10,7 +12,7 @@ from services.docx_formatter import format_report_as_docx
 import uuid
 import glob
 from supabase import create_client, Client
-from utils.id_mapper import ensure_id_is_int
+from utils.supabase_helper import create_supabase_client
 import json
 import datetime
 import hashlib
@@ -21,100 +23,70 @@ __all__ = ['format_report_as_pdf', 'get_reference_metadata', 'update_report_file
 router = APIRouter()
 
 
-def fetch_report_from_supabase(report_id):
+def fetch_report_from_supabase(report_id: UUID4) -> str:
     """
     Fetch the report content from Supabase using the report_id.
     
     Args:
-        report_id: Can be an integer ID or UUID string
+        report_id: The UUID of the report
+        
+    Returns:
+        The report content as a string
+        
+    Raises:
+        HTTPException: If the report is not found or there's an error
     """
     try:
         # Initialize Supabase client
-        supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        supabase = create_supabase_client()
         
-        # Convert to integer using the utility function
-        try:
-            db_id = ensure_id_is_int(report_id)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid report ID format: {str(e)}")
-                
-        # Query the reports table
-        response = supabase.table("reports").select("content").eq("id", db_id).execute()
+        # Query the reports table using report_id directly
+        response = supabase.table("reports").select("content").eq("report_id", str(report_id)).execute()
         
         if not response.data:
-            raise HTTPException(status_code=404, detail=f"Report not found in the database with ID: {report_id}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Report not found with report_id: {report_id}"
+            )
             
         return response.data[0]["content"]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching report: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error fetching report: {str(e)}"
+        )
 
 
-def update_report_file_path(report_id, file_path: str):
+def update_report_file_path(report_id: UUID4, file_path: str):
     """
     Updates the finalized report's file path in Supabase.
     
     Args:
-        report_id: Can be an integer ID or UUID string
+        report_id: The UUID of the report
         file_path: Path to the generated report file (DOCX)
     """
     try:
         # Initialize Supabase client
-        supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        
-        # Convert to integer using the utility function
-        try:
-            db_id = ensure_id_is_int(report_id)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid report ID format: {str(e)}")
+        supabase = create_supabase_client()
         
         # Update the report with the file path
-        try:
-            # Update both fields to ensure compatibility
-            data = {
-                "formatted_file_path": file_path, 
-                "file_path": file_path,
-                "is_finalized": True
-            }
+        data = {
+            "file_path": file_path,
+            "is_finalized": True
+        }
+        
+        response = supabase.table("reports").update(data).eq("report_id", str(report_id)).execute()
+        
+        if not response.data:
+            print(f"Warning: No report found with report_id {report_id} when updating file path")
             
-            # Try to find the report by ID first
-            response = supabase.table("reports").update(data).eq("id", db_id).execute()
-            
-            if not response.data:
-                # If not found by ID, try UUID
-                if isinstance(report_id, str) and "-" in report_id:
-                    print(f"Report not found by ID {db_id}, trying UUID {report_id}")
-                    response = supabase.table("reports").update(data).eq("uuid", report_id).execute()
-            
-            if not response.data:
-                print(f"Warning: No report found with ID {db_id} or UUID {report_id} when updating file path")
-        except Exception as db_error:
-            # Handle database errors
-            print(f"Database error updating report file path: {str(db_error)}")
-            print("This is likely due to missing columns in the database.")
-            
-            # Save locally as fallback
-            report_dir = os.path.join(settings.UPLOAD_DIR, str(report_id))
-            metadata_path = os.path.join(report_dir, "metadata.json")
-            
-            if os.path.exists(report_dir) and os.path.isdir(report_dir):
-                # Save locally in metadata.json
-                try:
-                    metadata = {}
-                    if os.path.exists(metadata_path):
-                        with open(metadata_path, "r") as f:
-                            metadata = json.load(f)
-                    
-                    metadata["docx_path"] = file_path
-                    metadata["is_finalized"] = True
-                    
-                    with open(metadata_path, "w") as f:
-                        json.dump(metadata, f)
-                        
-                    print(f"Saved file path to local metadata file: {metadata_path}")
-                except Exception as file_error:
-                    print(f"Error saving metadata file: {str(file_error)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating report file path: {str(e)}")
+        # Handle database errors
+        print(f"Database error updating report file path: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating report file path: {str(e)}"
+        )
 
 
 @router.post("/preview", response_model=dict)
@@ -259,9 +231,9 @@ async def format_final(data: Dict = Body(...)):
     except ValueError as e:
         # If this is a UUID but conversion failed, try to work with it directly
         if is_uuid:
-            print(f"Working with UUID report_id directly: {report_id}")
+            print(f"Working with report_id directly: {report_id}")
             try:
-                # Use a hash of the UUID as an integer ID for filename purposes
+                # Use a hash of the report_id as an integer ID for filename purposes
                 db_id = int(hashlib.md5(report_id.encode()).hexdigest(), 16) % 10000000
             except Exception:
                 # Last resort fallback
@@ -287,9 +259,9 @@ async def format_final(data: Dict = Body(...)):
                         metadata = json.load(f)
                         if "report_content" in metadata:
                             report_content = metadata["report_content"]
-                            print(f"Using report content from metadata.json for UUID {report_id}")
+                            print(f"Using report content from metadata.json for report_id {report_id}")
                 except Exception as e:
-                    print(f"Error reading metadata for UUID {report_id}: {str(e)}")
+                    print(f"Error reading metadata for report_id {report_id}: {str(e)}")
         
         # If we didn't get content from files, try Supabase
         if not report_content:
@@ -303,7 +275,7 @@ async def format_final(data: Dict = Body(...)):
                         try:
                             with open(content_path, "r") as f:
                                 report_content = f.read()
-                            print(f"Using content from content.txt for UUID {report_id}")
+                            print(f"Using content from content.txt for report_id {report_id}")
                         except Exception as read_err:
                             print(f"Error reading content.txt: {str(read_err)}")
                     
@@ -385,7 +357,7 @@ This error occurs when the system cannot locate the report content in the databa
                 print(f"Saved report content to: {content_path}")
                         
             except Exception as e:
-                print(f"Error updating metadata for UUID {report_id}: {str(e)}")
+                print(f"Error updating metadata for report_id {report_id}: {str(e)}")
 
         # Try to update the database with the file path
         try:
@@ -395,7 +367,7 @@ This error occurs when the system cannot locate the report content in the databa
             # so log but don't fail if database update fails
             if not is_uuid:
                 raise e
-            print(f"Warning: Could not update database for UUID {report_id}: {str(e)}")
+            print(f"Warning: Could not update database for report_id {report_id}: {str(e)}")
         
         # Verify the file exists
         if not os.path.exists(absolute_docx_path):
@@ -478,7 +450,7 @@ async def preview_file(data: Dict = Body(...)):
     Generate a preview of the report PDF from a report ID.
     
     Args:
-        data: Contains report_id to preview
+        data: Contains report_id (UUID) to preview
         
     Returns:
         URL to the preview PDF
@@ -489,16 +461,7 @@ async def preview_file(data: Dict = Body(...)):
     report_id = data["report_id"]
     
     try:
-        # Use the ID mapper utility to handle UUID/integer conversion
-        try:
-            db_id = ensure_id_is_int(report_id)
-        except ValueError as e:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid report_id format: {str(e)}"
-            )
-        
-        # Fetch the report content from Supabase
+        # Fetch the report content from Supabase using report_id
         report_content = fetch_report_from_supabase(report_id)
         
         # Generate unique filename for the preview
@@ -507,7 +470,7 @@ async def preview_file(data: Dict = Body(...)):
         
         # Create reference metadata for preview
         reference_metadata = {
-            "headers": ["INSURANCE REPORT - PREVIEW", f"Report #{db_id}"],
+            "headers": ["INSURANCE REPORT - PREVIEW", f"Report #{report_id[:8]}"],
             "footers": ["Preview Only - Not for Distribution", "Page {page}"]
         }
         
@@ -532,13 +495,12 @@ async def preview_file(data: Dict = Body(...)):
             "preview_url": preview_url,
             "pdf_path": pdf_path
         }
-        
+    except HTTPException:
+        raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to generate preview: {str(e)}"
+            detail=f"Error generating preview: {str(e)}"
         )
 
 

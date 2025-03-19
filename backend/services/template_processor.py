@@ -2,7 +2,8 @@ from docxtpl import DocxTemplate, RichText
 import os
 from pathlib import Path
 import re
-import uuid
+from uuid import UUID
+from pydantic import UUID4
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from utils.error_handler import handle_exception, logger
@@ -175,41 +176,37 @@ class TemplateProcessor:
     
     def render_template(self, template_name: str, variables: Dict[str, Any], output_path: Optional[str] = None) -> str:
         """
-        Render a template with the provided variables.
+        Render a template with the given variables.
         
         Args:
             template_name: Name of the template file
-            variables: Dictionary of variables to insert
-            output_path: Optional output path
+            variables: Dictionary of variables to use in the template
+            output_path: Optional path to save the rendered file
             
         Returns:
-            Path to the rendered document
+            Path to the rendered file
         """
         try:
-            # Find the template
+            # Find template
             template_path = self.find_template(template_name)
             if not template_path:
-                logger.error(f"Template {template_name} not found")
                 raise FileNotFoundError(f"Template {template_name} not found")
+            
+            # Load template
+            doc = DocxTemplate(str(template_path))
             
             # Process variables
             processed_vars = self.process_variables(variables)
             
             # Generate output path if not provided
             if not output_path:
-                report_id = str(uuid.uuid4())
+                report_id = UUID4()
                 output_path = str(self.output_dir / f"report_{report_id}.docx")
             
-            # Load the template
-            doc = DocxTemplate(str(template_path))
-            
-            # Render the template with variables
+            # Render template
             doc.render(processed_vars)
-            
-            # Save the document
             doc.save(output_path)
             
-            logger.info(f"Successfully rendered template {template_name} to {output_path}")
             return output_path
             
         except Exception as e:

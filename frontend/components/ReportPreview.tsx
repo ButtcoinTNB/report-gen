@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Box, 
   Button, 
@@ -8,44 +8,63 @@ import {
   Divider,
   Stack,
   CircularProgress,
-  Alert
+  Alert,
+  IconButton
 } from '@mui/material';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
 import { formatReport } from '../api/format';
+import { getReport } from '../api/report';
+import { Report } from '../src/types';
 
-interface ReportPreviewProps {
-  reportId: number | null;
-  reportText: string | null;
-  onReportUpdated: (text: string) => void;
-  onPreviewReady: () => void;
+interface Props {
+  reportId: string | null;  // UUID
+  onError?: (error: Error) => void;
 }
 
-const ReportPreview: React.FC<ReportPreviewProps> = ({
-  reportId,
-  reportText,
-  onReportUpdated,
-  onPreviewReady
-}) => {
-  const [editing, setEditing] = useState(false);
-  const [editedText, setEditedText] = useState(reportText || '');
-  const [loading, setLoading] = useState(false);
+const ReportPreview: React.FC<Props> = ({ reportId, onError }) => {
+  const [report, setReport] = useState<Report | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editedContent, setEditedContent] = useState('');
 
-  // Update editedText when reportText changes (like when a new report is generated)
-  React.useEffect(() => {
-    if (reportText) {
-      setEditedText(reportText);
+  useEffect(() => {
+    if (reportId) {
+      loadReport();
     }
-  }, [reportText]);
+  }, [reportId]);
+
+  useEffect(() => {
+    if (report?.content) {
+      setEditedContent(report.content);
+    }
+  }, [report?.content]);
+
+  const loadReport = async () => {
+    try {
+      setLoading(true);
+      const reportData = await getReport(reportId as string) as Report;
+      setReport(reportData);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load report';
+      setError(errorMessage);
+      if (onError) {
+        onError(new Error(errorMessage));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleEdit = () => {
     setEditing(true);
   };
 
   const handleSave = () => {
-    onReportUpdated(editedText);
+    if (!report) return;
+    // TODO: Implement save functionality
     setEditing(false);
   };
 
@@ -57,7 +76,6 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
     
     try {
       await formatReport(reportId, true); // true = preview mode
-      onPreviewReady();
     } catch (err) {
       console.error('Error generating preview:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate preview. Please try again.');
@@ -74,7 +92,6 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
     
     try {
       await formatReport(reportId, false); // false = final mode
-      onPreviewReady();
     } catch (err) {
       console.error('Error finalizing report:', err);
       setError(err instanceof Error ? err.message : 'Failed to finalize report. Please try again.');
@@ -83,7 +100,7 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
     }
   };
 
-  if (!reportText) {
+  if (!report) {
     return null;
   }
 
@@ -95,25 +112,35 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
       
       <Divider sx={{ my: 2 }} />
       
-      {editing ? (
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between' }}>
+        <Typography variant="h6">Report Preview</Typography>
+        <Box>
+          {!editing ? (
+            <IconButton onClick={handleEdit} color="primary">
+              <EditIcon />
+            </IconButton>
+          ) : (
+            <IconButton onClick={handleSave} color="primary">
+              <SaveIcon />
+            </IconButton>
+          )}
+        </Box>
+      </Box>
+      
+      {loading ? (
+        <CircularProgress />
+      ) : error ? (
+        <Typography color="error">{error}</Typography>
+      ) : editing ? (
         <Box sx={{ mb: 3 }}>
           <TextField
             multiline
             fullWidth
             minRows={10}
-            value={editedText}
-            onChange={(e) => setEditedText(e.target.value)}
+            value={editedContent}
+            onChange={(e) => setEditedContent(e.target.value)}
             variant="outlined"
           />
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleSave}
-            startIcon={<SaveIcon />}
-            sx={{ mt: 2 }}
-          >
-            Save Changes
-          </Button>
         </Box>
       ) : (
         <Box sx={{ mb: 3 }}>
@@ -126,18 +153,8 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
               whiteSpace: 'pre-wrap'
             }}
           >
-            <Typography variant="body1">{reportText}</Typography>
+            <Typography variant="body1">{report.content}</Typography>
           </Paper>
-          
-          <Button
-            variant="outlined"
-            color="primary"
-            onClick={handleEdit}
-            startIcon={<EditIcon />}
-            sx={{ mt: 2 }}
-          >
-            Edit Report
-          </Button>
         </Box>
       )}
       

@@ -1,110 +1,138 @@
-from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    DateTime,
-    ForeignKey,
-    JSON,
-    Text,
-    Boolean,
-)
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.sql import func
-from typing import Dict, Optional
-from pydantic import BaseModel
+from typing import Dict, Optional, List, Any
+from pydantic import BaseModel, UUID4
 import datetime
 
-Base = declarative_base()
-
-
-# Database Models
-class User(Base):
-    __tablename__ = "users"
+# Pydantic Models for API and Supabase
+class SupabaseModel(BaseModel):
+    """Base model for Supabase tables"""
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+    is_deleted: bool = False
     
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
-    username = Column(String, unique=True, index=True)
-    hashed_password = Column(String, nullable=True)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    class Config:
+        orm_mode = True
 
+class User(SupabaseModel):
+    """User model for the 'users' table in Supabase"""
+    user_id: UUID4
+    email: str
+    username: str
+    hashed_password: Optional[str] = None
+    is_active: bool = True
 
-class File(Base):
-    __tablename__ = "files"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    filename = Column(String, index=True)
-    file_path = Column(String)
-    file_type = Column(String)
-    file_size = Column(Integer)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+class File(SupabaseModel):
+    """File model for the 'files' table in Supabase"""
+    file_id: UUID4
+    report_id: UUID4
+    filename: str
+    file_path: str
+    file_type: str
+    content: Optional[str] = None
+    file_size: int
+    mime_type: Optional[str] = None
+    user_id: Optional[UUID4] = None
 
-
-class TemplateDB(Base):
-    __tablename__ = "templates"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    file_path = Column(String)  # Path in Supabase Storage
-    meta_data = Column(JSON)  # Format metadata (headers, footers, fonts, etc.)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class ReportDB(Base):
-    __tablename__ = "reports"
-
-    id = Column(Integer, primary_key=True, index=True)
-    uuid = Column(String, unique=True, index=True)
-    content = Column(Text)
-    formatted_file_path = Column(String, nullable=True)
-    file_path = Column(String, nullable=True)
-    is_finalized = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-# Pydantic Models for API
 class FormatMetadata(BaseModel):
+    """Format metadata for templates"""
     header: Optional[str] = None
     footer: Optional[str] = None
     fonts: Dict[str, str] = {}
     margins: Dict[str, int] = {}
     logo_path: Optional[str] = None
 
-
-class TemplateCreate(BaseModel):
+class Template(SupabaseModel):
+    """Template model for the 'templates' table in Supabase"""
+    template_id: UUID4
     name: str
-    meta_data: Optional[FormatMetadata] = None
-
-
-class Template(TemplateCreate):
-    id: int
-    file_path: str
-    created_at: datetime.datetime
-
-    class Config:
-        orm_mode = True
-
-
-class ReportCreate(BaseModel):
-    template_id: int
-    title: str
     content: str
+    version: str
+    file_path: Optional[str] = None
+    meta_data: Optional[FormatMetadata] = None
+    user_id: Optional[UUID4] = None
 
-
-class Report(ReportCreate):
-    id: int
-    formatted_file_path: Optional[str] = None
-    meta_data: Optional[Dict] = None
-    created_at: datetime.datetime
-    updated_at: Optional[datetime.datetime] = None
+class Report(SupabaseModel):
+    """Report model for the 'reports' table in Supabase"""
+    report_id: UUID4
+    title: Optional[str] = None
+    content: Optional[str] = None
+    file_path: Optional[str] = None
     is_finalized: bool = False
-
-    class Config:
-        orm_mode = True
-
+    files_cleaned: bool = False
+    template_id: Optional[UUID4] = None
+    user_id: Optional[UUID4] = None
 
 class ReportUpdate(BaseModel):
+    """Model for updating a report"""
     title: Optional[str] = None
     content: Optional[str] = None
     is_finalized: Optional[bool] = None
+
+class ReportCreate(BaseModel):
+    """Model for creating a new report"""
+    title: Optional[str] = None
+    content: Optional[str] = None
+    template_id: Optional[UUID4] = None
+    user_id: Optional[UUID4] = None
+
+class FileCreate(BaseModel):
+    """Model for creating a new file"""
+    filename: str
+    file_type: str
+    content: Optional[str] = None
+    file_size: int
+    mime_type: Optional[str] = None
+    report_id: Optional[UUID4] = None
+    user_id: Optional[UUID4] = None
+
+class TemplateCreate(BaseModel):
+    """Model for creating a new template"""
+    name: str
+    content: str
+    version: str
+    file_path: Optional[str] = None
+    meta_data: Optional[FormatMetadata] = None
+    user_id: Optional[UUID4] = None
+
+class ReferenceReport(SupabaseModel):
+    """Reference report model for the 'reference_reports' table in Supabase"""
+    reference_id: UUID4
+    title: str
+    content: str
+    category: str
+    tags: List[str] = []
+    metadata: Optional[Dict[str, Any]] = None
+    file_path: Optional[str] = None
+    public_url: Optional[str] = None
+    user_id: Optional[UUID4] = None
+
+class ReferenceReportCreate(BaseModel):
+    """Model for creating a new reference report"""
+    title: str
+    content: str
+    category: str
+    tags: List[str] = []
+    metadata: Optional[Dict[str, Any]] = None
+    user_id: Optional[UUID4] = None
+
+# Helper functions for converting between Supabase rows and Pydantic models
+def supabase_to_pydantic(table_name: str, row: Dict[str, Any]) -> SupabaseModel:
+    """Convert a Supabase row to a Pydantic model"""
+    if table_name == "users":
+        return User(**row)
+    elif table_name == "files":
+        return File(**row)
+    elif table_name == "templates":
+        return Template(**row)
+    elif table_name == "reports":
+        return Report(**row)
+    elif table_name == "reference_reports":
+        return ReferenceReport(**row)
+    else:
+        raise ValueError(f"Unknown table name: {table_name}")
+
+def pydantic_to_supabase(model: SupabaseModel) -> Dict[str, Any]:
+    """Convert a Pydantic model to a Supabase-compatible dict"""
+    data = model.dict(exclude_unset=True)
+    
+    # Remove None values as Supabase prefers not having them
+    return {k: v for k, v in data.items() if v is not None}

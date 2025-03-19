@@ -5,7 +5,7 @@ import { handleApiError } from "../utils/errorHandler";
 /**
  * Format a report as PDF with preview or final mode
  * 
- * @param {number} reportId - ID of the report to format
+ * @param {string|number} reportId - ID of the report to format (UUID or integer)
  * @param {boolean} isPreview - Whether this is a preview (true) or final version (false)
  * @returns {Promise<Object>} Formatting response
  */

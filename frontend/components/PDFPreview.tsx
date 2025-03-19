@@ -16,48 +16,43 @@ import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { fetchPDFPreview } from '../api/download';
 
-// Define the interface for the API response
+interface Props {
+  previewId?: string;  // UUID
+  reportId: string | null;  // UUID
+  onError?: (error: Error) => void;
+}
+
 interface PDFPreviewResult {
-  success: boolean;
-  previewUrl: string;
-  previewId?: string;
+  url: string;
+  error?: string;
 }
 
-interface PDFPreviewProps {
-  reportId: number | null;
-  onClose: () => void;
-}
-
-const PDFPreview: React.FC<PDFPreviewProps> = ({ reportId, onClose }) => {
+const PDFPreview: React.FC<Props> = ({ previewId, reportId, onError }) => {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
   
   useEffect(() => {
-    if (!reportId) {
-      setError('No report ID provided');
-      setLoading(false);
-      return;
+    if (reportId) {
+      loadPreview();
     }
-    
-    loadPDFPreview();
-  }, [reportId]);
+  }, [reportId, previewId]);
   
-  const loadPDFPreview = async () => {
-    setLoading(true);
-    setError(null);
-    
+  const loadPreview = async () => {
     try {
-      const result = await fetchPDFPreview(reportId as number) as PDFPreviewResult;
-      if (result && result.previewUrl) {
-        setPdfUrl(result.previewUrl);
-      } else {
-        setError('Failed to generate PDF preview');
+      setLoading(true);
+      const result = await fetchPDFPreview(reportId as string) as PDFPreviewResult;
+      if (result.error) {
+        throw new Error(result.error);
       }
+      setPreviewUrl(result.url);
     } catch (err) {
-      console.error('Error generating PDF preview:', err);
-      setError(err instanceof Error ? err.message : 'Failed to generate PDF preview. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load preview';
+      setError(errorMessage);
+      if (onError) {
+        onError(new Error(errorMessage));
+      }
     } finally {
       setLoading(false);
     }
@@ -76,7 +71,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ reportId, onClose }) => {
   };
   
   const handleRefresh = () => {
-    loadPDFPreview();
+    loadPreview();
   };
   
   return (
@@ -104,7 +99,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ reportId, onClose }) => {
         mb: 2
       }}>
         <Typography variant="h6">PDF Preview</Typography>
-        <IconButton onClick={onClose} aria-label="close">
+        <IconButton onClick={() => {}} aria-label="close">
           <CloseIcon />
         </IconButton>
       </Box>
@@ -182,14 +177,14 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ reportId, onClose }) => {
               Try Again
             </Button>
           </Box>
-        ) : pdfUrl ? (
+        ) : previewUrl ? (
           <Box sx={{ 
             width: `${zoom}%`, 
             height: '100%',
             transition: 'width 0.3s ease'
           }}>
             <iframe 
-              src={pdfUrl}
+              src={previewUrl}
               style={{ 
                 width: '100%', 
                 height: '100%', 

@@ -1,34 +1,35 @@
 """
 Database utility functions for the FastAPI application.
+Using Supabase for all database operations.
 """
 
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from config import settings
+from utils.supabase_helper import create_supabase_client
 from utils.error_handler import logger
 
-# Create SQLAlchemy engine and session factory
-engine = create_engine(settings.DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Database dependency
 def get_db():
     """
-    Get a database session dependency for FastAPI routes.
+    Get a Supabase client for database operations.
     
-    Yields:
-        A SQLAlchemy database session
+    Returns:
+        A Supabase client instance
         
     Notes:
-        The session is automatically closed when the request is complete
+        This replaces the SQLAlchemy session for database operations
     """
-    db = SessionLocal()
     try:
-        yield db
+        # Create Supabase client without proxy parameter
+        return create_supabase_client()
     except Exception as e:
-        logger.error(f"Database error: {str(e)}")
-        db.rollback()
+        logger.error(f"Database connection error: {str(e)}")
         raise
-    finally:
-        db.close() 
+
+# Backwards compatibility function for code that expects a session
+def get_db_session():
+    """
+    Legacy function for code that expects a SQLAlchemy session.
+    This should be migrated to use the Supabase client directly.
+    
+    Returns:
+        A Supabase client that can be used for database operations
+    """
+    return get_db() 

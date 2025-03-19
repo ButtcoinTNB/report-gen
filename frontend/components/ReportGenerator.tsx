@@ -19,7 +19,8 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import SchemaIcon from '@mui/icons-material/Schema';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { generateReport } from '../api/generate'; // Import the API function
+import { generateReport } from '../src/services/api'; // Import the API function
+import { Report } from '../src/types';
 
 // Define a subtle pulsing animation for the progress bar
 const pulse = keyframes`
@@ -44,21 +45,29 @@ const shimmer = keyframes`
   }
 `;
 
-// Define interfaces for the types
-interface ReportGeneratorProps {
-  reportId: number | null;
-  onGenerateSuccess: (text: string) => void;
+interface Props {
+    reportId: string | null;  // UUID
+    onGenerate: (report: Report) => void;
+    onError: (error: Error) => void;
+}
+
+interface State {
+    isGenerating: boolean;
+    error: Error | null;  // Changed from string to Error
+    documentIds: string[];  // UUIDs
+    additionalInfo: string;
+    templateId?: string;  // UUID
 }
 
 interface ProgressUpdate {
-  step: number;
-  message: string;
-  progress: number;
+    step: number;
+    message: string;
+    progress: number;
 }
 
 interface ReportResponse {
-  content: string;
-  error?: boolean;
+    content: string;
+    error?: boolean;
 }
 
 // Define the processing steps
@@ -69,12 +78,13 @@ const PROCESSING_STEPS = [
   { label: "Done! Reviewing your report... ✅", value: 100, icon: <CheckCircleIcon /> }
 ];
 
-const ReportGenerator: React.FC<ReportGeneratorProps> = ({ 
-  reportId, 
-  onGenerateSuccess 
-}) => {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => {
+  const [state, setState] = useState<State>({
+    isGenerating: false,
+    error: null,
+    documentIds: [],
+    additionalInfo: '',
+  });
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
   const [processingTime, setProcessingTime] = useState(0);
@@ -88,7 +98,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
   useEffect(() => {
     let timeInterval: NodeJS.Timeout;
     
-    if (loading) {
+    if (state.isGenerating) {
       // Start the processing time counter
       let seconds = 0;
       timeInterval = setInterval(() => {
@@ -105,13 +115,13 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         clearInterval(timeInterval);
       };
     }
-  }, [loading, currentStep]);
+  }, [state.isGenerating, currentStep]);
 
   // Simulate progress between API progress updates
   useEffect(() => {
     let progressInterval: NodeJS.Timeout;
     
-    if (loading) {
+    if (state.isGenerating) {
       // Update progress bar smoothly between steps
       progressInterval = setInterval(() => {
         setProgress(prevProgress => {
@@ -128,7 +138,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         clearInterval(progressInterval);
       };
     }
-  }, [loading, currentStep]);
+  }, [state.isGenerating, currentStep]);
 
   // Effect to animate the progress counter smoothly
   useEffect(() => {
@@ -164,70 +174,54 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
 
   const handleGenerateReport = async () => {
     if (!reportId) {
-      setError('No document has been uploaded');
-      return;
+        onError(new Error('No document has been uploaded'));
+        return;
     }
 
     // Reset states
-    setLoading(true);
-    setError(null);
+    setState(prev => ({ ...prev, isGenerating: true, error: null, documentIds: [], additionalInfo: '', templateId: undefined }));
     setCurrentStep(0);
     setDisplayStep(0);
-    setProgress(5); // Start with a small progress indicator immediately
-    setDisplayProgress(5);
-    setProcessingTime(0);
-    setShowLongProcessingMessage(false);
-    setStepTransition(false);
-
-    // Add a small artificial delay with increasing progress to provide immediate feedback
-    setTimeout(() => setProgress(10), 300);
-    setTimeout(() => setProgress(20), 600);
+    setProgress(0);
 
     try {
-      // Use the API function with progress callback
-      const result = await generateReport(
-        reportId, 
-        {}, // No special options
-        (progressUpdate: ProgressUpdate) => {
-          // Update UI based on API progress
-          if (progressUpdate.step !== undefined) {
-            setCurrentStep(progressUpdate.step);
-          }
-          
-          if (progressUpdate.progress !== undefined) {
-            setProgress(progressUpdate.progress);
-          }
-          
-          // After the initial step, move to step 1 after 2 seconds
-          // and step 2 after 4 more seconds to simulate progress
-          if (progressUpdate.step === 0) {
-            setTimeout(() => {
-              if (loading) { // Check if still loading
-                setCurrentStep(1);
-                setTimeout(() => {
-                  if (loading) { // Check if still loading
-                    setCurrentStep(2);
-                  }
-                }, 4000);
-              }
-            }, 2000);
-          }
-        }
-      ) as ReportResponse;
+        const result: ReportResponse = await generateReport(
+            {
+                reportId,
+                documentIds: state.documentIds,
+                additionalInfo: state.additionalInfo,
+                templateId: state.templateId
+            },
+            {},
+            (update: ProgressUpdate) => {
+                if (update.step !== undefined) {
+                    setCurrentStep(update.step);
+                }
+                if (update.progress !== undefined) {
+                    setProgress(update.progress);
+                }
+            }
+        );
 
-      if (result.error) {
-        throw new Error(result.content || 'Failed to generate report');
-      }
-
-      // Small delay to show the completion step before moving on
-      setTimeout(() => {
-        onGenerateSuccess(result.content || '');
-        setLoading(false);
-      }, 1000);
+        // Small delay to show the completion step before moving on
+        setTimeout(() => {
+            onGenerate({
+                report_id: reportId,
+                content: result.content,
+                title: 'Generated Report',
+                file_path: '',
+                is_finalized: false,
+                files_cleaned: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            });
+            setState(prev => ({ ...prev, isGenerating: false }));
+        }, 1000);
     } catch (err) {
-      console.error('Error generating report:', err);
-      setError(err instanceof Error ? err.message : 'Failed to generate report. Please try again.');
-      setLoading(false);
+        console.error('Error generating report:', err);
+        const error = err instanceof Error ? err : new Error('Failed to generate report. Please try again.');
+        onError(error);
+        setState(prev => ({ ...prev, isGenerating: false, error }));
     }
   };
 
@@ -244,7 +238,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
           Click the button below to analyze your uploaded documents and generate a 
           professional insurance report using AI.
         </Typography>
-        {!loading && (
+        {!state.isGenerating && (
           <Typography variant="body2" color="text.secondary">
             Processing typically takes 10-15 seconds.
           </Typography>
@@ -256,20 +250,20 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         color="secondary"
         size="large"
         onClick={handleGenerateReport}
-        disabled={loading || !reportId}
-        startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <AutoAwesomeIcon />}
+        disabled={state.isGenerating || !reportId}
+        startIcon={state.isGenerating ? <CircularProgress size={20} color="inherit" /> : <AutoAwesomeIcon />}
         fullWidth
         sx={{ 
           mb: 2,
           position: 'relative',
           '&:disabled': {
-            bgcolor: loading ? 'secondary.main' : 'action.disabledBackground',
-            color: loading ? 'secondary.contrastText' : 'action.disabled',
-            opacity: loading ? 0.8 : 0.7
+            bgcolor: state.isGenerating ? 'secondary.main' : 'action.disabledBackground',
+            color: state.isGenerating ? 'secondary.contrastText' : 'action.disabled',
+            opacity: state.isGenerating ? 0.8 : 0.7
           },
           transition: 'all 0.3s ease',
           overflow: 'hidden',
-          ...(loading && {
+          ...(state.isGenerating && {
             '&::before': {
               content: '""',
               position: 'absolute',
@@ -285,8 +279,8 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
           })
         }}
       >
-        {loading ? 'Generating Report...' : 'Generate AI Report'}
-        {loading && (
+        {state.isGenerating ? 'Generating Report...' : 'Generate AI Report'}
+        {state.isGenerating && (
           <Box 
             sx={{
               position: 'absolute',
@@ -304,7 +298,7 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         )}
       </Button>
       
-      {loading && (
+      {state.isGenerating && (
         <Box sx={{ mt: 3 }}>
           <Stepper activeStep={displayStep} alternativeLabel sx={{ mb: 3 }}>
             {PROCESSING_STEPS.map((step, index) => (
@@ -388,9 +382,9 @@ const ReportGenerator: React.FC<ReportGeneratorProps> = ({
         </Box>
       )}
       
-      {error && (
+      {state.error && (
         <Alert severity="error" sx={{ mt: 2 }}>
-          {error}
+          {state.error.message}
         </Alert>
       )}
     </Paper>

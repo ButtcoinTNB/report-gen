@@ -15,11 +15,14 @@ class Settings(BaseSettings):
     # API Keys
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
 
-    # Supabase
+    # Supabase - Primary database and storage solution
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
 
-    # Database
+    # Important: We are no longer using direct DATABASE_URL connections
+    # All database operations should use the Supabase client
+    # DATABASE_URL is kept for backwards compatibility only and should be removed
+    # in future versions
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # File storage - use absolute paths

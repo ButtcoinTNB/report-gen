@@ -1,13 +1,14 @@
 import axios from "axios";
 import { config } from "../config";
 import { handleApiError, formatApiError } from "../utils/errorHandler";
+import { Report, AnalysisResponse } from '../src/types';
 
 /**
  * Analyze uploaded documents to extract information
  * 
- * @param {string|number} reportId - ID of the report to analyze
+ * @param {string} reportId - UUID of the report to analyze
  * @param {string} additionalInfo - Additional information for the analysis
- * @returns {Promise<Object>} Analysis results with extracted variables
+ * @returns {Promise<AnalysisResponse>} Analysis results
  */
 export async function analyzeDocuments(reportId, additionalInfo = "") {
   try {
@@ -38,10 +39,10 @@ export async function analyzeDocuments(reportId, additionalInfo = "") {
 /**
  * Generate a report from uploaded documents with additional information
  * 
- * @param {string|number} reportId - ID of the report to generate
+ * @param {string} reportId - UUID of the report to generate
  * @param {string} additionalInfo - Additional information for the report
  * @param {Function} onProgress - Optional callback for progress updates
- * @returns {Promise<Object>} Generated report with preview and download URLs
+ * @returns {Promise<Report>} The generated report
  */
 export async function generateReportWithInfo(reportId, additionalInfo = "", onProgress) {
   try {
@@ -88,10 +89,10 @@ export async function generateReportWithInfo(reportId, additionalInfo = "", onPr
 /**
  * Generate a report from uploaded documents
  * 
- * @param {number} reportId - ID of the report to generate content for
- * @param {Object} options - Additional options for generation
+ * @param {string} reportId - UUID of the report to generate content for
+ * @param {object} options - Generation options
  * @param {Function} onProgress - Optional callback for progress updates
- * @returns {Promise<Object>} Generated report content
+ * @returns {Promise<Report>} The generated report content
  */
 export async function generateReport(reportId, options = {}, onProgress) {
   try {
@@ -146,32 +147,18 @@ export async function generateReport(reportId, options = {}, onProgress) {
     
     return response.data;
   } catch (error) {
-    // Log the error but don't throw - return a fallback response
     console.error("Error generating report:", error);
-    
-    // More detailed logging for API errors
-    if (error?.isAxiosError && error.response) {
-      console.error("Server error response:", error.response.data);
-    }
-    
-    // Create a user-friendly error message
-    const errorMessage = formatApiError(error, "Error generating report");
-    
-    // Return a fallback response instead of throwing
-    return {
-      content: `${errorMessage}\n\nPlease try again later.`,
-      error: true
-    };
+    throw new Error(error.message || "Failed to generate report");
   }
 }
 
 /**
  * Request AI-based refinement of a report
  * 
- * @param {number} reportId - ID of the report to refine
+ * @param {string} reportId - UUID of the report to refine
  * @param {string} instructions - User instructions for refinement
  * @param {Function} onProgress - Optional callback for progress updates
- * @returns {Promise<Object>} Refined report content
+ * @returns {Promise<Report>} The refined report
  */
 export async function refineReport(reportId, instructions, onProgress) {
   try {

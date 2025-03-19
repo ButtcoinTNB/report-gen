@@ -21,70 +21,72 @@ import {
 import dynamic from 'next/dynamic';
 import 'easymde/dist/easymde.min.css';
 import { getReport, updateReport, refineReport, finalizeReport } from '../api/report';
+import { Report } from '../src/types';
 
 // Dynamic import for the Markdown editor to avoid SSR issues
 const SimpleMDE = dynamic(() => import('react-simplemde-editor'), { ssr: false });
 
-// Define Report interface
-interface Report {
-  id: number;
-  template_id: number;
-  title: string;
-  content: string;
-  formatted_file_path: string | null;
-  created_at: string;
-  updated_at: string | null;
-  is_finalized: boolean;
+interface ReportData {
+    report_id: string;  // UUID
+    template_id?: string;  // UUID
+    title?: string;
+    content?: string;
+    is_finalized?: boolean;
+    files_cleaned?: boolean;
+    created_at?: string;
+    updated_at?: string;
 }
 
 const EditPage = () => {
   const router = useRouter();
-  const { id } = router.query; // Get report ID from URL
-  
-  // State
-  const [report, setReport] = useState<Report | null>(null);
+  const { id } = router.query;
+  const [report, setReport] = useState<ReportData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [aiInstructions, setAiInstructions] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [aiInstructions, setAiInstructions] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isRefining, setIsRefining] = useState(false);
-  const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  
-  // Fetch report data on component mount
+
   useEffect(() => {
-    const fetchReport = async () => {
-      if (!id) return;
-      
-      setIsLoading(true);
-      try {
-        // Call the API client function to fetch the report
-        const reportData = await getReport(Number(id)) as Report;
-        setReport(reportData);
-        setTitle(reportData.title);
-        setContent(reportData.content);
-      } catch (err) {
-        console.error('Error fetching report:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load report. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    fetchReport();
+    if (id) {
+      loadReport(id as string);
+    }
   }, [id]);
 
-  // Handle saving the edited report
+  const loadReport = async (reportId: string) => {
+    try {
+      setLoading(true);
+      const reportData = await getReport(reportId) as Report;
+      setReport({
+        report_id: reportData.report_id,
+        template_id: reportData.template_id,
+        title: reportData.title,
+        content: reportData.content,
+        is_finalized: reportData.is_finalized,
+        files_cleaned: reportData.files_cleaned,
+        created_at: reportData.created_at,
+        updated_at: reportData.updated_at
+      });
+      setTitle(reportData.title || '');
+      setContent(reportData.content || '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load report');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!report) return;
     
-    setIsLoading(true);
+    setLoading(true);
     setError('');
     setSuccess('');
     
     try {
-      // Call the API client function to update the report
-      const updatedReport = await updateReport(report.id, {
+      const updatedReport = await updateReport(report.report_id, {
         title,
         content,
         is_finalized: false
@@ -96,63 +98,61 @@ const EditPage = () => {
       console.error('Error saving report:', err);
       setError(err instanceof Error ? err.message : 'Failed to save report. Please try again.');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
   
-  // Handle AI refinement
   const handleRefine = async () => {
-    if (!report || !aiInstructions.trim()) return;
-    
-    setIsRefining(true);
-    setError('');
-    
+    if (!report) return;
+
     try {
-      // Call the API client function for AI refinement
-      const refinedReport = await refineReport(report.id, aiInstructions) as Report;
-      
-      setReport(refinedReport);
-      setContent(refinedReport.content);
-      setSuccess('Report refined successfully!');
-      setAiInstructions(''); // Clear the instructions field
+      setIsRefining(true);
+      const refinedReport = await refineReport(report.report_id, aiInstructions) as Report;
+      setReport({
+        report_id: refinedReport.report_id,
+        template_id: refinedReport.template_id,
+        title: refinedReport.title,
+        content: refinedReport.content,
+        is_finalized: refinedReport.is_finalized,
+        files_cleaned: refinedReport.files_cleaned,
+        created_at: refinedReport.created_at,
+        updated_at: refinedReport.updated_at
+      });
+      setAiInstructions('');
     } catch (err) {
       console.error('Error refining report:', err);
-      setError(err instanceof Error ? err.message : 'Failed to refine report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to refine report');
     } finally {
       setIsRefining(false);
     }
   };
   
-  // Handle report finalization
   const handleFinalize = async () => {
     if (!report) return;
     
-    setIsLoading(true);
+    setLoading(true);
     setError('');
     
     try {
-      // Call the API client function to finalize the report
       await finalizeReport({
-        report_id: report.id,
+        report_id: report.report_id,
         template_id: 1  // Always use template ID 1
       });
       
       setSuccess('Report finalized successfully!');
       
-      // Redirect to download page
       setTimeout(() => {
-        router.push(`/download?id=${report.id}`);
+        router.push(`/download?id=${report.report_id}`);
       }, 1500);
     } catch (err) {
       console.error('Error finalizing report:', err);
       setError(err instanceof Error ? err.message : 'Impossibile finalizzare il report. Riprova.');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
   
-  // If loading or no report yet
-  if (isLoading && !report) {
+  if (loading && !report) {
     return (
       <Container maxWidth="lg" sx={{ mt: 5, mb: 5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 10 }}>
@@ -168,7 +168,6 @@ const EditPage = () => {
         Modifica Report
       </Typography>
       
-      {/* Report Editor */}
       <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
         <TextField
           label="Titolo del Report"
@@ -192,29 +191,27 @@ const EditPage = () => {
           disabled={report?.is_finalized}
         />
         
-        {/* Action buttons */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Button 
             variant="contained" 
             color="primary" 
             onClick={handleSave}
-            disabled={isLoading || report?.is_finalized}
+            disabled={loading || report?.is_finalized}
           >
-            {isLoading ? <CircularProgress size={24} /> : 'Salva Modifiche'}
+            {loading ? <CircularProgress size={24} /> : 'Salva Modifiche'}
           </Button>
           
           <Button 
             variant="contained" 
             color="success" 
             onClick={handleFinalize}
-            disabled={isLoading || report?.is_finalized}
+            disabled={loading || report?.is_finalized}
           >
-            {isLoading ? <CircularProgress size={24} /> : 'Finalizza Report'}
+            {loading ? <CircularProgress size={24} /> : 'Finalizza Report'}
           </Button>
         </Box>
       </Paper>
       
-      {/* AI Refinement Section */}
       <Paper elevation={3} sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
           Assistenza AI
@@ -247,7 +244,6 @@ const EditPage = () => {
         </Button>
       </Paper>
       
-      {/* Status messages */}
       <Snackbar 
         open={!!error} 
         autoHideDuration={6000} 

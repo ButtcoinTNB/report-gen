@@ -117,10 +117,12 @@ async def cleanup_old_data(max_age_hours: int = 24):
         
         # Update database if using Supabase to mark old reports as cleaned
         try:
-            from supabase import create_client
-            
+            # Only connect to Supabase if URLs are configured
             if settings.SUPABASE_URL and settings.SUPABASE_KEY:
-                supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+                from utils.supabase_helper import create_supabase_client
+                
+                # Create client with the helper function that handles proxy issues
+                supabase = create_supabase_client()
                 
                 # Get the timestamp for max_age_hours ago
                 max_age_time = datetime.now() - timedelta(hours=max_age_hours)

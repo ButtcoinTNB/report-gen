@@ -1,35 +1,36 @@
 from fastapi import APIRouter, HTTPException, Body
-from typing import Dict
+from typing import Dict, Any
+from uuid import UUID
+from pydantic import UUID4
 from models import ReportUpdate, Report
 from services.ai_service import refine_report_text
-from supabase import create_client, Client
-from config import settings
+from utils.supabase_helper import create_supabase_client
 from datetime import datetime
-from utils.id_mapper import ensure_id_is_int
 
 router = APIRouter()
 
 
 @router.put("/{report_id}", response_model=Report)
 async def update_report(
-    report_id: str,
+    report_id: UUID4,
     data: ReportUpdate,
 ):
     """
     Update a generated report with manual edits
+    
+    Args:
+        report_id: UUID of the report to update
+        data: Update data containing title, content, and finalization status
+        
+    Returns:
+        Updated report
     """
     try:
-        # Try to convert the report_id to an integer if it's a UUID
-        try:
-            db_id = ensure_id_is_int(report_id)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid report ID format: {str(e)}")
-        
         # Initialize Supabase client
-        supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        supabase = create_supabase_client()
         
-        # Retrieve report from database using the integer ID
-        response = supabase.table("reports").select("*").eq("id", db_id).execute()
+        # Retrieve report from database
+        response = supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail=f"Report with ID {report_id} not found")
@@ -48,63 +49,63 @@ async def update_report(
         update_data["updated_at"] = datetime.now().isoformat()
         
         # Update report in database
-        response = supabase.table("reports").update(update_data).eq("id", db_id).execute()
+        response = supabase.table("reports").update(update_data).eq("report_id", str(report_id)).execute()
         
         if not response.data:
             raise HTTPException(status_code=500, detail="Failed to update report")
         
         return response.data[0]
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error updating report: {str(e)}")
 
 
 @router.post("/ai-refine", response_model=Report)
 async def ai_refine_report(
-    data: Dict = Body(...),
+    data: Dict[str, Any] = Body(...),
 ):
     """
-    Use AI to refine a report based on additional instructions
-    """
-    # Required fields
-    if "report_id" not in data:
-        raise HTTPException(status_code=400, detail="report_id is required")
-    if "instructions" not in data:
-        raise HTTPException(status_code=400, detail="instructions is required")
-
-    report_id = data["report_id"]
-    instructions = data["instructions"]
-
-    try:
-        # Initialize Supabase client
-        supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    Refine a report using AI
+    
+    Args:
+        data: Dictionary containing report_id and instructions
         
-        # Retrieve report from database
-        response = supabase.table("reports").select("*").eq("id", report_id).execute()
+    Returns:
+        Refined report
+    """
+    try:
+        report_id = UUID4(data.get("report_id"))
+        instructions = data.get("instructions")
+        
+        if not report_id or not instructions:
+            raise HTTPException(status_code=400, detail="Missing report_id or instructions")
+        
+        # Initialize Supabase client
+        supabase = create_supabase_client()
+        
+        # Get current report content
+        response = supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
         
         if not response.data:
             raise HTTPException(status_code=404, detail=f"Report with ID {report_id} not found")
         
         report = response.data[0]
-        current_content = report["content"]
-
-        # Refine content with AI
-        refined_content = await refine_report_text(
-            current_content, instructions
-        )
-
-        # Update report in database
+        
+        # Refine the report content using AI
+        refined_content = await refine_report_text(report["content"], instructions)
+        
+        # Update the report with refined content
         update_data = {
             "content": refined_content,
             "updated_at": datetime.now().isoformat()
         }
         
-        response = supabase.table("reports").update(update_data).eq("id", report_id).execute()
+        response = supabase.table("reports").update(update_data).eq("report_id", str(report_id)).execute()
         
         if not response.data:
             raise HTTPException(status_code=500, detail="Failed to update report")
         
         return response.data[0]
+        
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error refining report: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Error refining report: {str(e)}")

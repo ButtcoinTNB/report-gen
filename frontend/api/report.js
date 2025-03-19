@@ -1,61 +1,96 @@
-import axios from "axios";
-import { config } from "../config";
+import { Report } from '../src/types';
+import config from '../config';
 import { handleApiError } from "../utils/errorHandler";
 
 /**
- * Fetch a report by ID
+ * Fetch a report by its ID
  * 
- * @param {number} reportId - ID of the report to fetch
- * @returns {Promise<Object>} Report data
+ * @param {string} reportId - UUID of the report to fetch
+ * @returns {Promise<Report>} The report data
  */
 export async function getReport(reportId) {
-  try {
-    console.log(`Fetching report with ID: ${reportId}`);
-    
-    const response = await axios.get(`${config.endpoints.edit}/${reportId}`);
-    return response.data;
-  } catch (error) {
-    return handleApiError(error, "fetching report");
-  }
+    const response = await fetch(`${config.endpoints.reports}/${reportId}`);
+    if (!response.ok) {
+        throw new Error('Failed to fetch report');
+    }
+    return response.json();
 }
 
 /**
- * Update a report with edited content
+ * Update a report's content
  * 
- * @param {number} reportId - ID of the report to update
- * @param {Object} data - Data to update (content, title, etc.)
- * @returns {Promise<Object>} Updated report data
+ * @param {string} reportId - UUID of the report to update
+ * @param {object} data - The data to update
+ * @returns {Promise<Report>} The updated report
  */
 export async function updateReport(reportId, data) {
-  try {
-    console.log(`Updating report ${reportId} with data:`, data);
-    
-    const response = await axios.put(`${config.endpoints.edit}/${reportId}`, data);
-    return response.data;
-  } catch (error) {
-    return handleApiError(error, "updating report");
-  }
+    const response = await fetch(`${config.endpoints.reports}/${reportId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+        throw new Error('Failed to update report');
+    }
+    return response.json();
 }
 
 /**
- * Request AI refinement for a report
+ * Refine a report based on user instructions
  * 
- * @param {number} reportId - ID of the report to refine
- * @param {string} instructions - Instructions for AI refinement
- * @returns {Promise<Object>} Refined report data
+ * @param {string} reportId - UUID of the report to refine
+ * @param {string} instructions - User instructions for refinement
+ * @returns {Promise<Report>} The refined report
  */
 export async function refineReport(reportId, instructions) {
-  try {
     console.log(`Refining report ${reportId} with instructions: ${instructions}`);
     
-    const response = await axios.post(`${config.endpoints.edit}/ai-refine`, {
-      report_id: reportId,
-      instructions: instructions
+    const response = await fetch(`${config.endpoints.reports}/${reportId}/refine`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions })
     });
-    return response.data;
-  } catch (error) {
-    return handleApiError(error, "AI refinement");
-  }
+    
+    if (!response.ok) {
+        throw new Error('Failed to refine report');
+    }
+    
+    return response.json();
+}
+
+/**
+ * Check if a report exists and is ready
+ * 
+ * @param {string} reportId - UUID of the report to check
+ * @returns {Promise<boolean>} Whether the report exists and is ready
+ */
+export async function checkReportExists(reportId) {
+    try {
+        const response = await fetch(`${config.endpoints.reports}/${reportId}/status`);
+        if (!response.ok) {
+            return false;
+        }
+        const data = await response.json();
+        return data.exists && data.ready;
+    } catch (error) {
+        console.error('Error checking report status:', error);
+        return false;
+    }
+}
+
+/**
+ * Download a report in the specified format
+ * 
+ * @param {string} reportId - UUID of the report to download
+ * @param {string} format - Format to download (pdf, docx)
+ * @returns {Promise<Blob>} The report file as a blob
+ */
+export async function downloadReport(reportId, format = 'docx') {
+    const response = await fetch(`${config.endpoints.reports}/${reportId}/download?format=${format}`);
+    if (!response.ok) {
+        throw new Error('Failed to download report');
+    }
+    return response.blob();
 }
 
 /**
@@ -68,12 +103,17 @@ export async function finalizeReport(data) {
   try {
     console.log("Finalizing report with data:", data);
     
-    const response = await axios.post(`${config.endpoints.format}/final`, data, {
-      timeout: 30000 // Increase timeout to 30 seconds as PDF generation might take time
+    const response = await fetch(`${config.endpoints.reports}/${data.id}/finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
     });
     
-    console.log("Finalize response:", response.data);
-    return response.data;
+    if (!response.ok) {
+      throw new Error('Failed to finalize report');
+    }
+    
+    return response.json();
   } catch (error) {
     return handleApiError(error, "finalizing report");
   }
@@ -88,8 +128,11 @@ export async function getTemplates() {
   try {
     console.log("Fetching available templates");
     
-    const response = await axios.get(`${config.endpoints.upload}/templates`);
-    return response.data;
+    const response = await fetch(`${config.endpoints.reports}/templates`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch templates');
+    }
+    return response.json();
   } catch (error) {
     return handleApiError(error, "fetching templates");
   }
@@ -98,40 +141,19 @@ export async function getTemplates() {
 /**
  * Check the status of a report
  * 
- * @param {number} reportId - ID of the report to check
+ * @param {string} reportId - UUID of the report to check
  * @returns {Promise<Object>} Report status
  */
 export async function checkReportStatus(reportId) {
   try {
     console.log(`Checking status of report ${reportId}`);
     
-    const response = await axios.get(`${config.endpoints.edit}/status/${reportId}`);
-    return response.data;
+    const response = await fetch(`${config.endpoints.reports}/${reportId}/status`);
+    if (!response.ok) {
+      throw new Error('Failed to check report status');
+    }
+    return response.json();
   } catch (error) {
     return handleApiError(error, "checking report status", { throwError: false });
-  }
-}
-
-/**
- * Download a finalized report
- */
-export async function downloadReport(reportId) {
-  try {
-    console.log("Downloading report with ID:", reportId);
-    
-    // Direct download approach - create a download URL and trigger browser download
-    const directUrl = `${config.API_URL}/api/download/${reportId}`;
-    console.log("Using direct download URL:", directUrl);
-    
-    // Return the direct URL to be opened in a new tab/window
-    return {
-      data: {
-        download_url: directUrl
-      },
-      status: 200
-    };
-  } catch (error) {
-    console.error("Error preparing download:", error);
-    throw new Error(`Failed to prepare download: ${error.message}`);
   }
 } 

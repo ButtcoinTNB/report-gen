@@ -28,6 +28,7 @@ import { downloadReport, getReport } from '../api/report';
 // Types
 interface Report {
   id: number;
+  report_id: string;  // UUID
   template_id: number;
   title: string;
   content: string;
@@ -65,10 +66,10 @@ const DownloadPage = () => {
       setIsLoading(true);
       try {
         // Call the API client function to fetch the report
-        const reportData = await getReport(Number(id)) as Report;
+        const reportData = await getReport(id as string) as Report;
         
         // Then get the download information
-        const downloadData = await downloadReport(Number(id)) as DownloadResponse;
+        const downloadData = await downloadReport(id as string) as DownloadResponse;
         
         setReport({
           ...reportData,

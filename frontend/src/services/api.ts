@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { Report, ReportPreview, AnalysisResponse } from '../types';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -18,74 +19,86 @@ interface AnalysisDetails {
   richiede_verifica: boolean;
 }
 
-interface AnalysisResponse {
-  extractedVariables: Record<string, string>;
-  analysisDetails: Record<string, AnalysisDetails>;
-  fieldsNeedingAttention: string[];
+interface GenerateRequest {
+    reportId: string;  // UUID
+    documentIds: string[];  // UUIDs
+    additionalInfo?: string;
+    templateId?: string;  // UUID
 }
 
-interface GenerateReportParams {
-  documentIds: string[];
-  additionalInfo: string;
+interface RefineRequest {
+    reportId: string;  // UUID
+    instructions: string;
 }
 
-interface ReportPreview {
-  previewUrl: string;
-  downloadUrl: string;
-  reportId: string;
+interface ProgressUpdate {
+    step: number;
+    message: string;
+    progress: number;
+}
+
+interface ReportResponse {
+    content: string;
+    error?: boolean;
 }
 
 export const analyzeDocuments = async (documentIds: string[]): Promise<AnalysisResponse> => {
-  try {
-    const response = await api.post('/analyze', { document_ids: documentIds });
-    if (response.data.status === 'success') {
-      return {
-        extractedVariables: response.data.extracted_variables,
-        analysisDetails: response.data.analysis_details,
-        fieldsNeedingAttention: response.data.fields_needing_attention,
-      };
+    const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentIds })
+    });
+    
+    if (!response.ok) {
+        throw new Error('Failed to analyze documents');
     }
-    throw new Error(response.data.detail || 'Errore durante l\'analisi dei documenti');
-  } catch (error: any) {
-    throw new Error(error.response?.data?.detail || 'Errore durante l\'analisi dei documenti');
-  }
+    
+    return response.json();
 };
 
-export const generateReport = async ({ documentIds, additionalInfo }: GenerateReportParams): Promise<ReportPreview> => {
-  try {
-    const response = await api.post('/generate', {
-      document_ids: documentIds,
-      additional_info: additionalInfo,
+export const generateReport = async (
+    request: GenerateRequest,
+    options = {},
+    onProgress?: (update: ProgressUpdate) => void
+): Promise<ReportResponse> => {
+    const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
     });
-    if (response.data.status === 'success') {
-      return {
-        previewUrl: response.data.preview_url,
-        downloadUrl: response.data.download_url,
-        reportId: response.data.report_id,
-      };
+
+    if (!response.ok) {
+        throw new Error('Failed to generate report');
     }
-    throw new Error(response.data.detail || 'Errore durante la generazione del report');
-  } catch (error: any) {
-    throw new Error(error.response?.data?.detail || 'Errore durante la generazione del report');
-  }
+
+    const result = await response.json();
+    return result;
 };
 
 export const refineReport = async (reportId: string, instructions: string): Promise<ReportPreview> => {
-  try {
-    const response = await api.post(`/reports/${reportId}/refine`, {
-      instructions,
+    const response = await fetch(`/api/reports/${reportId}/refine`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instructions })
     });
-    if (response.data.status === 'success') {
-      return {
-        previewUrl: response.data.preview_url,
-        downloadUrl: response.data.download_url,
-        reportId: response.data.report_id,
-      };
+    
+    if (!response.ok) {
+        throw new Error('Failed to refine report');
     }
-    throw new Error(response.data.detail || 'Errore durante la modifica del report');
-  } catch (error: any) {
-    throw new Error(error.response?.data?.detail || 'Errore durante la modifica del report');
-  }
+    
+    return response.json();
+};
+
+export const downloadReport = async (reportId: string): Promise<Blob> => {
+    const response = await fetch(`/api/download/${reportId}`);
+    
+    if (!response.ok) {
+        throw new Error('Failed to download report');
+    }
+    
+    return response.blob();
 };
 
 export default api; 
