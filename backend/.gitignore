@@ -1,0 +1,45 @@
+# Python specific ignores
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+.env
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+
+# Generated files
+generated_reports/
+uploads/
+preview_files/
+tmp/
+*.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# API keys and secrets
+.env
+.env.*
+!.env.example
+
+# Allow template files
+!reference_reports/template.docx
+!templates/*.docx
+
+# Temporary files
+*.bak
+*.swp
+*~
+*.tmp
+.DS_Store 

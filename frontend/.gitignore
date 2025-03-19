@@ -12,6 +12,10 @@
 
 # testing
 /coverage
+/cypress/videos/
+/cypress/screenshots/
+/cypress/downloads/
+/cypress/fixtures/
 
 # next.js
 /.next/
@@ -30,8 +34,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +44,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Generated files
+/public/sitemap*.xml
+/public/robots.txt
+/public/sw.js
+/public/workbox-*.js
+/public/fallback-*.js
+*.map
+
+# Temporary files
+.temp/
+.cache/
+.eslintcache

@@ -45,6 +45,8 @@ out/
 # Uploaded files
 uploads/
 uploads/*
+generated_reports/
+generated_reports/*
 *.pdf
 *.docx
 *.doc
@@ -54,6 +56,25 @@ uploads/*
 *.jpeg
 !README.md
 !requirements.txt
+!templates/*.docx
+!reference_reports/template.docx
+
+# Temporary files
+tmp/
+*.tmp
+*.temp
+.cache/
+.pytest_cache/
+
+# Generated files
+__generated__/
+*.html
+preview_files/
+*.log
+logs/
+
+# Supabase local dev
+supabase/
 
 # OS specific
 .DS_Store
@@ -75,3 +96,4 @@ instructions.md
 API_SPECS.md
 CURSOR_RULES.md
 UX_FLOW.md
+frontend/cypress
