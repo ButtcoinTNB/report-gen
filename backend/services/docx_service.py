@@ -9,26 +9,41 @@ from config import settings
 
 class DocxService:
     def __init__(self):
-        # Define common paths
+        # Get current working directory for debugging
+        cwd = os.getcwd()
+        logger.info(f"Current working directory: {cwd}")
+        
+        # Define common paths - adjust paths to work in both development and production
         self.templates_dirs = [
-            Path("reference_reports"),
-            Path("backend/reference_reports"),
-            Path("templates")
+            Path("reference_reports"),                # Direct reference_reports folder
+            Path("templates"),                        # Direct templates folder
+            Path(cwd) / "reference_reports",          # Absolute path using current working directory
+            Path(cwd) / "backend" / "reference_reports" # Absolute path to backend/reference_reports
         ]
+        
+        # Define output directories
         self.output_dir = Path(settings.GENERATED_REPORTS_DIR)
         self.preview_dir = Path("previews")
         
-        # Create necessary directories
+        # Create necessary directories for outputs (these should always work)
         for directory in [self.output_dir, self.preview_dir]:
-            directory.mkdir(exist_ok=True, parents=True)
+            try:
+                directory.mkdir(exist_ok=True, parents=True)
+                logger.info(f"Created or verified directory: {directory}")
+            except Exception as e:
+                logger.error(f"Failed to create directory {directory}: {str(e)}")
         
-        # Try to create template directories if they don't exist
+        # Try to create template directories, but don't fail if they can't be created
         for template_dir in self.templates_dirs:
             try:
-                # Create directory with parents flag to ensure parent directories exist
                 template_dir.mkdir(exist_ok=True, parents=True)
+                logger.info(f"Created or verified template directory: {template_dir}")
             except Exception as e:
-                logger.warning(f"Could not create template directory {template_dir}: {str(e)}")
+                # This is now just informational - not a warning
+                logger.info(f"Note: Could not create template directory {template_dir}: {str(e)}")
+                # Check if directory exists anyway (might be read-only)
+                if template_dir.exists():
+                    logger.info(f"Directory {template_dir} exists but cannot be created (might be read-only)")
     
     def find_template(self, template_name: str = "template.docx") -> Optional[Path]:
         """
@@ -40,17 +55,30 @@ class DocxService:
         Returns:
             Path to the template file or None if not found
         """
+        logger.info(f"Looking for template: {template_name}")
+        
         # Check all potential template directories
         for template_dir in self.templates_dirs:
             template_path = template_dir / template_name
             if template_path.exists():
                 logger.info(f"Found template at {template_path}")
                 return template_path
+            else:
+                logger.debug(f"Template not found at {template_path}")
         
         # Special case for default template name
         if template_name == "default.docx" and self.find_template("template.docx"):
             return self.find_template("template.docx")
-            
+        
+        # If no template found, look for any .docx files in the templates directories
+        for template_dir in self.templates_dirs:
+            if template_dir.exists():
+                docx_files = list(template_dir.glob("*.docx"))
+                if docx_files:
+                    logger.info(f"Using alternative template: {docx_files[0]}")
+                    return docx_files[0]
+        
+        logger.warning(f"No suitable template found for {template_name}")
         return None
     
     def generate_report(self, template_variables: Dict[str, Any], template_name: str = "template.docx") -> str:
