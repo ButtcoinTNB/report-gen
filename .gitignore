@@ -70,3 +70,8 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace 
 .cursorrules
+AI_SERVICE.md
+instructions.md
+API_SPECS.md
+CURSOR_RULES.md
+UX_FLOW.md

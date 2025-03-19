@@ -56,10 +56,10 @@ export default function Home() {
   
   // Updated steps for new workflow
   const steps = [
-    'Upload Documents', 
-    'Add Information', 
-    'Preview & Edit Report', 
-    'Download'
+    'Carica Documenti', 
+    'Aggiungi Informazioni', 
+    'Anteprima e Modifica', 
+    'Scarica'
   ];
 
   const handleUploadSuccess = async (reportId) => {
@@ -93,7 +93,7 @@ export default function Home() {
       setAnalysisComplete(true);
     } catch (err) {
       console.error('Error analyzing documents:', err);
-      setError('Analysis completed with some issues. You can still proceed.');
+      setError('Analisi completata con alcuni problemi. Puoi comunque procedere.');
       setShowError(true);
     } finally {
       setAnalysisInProgress(false);
@@ -113,17 +113,17 @@ export default function Home() {
       if (typeof data === 'string') return data;
       if (data.detail) return data.detail;
       if (data.message) return data.message;
-      if (data.error) return typeof data.error === 'string' ? data.error : 'Server error';
+      if (data.error) return typeof data.error === 'string' ? data.error : 'Errore del server';
       if (data.errorMessage) return data.errorMessage;
     }
     
-    return error.message || 'An unknown error occurred';
+    return error.message || 'Si è verificato un errore sconosciuto';
   };
 
   // Handler for submitting additional information
   const handleInfoSubmit = async () => {
     if (!reportId) {
-      setError('No report ID found. Please upload documents first.');
+      setError('Nessun ID report trovato. Carica prima i documenti.');
       setShowError(true);
       return;
     }
@@ -163,13 +163,13 @@ export default function Home() {
         // Move to the Preview & Edit step
         setActiveStep(2);
       } else {
-        throw new Error('Failed to generate report preview');
+        throw new Error('Impossibile generare l\'anteprima del report');
       }
     } catch (err) {
       console.error('Error generating report:', err);
       
       // Improved error handling to extract string message from various error formats
-      let errorMessage = 'There was an error generating your report. Please try again.';
+      let errorMessage = 'Si è verificato un errore durante la generazione del report. Riprova.';
       
       if (err.response) {
         // The request was made and the server responded with a status code
@@ -186,7 +186,7 @@ export default function Home() {
           } else if (responseData.error) {
             errorMessage = typeof responseData.error === 'string' 
               ? responseData.error 
-              : 'Server error occurred';
+              : 'Si è verificato un errore sul server';
           }
         }
       } else if (err.message) {
@@ -256,31 +256,24 @@ export default function Home() {
     } catch (err) {
       console.error('Error refining report:', err);
       
-      // Add error message to chat
-      const chatErrorMessage = { 
-        role: 'assistant', 
-        content: 'Si è verificato un errore durante l\'elaborazione della tua richiesta. Puoi riprovare?' 
-      };
-      setChatMessages(prevMessages => [...prevMessages, chatErrorMessage]);
-      
       // Improved error handling similar to handleInfoSubmit
-      let uiErrorMessage = 'Error refining report: Unknown error';
+      let uiErrorMessage = 'Errore durante il perfezionamento del report: Errore sconosciuto';
       
       if (err.response && err.response.data) {
         const responseData = err.response.data;
         if (typeof responseData === 'string') {
-          uiErrorMessage = 'Error refining report: ' + responseData;
+          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + responseData;
         } else if (responseData.detail) {
-          uiErrorMessage = 'Error refining report: ' + responseData.detail;
+          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + responseData.detail;
         } else if (responseData.message) {
-          uiErrorMessage = 'Error refining report: ' + responseData.message;
+          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + responseData.message;
         } else if (responseData.error) {
-          uiErrorMessage = 'Error refining report: ' + (typeof responseData.error === 'string' 
+          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + (typeof responseData.error === 'string' 
             ? responseData.error 
-            : 'Server error occurred');
+            : 'Si è verificato un errore sul server');
         }
       } else if (err.message) {
-        uiErrorMessage = 'Error refining report: ' + err.message;
+        uiErrorMessage = 'Errore durante il perfezionamento del report: ' + err.message;
       }
       
       setError(uiErrorMessage);
@@ -298,7 +291,7 @@ export default function Home() {
   // Handler for the "Download Current Version" action
   const handleDownloadCurrentVersion = async () => {
     if (!reportId) {
-      setError('No report ID found. Please generate a report first.');
+      setError('Nessun ID report trovato. Genera prima un report.');
       setShowError(true);
       return;
     }
@@ -310,11 +303,11 @@ export default function Home() {
       if (result && result.data && result.data.download_url) {
         window.open(result.data.download_url, '_blank');
       } else {
-        throw new Error('Failed to get download URL');
+        throw new Error('Impossibile ottenere l\'URL di download');
       }
     } catch (err) {
       console.error('Error downloading report:', err);
-      setError('Error downloading report: ' + (err.message || 'Unknown error'));
+      setError('Errore durante il download del report: ' + (err.message || 'Errore sconosciuto'));
       setShowError(true);
     } finally {
       setIsDownloading(false);

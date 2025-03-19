@@ -145,7 +145,7 @@ const EditPage = () => {
       }, 1500);
     } catch (err) {
       console.error('Error finalizing report:', err);
-      setError(err instanceof Error ? err.message : 'Failed to finalize report. Please try again.');
+      setError(err instanceof Error ? err.message : 'Impossibile finalizzare il report. Riprova.');
     } finally {
       setIsLoading(false);
     }
@@ -165,13 +165,13 @@ const EditPage = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 5, mb: 5 }}>
       <Typography variant="h4" component="h1" gutterBottom>
-        Edit Report
+        Modifica Report
       </Typography>
       
       {/* Report Editor */}
       <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
         <TextField
-          label="Report Title"
+          label="Titolo del Report"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           fullWidth
@@ -181,7 +181,7 @@ const EditPage = () => {
         />
         
         <TextField
-          label="Report Content"
+          label="Contenuto del Report"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           fullWidth
@@ -200,7 +200,7 @@ const EditPage = () => {
             onClick={handleSave}
             disabled={isLoading || report?.is_finalized}
           >
-            {isLoading ? <CircularProgress size={24} /> : 'Save Changes'}
+            {isLoading ? <CircularProgress size={24} /> : 'Salva Modifiche'}
           </Button>
           
           <Button 
@@ -209,7 +209,7 @@ const EditPage = () => {
             onClick={handleFinalize}
             disabled={isLoading || report?.is_finalized}
           >
-            {isLoading ? <CircularProgress size={24} /> : 'Finalize Report'}
+            {isLoading ? <CircularProgress size={24} /> : 'Finalizza Report'}
           </Button>
         </Box>
       </Paper>
@@ -217,15 +217,15 @@ const EditPage = () => {
       {/* AI Refinement Section */}
       <Paper elevation={3} sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
-          AI Assistance
+          Assistenza AI
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Provide instructions on how you'd like the AI to refine your report.
+          Fornisci istruzioni su come vorresti che l'AI perfezionasse il tuo report.
         </Typography>
         
         <TextField
-          label="Instructions for AI"
-          placeholder="E.g., &apos;Add more details to the damages section&apos; or &apos;Make the tone more formal&apos;"
+          label="Istruzioni per l'AI"
+          placeholder="Es., 'Aggiungi più dettagli alla sezione danni' o 'Rendi il tono più formale'"
           value={aiInstructions}
           onChange={(e) => setAiInstructions(e.target.value)}
           fullWidth
@@ -243,7 +243,7 @@ const EditPage = () => {
           disabled={isRefining || !aiInstructions.trim() || report?.is_finalized}
           fullWidth
         >
-          {isRefining ? <CircularProgress size={24} /> : 'Refine with AI'}
+          {isRefining ? <CircularProgress size={24} /> : 'Raffina con AI'}
         </Button>
       </Paper>
       

@@ -123,14 +123,14 @@ const DownloadPage = () => {
     return (
       <Container maxWidth="md" sx={{ mt: 5, mb: 5 }}>
         <Alert severity="error" sx={{ mb: 3 }}>
-          {error || 'Report not found or not finalized yet.'}
+          {error || 'Report non trovato o non ancora finalizzato.'}
         </Alert>
         <Button 
           variant="contained" 
           startIcon={<ArrowBackIcon />}
           onClick={() => router.push('/')}
         >
-          Back to Home
+          Torna alla Home
         </Button>
       </Container>
     );
@@ -140,14 +140,14 @@ const DownloadPage = () => {
     <Container maxWidth="md" sx={{ mt: 5, mb: 5 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" component="h1">
-          Download Report
+          Scarica Report
         </Typography>
         <Button 
           variant="outlined" 
           startIcon={<ArrowBackIcon />}
           onClick={() => router.push('/')}
         >
-          Back to Home
+          Torna alla Home
         </Button>
       </Box>
       

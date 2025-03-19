@@ -62,13 +62,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
     
     // Set warning if approaching limit
     if (newTotalSize > WARNING_THRESHOLD && newTotalSize <= MAX_TOTAL_SIZE) {
-      setSizeWarning(`Total size (${getFileSize(newTotalSize)}) is approaching the 100MB limit`);
+      setSizeWarning(`La dimensione totale (${getFileSize(newTotalSize)}) si sta avvicinando al limite di 100MB`);
     } else if (newTotalSize > MAX_TOTAL_SIZE) {
-      setSizeWarning(`Total size (${getFileSize(newTotalSize)}) exceeds the 100MB limit. Please remove some files.`);
-      setError("Total file size exceeds 100MB limit. Please remove some files before uploading.");
+      setSizeWarning(`La dimensione totale (${getFileSize(newTotalSize)}) supera il limite di 100MB. Rimuovi alcuni file.`);
+      setError("La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.");
     } else {
       setSizeWarning(null);
-      if (error === "Total file size exceeds 100MB limit. Please remove some files before uploading.") {
+      if (error === "La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.") {
         setError(null);
       }
     }
@@ -123,13 +123,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
     e.preventDefault();
     
     if (files.length === 0) {
-      setError("Please select at least one file to upload.");
+      setError("Seleziona almeno un file da caricare.");
       return;
     }
     
     // Double-check size before submitting
     if (totalSize > MAX_TOTAL_SIZE) {
-      setError("Total file size exceeds 100MB limit. Please remove some files before uploading.");
+      setError("La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.");
       return;
     }
 
@@ -148,11 +148,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
         // Call onUploadSuccess directly to proceed to the next step
         onUploadSuccess(response.report_id);
       } else {
-        setError("No report ID received from the server.");
+        setError("Nessun ID report ricevuto dal server.");
       }
     } catch (err) {
       console.error("Error uploading files:", err);
-      setError(err instanceof Error ? err.message : "Failed to upload files. Please try again.");
+      setError(err instanceof Error ? err.message : "Impossibile caricare i file. Riprova.");
     } finally {
       setLoading(false);
     }
@@ -170,7 +170,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
     }}>
       <Box component="form" onSubmit={handleSubmit} noValidate>
         <Typography variant="h4" sx={{ mb: 3, fontWeight: 600 }}>
-          Upload Documents
+          Carica Documenti
         </Typography>
         
         <Box
@@ -194,13 +194,13 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
           <input {...getInputProps()} />
           <CloudUploadIcon fontSize="large" color="primary" sx={{ mb: 2, fontSize: 45 }} />
           <Typography variant="h6" gutterBottom>
-            {isDragActive ? 'Drop files here' : 'Drag & drop files here'}
+            {isDragActive ? 'Rilascia i file qui' : 'Trascina e rilascia i file qui'}
           </Typography>
           <Typography variant="body2" color="textSecondary">
-            or click to browse your device
+            o clicca per sfogliare i file
           </Typography>
           <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
-            Supports PDF, DOC, DOCX, TXT, and image files
+            Supporta file PDF, DOC, DOCX, TXT e immagini
           </Typography>
         </Box>
         
@@ -208,10 +208,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
               <Typography variant="h6">
-                Selected Files ({files.length})
+                File Selezionati ({files.length})
               </Typography>
               <Typography variant="body2" color={sizePercentage > 80 ? "error.main" : "text.secondary"}>
-                Total Size: {getFileSize(totalSize)} / 100 MB
+                Dimensione Totale: {getFileSize(totalSize)} / 100 MB
               </Typography>
             </Box>
             
@@ -227,7 +227,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
             
             {sizeWarning && (
               <Alert severity={sizePercentage > 100 ? "error" : "warning"} sx={{ mb: 2, borderRadius: 2 }}>
-                {sizeWarning}
+                {sizeWarning.includes("approaching") ? 
+                  `La dimensione totale (${getFileSize(totalSize)}) si sta avvicinando al limite di 100MB` : 
+                  `La dimensione totale (${getFileSize(totalSize)}) supera il limite di 100MB. Rimuovi alcuni file.`}
               </Alert>
             )}
             
@@ -258,7 +260,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
         
         {error && (
           <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }}>
-            {error}
+            {error.includes("select at least one file") ? 
+              "Seleziona almeno un file da caricare." : 
+              error.includes("Total file size exceeds") ? 
+              "La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare." : 
+              error}
           </Alert>
         )}
         
@@ -285,9 +291,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onUploadSuccess }) => {
                   left: 'calc(50% - 12px)'
                 }} 
               />
-              <span style={{ opacity: 0 }}>Processing...</span>
+              <span style={{ opacity: 0 }}>Elaborazione...</span>
             </>
-          ) : files.length > 0 ? 'Upload Documents' : 'Select Files to Upload'}
+          ) : files.length > 0 ? 'Carica Documenti' : 'Seleziona File da Caricare'}
         </Button>
       </Box>
     </Paper>
