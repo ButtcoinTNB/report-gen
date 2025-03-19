@@ -5,7 +5,7 @@ import { handleApiError } from "../utils/errorHandler";
 /**
  * Get a preview of the report PDF
  * 
- * @param {string|number} reportId - ID of the report to preview (UUID or integer)
+ * @param {string} reportId - UUID of the report to preview
  * @returns {Promise<Object>} Preview information including URL
  */
 export async function fetchPDFPreview(reportId) {
@@ -36,7 +36,7 @@ export async function fetchPDFPreview(reportId) {
 /**
  * Download a report PDF directly
  * 
- * @param {string|number} reportId - ID of the report to download (UUID or integer)
+ * @param {string} reportId - UUID of the report to download
  * @returns {Promise<boolean>} Success status
  */
 export async function downloadPDF(reportId) {
@@ -73,7 +73,7 @@ export async function downloadPDF(reportId) {
 /**
  * Get download information for a report
  * 
- * @param {string|number} reportId - ID of the report (UUID or integer)
+ * @param {string} reportId - UUID of the report
  * @returns {Promise<Object>} Download information
  */
 export async function downloadReport(reportId) {
@@ -90,7 +90,7 @@ export async function downloadReport(reportId) {
 /**
  * Clean up report files after download
  * 
- * @param {string|number} reportId - ID of the report to clean up (UUID or integer)
+ * @param {string} reportId - UUID of the report to clean up
  * @returns {Promise<Object>} Cleanup response
  */
 export async function cleanupReportFiles(reportId) {
@@ -107,7 +107,7 @@ export async function cleanupReportFiles(reportId) {
 /**
  * Download a report in DOCX format
  * 
- * @param {string|number} reportId - ID of the report to download (UUID or integer)
+ * @param {string} reportId - UUID of the report to download
  * @returns {Promise<boolean>} Success status
  */
 export async function downloadDOCX(reportId) {
@@ -135,7 +135,7 @@ export async function downloadDOCX(reportId) {
 /**
  * Generate a DOCX version of a report
  * 
- * @param {string|number} reportId - ID of the report to convert (UUID or integer)
+ * @param {string} reportId - UUID of the report to convert
  * @returns {Promise<Object>} Generation response
  */
 export async function generateDOCX(reportId) {

@@ -23,7 +23,7 @@ import { downloadPDF, downloadDOCX, generateDOCX } from '../api/download';
 import PDFPreview from './PDFPreview';
 
 interface DownloadReportProps {
-  reportId: number | null;
+  reportId: string | null;
   isPdfReady: boolean;
 }
 

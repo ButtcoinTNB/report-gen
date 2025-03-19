@@ -20,6 +20,7 @@ interface Props {
   previewId?: string;  // UUID
   reportId: string | null;  // UUID
   onError?: (error: Error) => void;
+  onClose: () => void;
 }
 
 interface PDFPreviewResult {
@@ -27,7 +28,7 @@ interface PDFPreviewResult {
   error?: string;
 }
 
-const PDFPreview: React.FC<Props> = ({ previewId, reportId, onError }) => {
+const PDFPreview: React.FC<Props> = ({ previewId, reportId, onError, onClose }) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +100,7 @@ const PDFPreview: React.FC<Props> = ({ previewId, reportId, onError }) => {
         mb: 2
       }}>
         <Typography variant="h6">PDF Preview</Typography>
-        <IconButton onClick={() => {}} aria-label="close">
+        <IconButton onClick={onClose} aria-label="close">
           <CloseIcon />
         </IconButton>
       </Box>
