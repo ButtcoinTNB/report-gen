@@ -133,6 +133,8 @@ If you encounter issues during deployment, please refer to the [Backend Deployme
 
 1. **Import Errors**: If you see `NameError` exceptions related to missing imports, check that you're using absolute imports in your Python files. See the [Backend Deployment Fixes](./BACKEND_DEPLOYMENT_FIXES.md#import-issues) document for details.
 
-2. **Path Resolution**: Ensure your start command includes `python -m` before `uvicorn` to properly resolve modules. See the [Backend Deployment Fixes](./BACKEND_DEPLOYMENT_FIXES.md#path-and-module-resolution) section.
+2. **Build Failures**: If your build is failing without a clear error message, see our detailed troubleshooting steps in the [Backend Build Fix](./BACKEND_BUILD_FIX.md) document.
 
-3. **Environment Variables**: Make sure all required environment variables are properly set in the Render dashboard. 
+3. **Path Resolution**: Ensure your start command includes `python -m` before `uvicorn` to properly resolve modules. See the [Backend Deployment Fixes](./BACKEND_DEPLOYMENT_FIXES.md#path-and-module-resolution) section.
+
+4. **Environment Variables**: Make sure all required environment variables are properly set in the Render dashboard. 

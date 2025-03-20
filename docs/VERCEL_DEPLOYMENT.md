@@ -128,9 +128,11 @@ If you encounter issues during deployment, please refer to the [Frontend Deploym
 
 1. **Missing Module Errors**: If you see errors about missing modules like `react-simplemde-editor`, refer to the [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#missing-module-issues) section.
 
-2. **Build Performance**: For slow builds or timeouts, see our optimization recommendations in the [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#build-performance-issues) section.
+2. **TypeScript Errors**: If you encounter TypeScript-related errors, see our detailed solutions in the [Frontend TypeScript Fix](./FRONTEND_TYPESCRIPT_FIX.md) document.
 
-3. **API Connection Issues**: If your frontend can't connect to the backend, check the environment variable configuration as detailed in [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#environment-variable-configuration).
+3. **Build Performance**: For slow builds or timeouts, see our optimization recommendations in the [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#build-performance-issues) section.
+
+4. **API Connection Issues**: If your frontend can't connect to the backend, check the environment variable configuration as detailed in [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#environment-variable-configuration).
 
 ## Redeploy After Changes
 
