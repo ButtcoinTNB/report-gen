@@ -16,6 +16,7 @@ from services.docx_service import docx_service
 from utils.supabase_helper import create_supabase_client, supabase_client_context
 from typing import Optional, Dict, Any
 from fastapi import status
+from utils.error_handler import handle_exception, api_error_handler, logger
 
 # Import format functions to avoid circular imports later
 try:
@@ -23,7 +24,7 @@ try:
     from services.pdf_formatter import format_report_as_pdf
 except ImportError:
     # This allows for cleaner error handling if imports fail
-    print("Warning: Could not import formatting functions, will import when needed")
+    logger.warning("Could not import formatting functions, will import when needed")
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ def get_report_content(report_id: UUID4) -> Optional[str]:
     Returns:
         The report content as text, or None if not found
     """
-    print(f"Attempting to retrieve content for report ID: {report_id}")
+    logger.info(f"Attempting to retrieve content for report ID: {report_id}")
     report_content = None
     
     # Check if report exists in Supabase
@@ -56,7 +57,7 @@ def get_report_content(report_id: UUID4) -> Optional[str]:
     # Validate the report_id before using it in path construction
     is_valid, report_dir = validate_path(report_dir_name, uploads_dir)
     if not is_valid:
-        print(f"Invalid report ID format or path: {report_id}")
+        logger.error(f"Invalid report ID format or path: {report_id}")
         return None
     
     if os.path.exists(report_dir) and os.path.isdir(report_dir):
@@ -69,7 +70,7 @@ def get_report_content(report_id: UUID4) -> Optional[str]:
                         with open(content_file_path, 'r', encoding='utf-8') as f:
                             return f.read()
                     except Exception as e:
-                        print(f"Error reading content file: {str(e)}")
+                        logger.error(f"Error reading content file: {str(e)}")
     
     return None
 
@@ -93,10 +94,10 @@ def fetch_report_path_from_supabase(report_id: UUID4) -> Optional[str]:
                 return validated_path
             
             # If the path wasn't valid or file doesn't exist, log this
-            print(f"File path from Supabase is invalid or file doesn't exist: {file_path}")
+            logger.warning(f"File path from Supabase is invalid or file doesn't exist: {file_path}")
         
     except Exception as e:
-        print(f"Error fetching report path from Supabase: {str(e)}")
+        logger.error(f"Error fetching report path from Supabase: {str(e)}")
     
     return None
 
@@ -149,6 +150,7 @@ def find_docx_file_locally(report_id: UUID4) -> Optional[str]:
 
 
 @router.get("/{report_id}")
+@api_error_handler
 async def download_report(
     report_id: UUID4, 
     format: str = Query("docx", description="Format of the report, either 'docx' or 'pdf'"),
@@ -157,74 +159,72 @@ async def download_report(
     """
     Download a generated report in DOCX or PDF format
     """
-    try:
-        # Validate format
-        if format.lower() not in ["docx", "pdf"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported format: {format}. Only 'docx' and 'pdf' are supported."
-            )
-        
-        # Initialize Supabase client
-        supabase = create_supabase_client()
-        
-        # Find the report in Supabase
-        response = supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Report not found with ID: {report_id}"
-            )
-        
-        report = response.data[0]
-        
-        # Determine which format to return
-        if format.lower() == "docx":
-            return await download_docx_report(report_id)
-        else:  # PDF
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="PDF download not implemented yet"
-            )
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        # Log and return a generic error
-        print(f"Error downloading report: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error downloading report: {str(e)}"
+    # Validate format
+    if format.lower() not in ["docx", "pdf"]:
+        handle_exception(
+            ValueError(f"Unsupported format: {format}. Only 'docx' and 'pdf' are supported."),
+            "validating report format",
+            default_status_code=400
+        )
+    
+    # Initialize Supabase client
+    supabase = create_supabase_client()
+    
+    # Find the report in Supabase
+    response = supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+    
+    if not response.data:
+        handle_exception(
+            FileNotFoundError(f"Report not found with ID: {report_id}"),
+            "locating report",
+            default_status_code=404
+        )
+    
+    report = response.data[0]
+    
+    # Determine which format to return
+    if format.lower() == "docx":
+        return await download_docx_report(report_id)
+    else:  # PDF
+        handle_exception(
+            NotImplementedError("PDF download not implemented yet"),
+            "generating PDF report",
+            default_status_code=501
         )
 
 
 @router.get("/file/{report_id}")
+@api_error_handler
 async def serve_report_file(report_id: UUID4):
     """
     Serve a report file directly (without downloading)
     """
-    try:
-        # Get file path from Supabase
-        supabase = create_supabase_client()
-        response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
-        
-        if not response.data or not response.data[0].get("file_path"):
-            raise HTTPException(status_code=404, detail="Report file not found")
-        
-        file_path = response.data[0]["file_path"]
-        
-        # Check if file exists locally
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Report file not found on server")
-        
-        # Return the file
-        return FileResponse(
-            path=file_path,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    # Get file path from Supabase
+    supabase = create_supabase_client()
+    response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+    
+    if not response.data or not response.data[0].get("file_path"):
+        handle_exception(
+            FileNotFoundError("Report file not found"),
+            "retrieving report file path",
+            default_status_code=404
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error serving report file: {str(e)}")
+    
+    file_path = response.data[0]["file_path"]
+    
+    # Check if file exists locally
+    if not os.path.exists(file_path):
+        handle_exception(
+            FileNotFoundError("Report file not found on server"),
+            "checking file existence",
+            default_status_code=404
+        )
+    
+    # Return the file
+    return FileResponse(
+        path=file_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 
 @router.post("/cleanup/{report_id}")

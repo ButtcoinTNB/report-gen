@@ -12,7 +12,7 @@ import time
 import re
 from sqlalchemy.orm import Session
 from models import Report, File as FileModel, User, Template
-from utils.error_handler import logger, handle_exception
+from utils.error_handler import logger, handle_exception, api_error_handler, retry_operation
 from utils.auth import get_current_user
 from utils.db import get_db
 from pydantic import BaseModel, UUID4
@@ -167,46 +167,43 @@ async def get_report_files(report_id: UUID4) -> List[Dict[str, Any]]:
 
 
 @router.post("/")
+@api_error_handler
 async def generate_report(
     request: GenerateRequest,
     background_tasks: BackgroundTasks
 ) -> Dict[str, Any]:
     """Generate a new report"""
-    try:
-        async with supabase_client_context() as supabase:
-            # Create new report
-            report_data = {
-                "report_id": str(uuid.uuid4()),
-                "title": "New Report",
-                "status": "draft",
-                "template_id": str(request.template_id) if request.template_id else None,
-                "metadata": {}
-            }
-            
-            report_response = await supabase.table("reports").insert(report_data).execute()
-            if not report_response.data:
-                raise HTTPException(status_code=500, detail="Failed to create report")
-            
-            report = report_response.data[0]
-            report_id = UUID(report["report_id"])
-            
-            # Associate files with report
-            for doc_id in request.document_ids:
-                await supabase.table("files").update({
-                    "report_id": str(report_id)
-                }).eq("file_id", str(doc_id)).execute()
-            
-            return {"report_id": str(report_id)}
-            
-    except Exception as e:
-        logger.error(f"Error generating report: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    async with supabase_client_context() as supabase:
+        # Create new report
+        report_data = {
+            "report_id": str(uuid.uuid4()),
+            "title": "New Report",
+            "status": "draft",
+            "template_id": str(request.template_id) if request.template_id else None,
+            "metadata": {}
+        }
+        
+        report_response = await supabase.table("reports").insert(report_data).execute()
+        if not report_response.data:
+            raise HTTPException(status_code=500, detail="Failed to create report")
+        
+        report = report_response.data[0]
+        report_id = UUID(report["report_id"])
+        
+        # Associate files with report
+        for doc_id in request.document_ids:
+            await supabase.table("files").update({
+                "report_id": str(report_id)
+            }).eq("file_id", str(doc_id)).execute()
+        
+        return {"report_id": str(report_id)}
 
 
 @router.post("/generate")
+@api_error_handler
 async def generate_report_content(
     request: GenerateRequest,
-    current_user: Optional[User] = Depends(get_current_user)  # Add optional authentication
+    current_user: Optional[User] = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
     Generate content for an existing report
@@ -215,62 +212,65 @@ async def generate_report_content(
         This endpoint uses optional authentication. When authenticated, the generated report
         will be associated with the user's account for better tracking and management.
     """
-    try:
-        # Extract values from request
-        report_id = request.document_ids[0] if request.document_ids else None
+    # Extract values from request
+    report_id = request.document_ids[0] if request.document_ids else None
+    
+    # Use provided report_id if available, otherwise use first document_id
+    if hasattr(request, 'report_id') and request.report_id:
+        report_id = request.report_id
         
-        # Use provided report_id if available, otherwise use first document_id
-        if hasattr(request, 'report_id') and request.report_id:
-            report_id = request.report_id
-            
-        if not report_id:
-            raise HTTPException(status_code=400, detail="Report ID is required")
-            
-        additional_info = request.additional_info
-        template_id = request.template_id
+    if not report_id:
+        handle_exception(
+            ValueError("Report ID is required"),
+            "generating report content", 
+            default_status_code=400
+        )
         
-        async with supabase_client_context() as supabase:
-            # Get report
-            report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
-            if not report_response.data:
-                raise HTTPException(status_code=404, detail="Report not found")
-            
-            report = report_response.data[0]
-            
-            # Get template if specified
-            template = None
-            if template_id or report.get("template_id"):
-                template_id_to_use = str(template_id) if template_id else report["template_id"]
-                template_response = await supabase.table("templates").select("*").eq("template_id", template_id_to_use).execute()
-                if template_response.data:
-                    template = template_response.data[0]
-            
-            # Get associated files
-            files = await get_report_files(report_id)
-            
-            # Generate report content
-            content = await generate_report_text(
-                files=files,
-                additional_info=additional_info or "",
-                template=template
+    additional_info = request.additional_info
+    template_id = request.template_id
+    
+    async with supabase_client_context() as supabase:
+        # Get report
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        if not report_response.data:
+            handle_exception(
+                FileNotFoundError(f"Report not found with ID: {report_id}"),
+                "retrieving report data",
+                default_status_code=404
             )
-            
-            # Update report
-            await supabase.table("reports").update({
-                "content": content,
-                "status": "generated",
-                "updated_at": "now()"
-            }).eq("report_id", str(report_id)).execute()
-            
-            return {
-                "report_id": str(report_id),
-                "content": content,
-                "status": "generated"
-            }
-            
-    except Exception as e:
-        logger.error(f"Error generating report content: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        
+        report = report_response.data[0]
+        
+        # Get template if specified
+        template = None
+        if template_id or report.get("template_id"):
+            template_id_to_use = str(template_id) if template_id else report["template_id"]
+            template_response = await supabase.table("templates").select("*").eq("template_id", template_id_to_use).execute()
+            if template_response.data:
+                template = template_response.data[0]
+        
+        # Get associated files
+        files = await get_report_files(report_id)
+        
+        # Generate report content
+        content = await generate_report_text(
+            files=files,
+            additional_info=additional_info or "",
+            template=template
+        )
+        
+        # Update report
+        await supabase.table("reports").update({
+            "content": content,
+            "status": "generated",
+            "updated_at": "now()"
+        }).eq("report_id", str(report_id)).execute()
+        
+        return {
+            "report_id": str(report_id),
+            "content": content,
+            "status": "generated"
+        }
 
 
 @router.post("/reports/{report_id}/refine")
@@ -672,9 +672,10 @@ async def generate_report_docx(
 
 
 @router.post("/from-id")
+@api_error_handler
 async def generate_report_from_id(
     data: Dict[str, Any] = Body(...),
-    current_user: Optional[User] = Depends(get_current_user)  # Add optional authentication
+    current_user: Optional[User] = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
     Generate report content based on report_id
@@ -683,52 +684,55 @@ async def generate_report_from_id(
         This endpoint uses optional authentication. When authenticated, user ownership
         of the report will be verified.
     """
-    try:
-        # Extract report_id from request
-        if "report_id" not in data:
-            raise HTTPException(status_code=400, detail="report_id is required")
-            
-        report_id = data["report_id"]
+    # Extract report_id from request
+    if "report_id" not in data:
+        handle_exception(
+            ValueError("report_id is required"),
+            "generating report from ID",
+            default_status_code=400
+        )
         
-        # Extract any additional options from request
-        options = {k: v for k, v in data.items() if k != "report_id"}
+    report_id = data["report_id"]
+    
+    # Extract any additional options from request
+    options = {k: v for k, v in data.items() if k != "report_id"}
+    
+    async with supabase_client_context() as supabase:
+        # Get report from database
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        if not report_response.data:
+            handle_exception(
+                FileNotFoundError(f"Report not found with ID: {report_id}"),
+                "retrieving report data for generation",
+                default_status_code=404
+            )
         
-        async with supabase_client_context() as supabase:
-            # Get report from database
-            report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
-            if not report_response.data:
-                raise HTTPException(status_code=404, detail="Report not found")
+        report = report_response.data[0]
+        
+        # Get associated files
+        files = await get_report_files(report_id)
+        
+        # Generate or retrieve content
+        if report.get("content"):
+            # Use existing content if available
+            content = report["content"]
+        else:
+            # Generate new content
+            content = await generate_report_text(
+                files=files,
+                additional_info=options.get("additional_info", ""),
+                template=options.get("template", None)
+            )
             
-            report = report_response.data[0]
-            
-            # Get associated files
-            files = await get_report_files(report_id)
-            
-            # Generate or retrieve content
-            if report.get("content"):
-                # Use existing content if available
-                content = report["content"]
-            else:
-                # Generate new content
-                content = await generate_report_text(
-                    files=files,
-                    additional_info=options.get("additional_info", ""),
-                    template=options.get("template", None)
-                )
-                
-                # Update report with generated content
-                await supabase.table("reports").update({
-                    "content": content,
-                    "status": "generated",
-                    "updated_at": "now()"
-                }).eq("report_id", str(report_id)).execute()
-            
-            return {
-                "report_id": str(report_id),
+            # Update report with generated content
+            await supabase.table("reports").update({
                 "content": content,
-                "status": report.get("status", "generated")
-            }
-            
-    except Exception as e:
-        logger.error(f"Error generating report from ID: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+                "status": "generated",
+                "updated_at": "now()"
+            }).eq("report_id", str(report_id)).execute()
+        
+        return {
+            "report_id": str(report_id),
+            "content": content,
+            "status": report.get("status", "generated")
+        }

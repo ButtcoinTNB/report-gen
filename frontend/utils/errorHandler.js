@@ -27,6 +27,38 @@ export function formatApiError(error, fallbackMessage = "An unexpected error occ
       
       // Handle common error response formats
       if (data) {
+        // Check for standardized error format first
+        if (data.status === "error") {
+          let errorMsg = data.message || "Unknown error";
+          
+          // Include operation context if available
+          if (data.operation) {
+            errorMsg = `Error during ${data.operation}: ${errorMsg}`;
+          }
+          
+          // Include error type for more context if available
+          if (data.error_type) {
+            // Map technical error types to user-friendly descriptions
+            const errorTypeMap = {
+              "validation_error": "Validation failed",
+              "value_error": "Invalid value",
+              "key_error": "Missing required field",
+              "file_not_found": "File not found",
+              "permission_error": "Permission denied", 
+              "not_implemented": "Feature not implemented",
+              "timeout_error": "Operation timed out",
+              "connection_error": "Connection failed",
+              "internal_error": "Internal server error"
+            };
+            
+            const readableType = errorTypeMap[data.error_type] || data.error_type;
+            return `${readableType}: ${errorMsg}`;
+          }
+          
+          return errorMsg;
+        }
+        
+        // Fall back to other formats
         if (data.detail) {
           return `Error: ${data.detail}`;
         }
@@ -67,6 +99,18 @@ export function handleApiError(error, context, { log = true, throwError = true }
     if (error?.isAxiosError && error.response) {
       console.error("Response status:", error.response.status);
       console.error("Response data:", error.response.data);
+      
+      // Additional logging for standardized error format
+      const data = error.response.data;
+      if (data && data.status === "error") {
+        console.error("Error type:", data.error_type);
+        console.error("Operation:", data.operation);
+        
+        // Log traceback in development mode if available
+        if (data.traceback && process.env.NODE_ENV !== 'production') {
+          console.error("Traceback:", data.traceback);
+        }
+      }
     }
   }
   
