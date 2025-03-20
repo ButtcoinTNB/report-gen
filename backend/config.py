@@ -1,7 +1,9 @@
 import os
 from pydantic_settings import BaseSettings
+from pydantic import validator, Field
 from dotenv import load_dotenv
 import sys
+from typing import List
 
 # Load environment variables from .env file
 load_dotenv()
@@ -10,14 +12,31 @@ load_dotenv()
 # If running on Render with backend as root, we need to adjust paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Import logger
+try:
+    from utils.error_handler import logger
+except ImportError:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
 
 class Settings(BaseSettings):
     # API Keys
-    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_API_KEY: str = Field(
+        default=os.getenv("OPENROUTER_API_KEY", ""), 
+        description="OpenRouter API key for AI model access"
+    )
 
     # Supabase - Primary database and storage solution
-    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
-    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_URL: str = Field(
+        default=os.getenv("SUPABASE_URL", ""), 
+        description="Supabase project URL"
+    )
+    SUPABASE_KEY: str = Field(
+        default=os.getenv("SUPABASE_KEY", ""), 
+        description="Supabase API key"
+    )
 
     # Important: We are no longer using direct DATABASE_URL connections
     # All database operations should use the Supabase client
@@ -54,10 +73,53 @@ class Settings(BaseSettings):
     # CORS Settings
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
+    # Validators for critical settings
+    @validator('OPENROUTER_API_KEY')
+    def validate_openrouter_api_key(cls, v):
+        if not v or len(v) < 10:
+            logger.warning("OPENROUTER_API_KEY is missing or appears to be invalid")
+        return v
+    
+    @validator('SUPABASE_URL')
+    def validate_supabase_url(cls, v):
+        if not v or not v.startswith('https://'):
+            logger.warning("SUPABASE_URL is missing or invalid (should start with https://)")
+        return v
+    
+    @validator('SUPABASE_KEY')
+    def validate_supabase_key(cls, v):
+        if not v or len(v) < 10:
+            logger.warning("SUPABASE_KEY is missing or appears to be invalid")
+        return v
+
     class Config:
         env_file = ".env"
         case_sensitive = True
         extra = "ignore"  # Allow extra fields in .env without validation errors
+    
+    def validate_all(self) -> List[str]:
+        """
+        Validate all required environment variables and return a list of missing ones.
+        
+        Returns:
+            List of names of missing or invalid environment variables
+        """
+        missing = []
+        
+        # Check key API requirements
+        if not self.OPENROUTER_API_KEY or len(self.OPENROUTER_API_KEY) < 10:
+            missing.append("OPENROUTER_API_KEY")
+            
+        # Check Supabase requirements if using Supabase
+        if (self.SUPABASE_URL and not self.SUPABASE_KEY) or (not self.SUPABASE_URL and self.SUPABASE_KEY):
+            # If one is provided but not the other
+            missing.append("SUPABASE_URL and SUPABASE_KEY (both must be provided)")
+            
+        # Check frontend URL for CORS
+        if not self.FRONTEND_URL:
+            missing.append("FRONTEND_URL")
+            
+        return missing
 
 
 # Create settings instance
@@ -66,6 +128,12 @@ settings = Settings()
 # Ensure upload directory exists
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
+
+# Validate settings
+missing_vars = settings.validate_all()
+if missing_vars:
+    logger.warning(f"Missing or invalid required environment variables: {', '.join(missing_vars)}")
+    logger.warning("The application may not function correctly without these variables.")
 
 print(f"Config loaded. Upload dir: {settings.UPLOAD_DIR}, Generated reports dir: {settings.GENERATED_REPORTS_DIR}")
 print(f"Data retention period: {settings.DATA_RETENTION_HOURS} hours")

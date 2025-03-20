@@ -8,6 +8,7 @@ import sys
 import asyncio
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Import rootpath utility to ensure proper module imports
 from rootpath import ensure_root_in_path
@@ -16,14 +17,31 @@ project_root, backend_dir = ensure_root_in_path()
 # Import API route modules
 from api import upload, generate, format, edit, download
 from config import settings
+from utils.file_utils import safe_path_join
 
 # Debug imports
 import traceback
+
+# Import logger
+try:
+    from utils.error_handler import logger
+except ImportError:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
 print(f"Ensured directories exist: {settings.UPLOAD_DIR}, {settings.GENERATED_REPORTS_DIR}")
+
+# Validate environment variables
+missing_vars = settings.validate_all()
+if missing_vars:
+    logger.warning(f"⚠️ STARTUP WARNING: Missing or invalid environment variables: {', '.join(missing_vars)}")
+    logger.warning("⚠️ Some application features may not work correctly. Please check your .env file.")
+else:
+    logger.info("✅ All required environment variables are properly configured.")
 
 app = FastAPI(
     title="Scrittore Automatico di Perizie",
@@ -41,75 +59,85 @@ async def cleanup_old_data(max_age_hours: int = 24):
         max_age_hours: Maximum age in hours before data is considered stale
     """
     try:
-        print(f"Starting cleanup of abandoned data older than {max_age_hours} hours")
+        logger.info(f"Starting cleanup of abandoned data older than {max_age_hours} hours")
         current_time = time.time()
         files_cleaned = 0
         
         # Clean up old uploads
         if os.path.exists(settings.UPLOAD_DIR):
             for item in os.listdir(settings.UPLOAD_DIR):
-                item_path = os.path.join(settings.UPLOAD_DIR, item)
-                
-                # Skip if not a directory (report uploads are in subdirectories)
-                if not os.path.isdir(item_path):
-                    continue
-                    
-                # Check if directory is older than the max age
                 try:
-                    # Get the most recent modification time of any file in the directory
-                    latest_mod_time = current_time
-                    for root, _, files in os.walk(item_path):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            mod_time = os.path.getmtime(file_path)
-                            latest_mod_time = min(latest_mod_time, mod_time)
+                    item_path = safe_path_join(settings.UPLOAD_DIR, item)
                     
-                    # Calculate age in hours
-                    age_hours = (current_time - latest_mod_time) / 3600
-                    
-                    # Delete if older than max age
-                    if age_hours > max_age_hours:
-                        print(f"Cleaning up old upload directory: {item_path} (Age: {age_hours:.1f} hours)")
+                    # Skip if not a directory (report uploads are in subdirectories)
+                    if not os.path.isdir(item_path):
+                        continue
                         
-                        # Delete all files in the directory
-                        for root, _, files in os.walk(item_path, topdown=False):
+                    # Check if directory is older than the max age
+                    try:
+                        # Get the most recent modification time of any file in the directory
+                        latest_mod_time = current_time
+                        for root, _, files in os.walk(item_path):
                             for file in files:
-                                file_path = os.path.join(root, file)
                                 try:
-                                    os.remove(file_path)
-                                    files_cleaned += 1
-                                except Exception as e:
-                                    print(f"Error deleting file {file_path}: {str(e)}")
+                                    file_path = safe_path_join(root, file)
+                                    mod_time = os.path.getmtime(file_path)
+                                    latest_mod_time = min(latest_mod_time, mod_time)
+                                except ValueError as e:
+                                    logger.warning(f"Skipping invalid file path: {e}")
+                                    continue
                         
-                        # Delete the directory itself
-                        try:
-                            os.rmdir(item_path)
-                        except Exception as e:
-                            print(f"Error deleting directory {item_path}: {str(e)}")
-                except Exception as e:
-                    print(f"Error checking age of directory {item_path}: {str(e)}")
+                        # Calculate age in hours
+                        age_hours = (current_time - latest_mod_time) / 3600
+                        
+                        # Delete if older than max age
+                        if age_hours > max_age_hours:
+                            logger.info(f"Cleaning up old upload directory: {item_path} (Age: {age_hours:.1f} hours)")
+                            
+                            # Delete all files in the directory
+                            for root, _, files in os.walk(item_path, topdown=False):
+                                for file in files:
+                                    try:
+                                        file_path = safe_path_join(root, file)
+                                        os.remove(file_path)
+                                        files_cleaned += 1
+                                    except (ValueError, OSError) as e:
+                                        logger.error(f"Error deleting file: {str(e)}")
+                            
+                            # Delete the directory itself
+                            try:
+                                os.rmdir(item_path)
+                            except Exception as e:
+                                logger.error(f"Error deleting directory {item_path}: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"Error checking age of directory {item_path}: {str(e)}")
+                except ValueError as e:
+                    logger.warning(f"Skipping invalid path in uploads directory: {e}")
         
         # Clean up old generated reports
         if os.path.exists(settings.GENERATED_REPORTS_DIR):
             for file in os.listdir(settings.GENERATED_REPORTS_DIR):
-                file_path = os.path.join(settings.GENERATED_REPORTS_DIR, file)
-                
-                # Skip if not a file
-                if not os.path.isfile(file_path):
-                    continue
-                    
                 try:
-                    # Get file modification time
-                    mod_time = os.path.getmtime(file_path)
-                    age_hours = (current_time - mod_time) / 3600
+                    file_path = safe_path_join(settings.GENERATED_REPORTS_DIR, file)
                     
-                    # Delete if older than max age
-                    if age_hours > max_age_hours:
-                        print(f"Cleaning up old generated file: {file_path} (Age: {age_hours:.1f} hours)")
-                        os.remove(file_path)
-                        files_cleaned += 1
-                except Exception as e:
-                    print(f"Error cleaning up file {file_path}: {str(e)}")
+                    # Skip if not a file
+                    if not os.path.isfile(file_path):
+                        continue
+                        
+                    try:
+                        # Get file modification time
+                        mod_time = os.path.getmtime(file_path)
+                        age_hours = (current_time - mod_time) / 3600
+                        
+                        # Delete if older than max age
+                        if age_hours > max_age_hours:
+                            logger.info(f"Cleaning up old generated file: {file_path} (Age: {age_hours:.1f} hours)")
+                            os.remove(file_path)
+                            files_cleaned += 1
+                    except Exception as e:
+                        logger.error(f"Error cleaning up file {file_path}: {str(e)}")
+                except ValueError as e:
+                    logger.warning(f"Skipping invalid path in generated reports directory: {e}")
         
         # Also clean up preview files using the existing service
         from services.preview_service import preview_service
@@ -133,14 +161,14 @@ async def cleanup_old_data(max_age_hours: int = 24):
                     {"files_cleaned": True}
                 ).filter("created_at", "lt", max_age_str).filter("files_cleaned", "eq", False).execute()
                 
-                print(f"Marked old reports as cleaned in database: {response}")
+                logger.info(f"Marked old reports as cleaned in database: {response}")
         except Exception as e:
-            print(f"Error updating database for old reports: {str(e)}")
+            logger.error(f"Error updating database for old reports: {str(e)}")
         
-        print(f"Cleanup complete. Removed {files_cleaned} stale files.")
+        logger.info(f"Cleanup complete. Removed {files_cleaned} stale files.")
         
     except Exception as e:
-        print(f"Error in cleanup_old_data: {str(e)}")
+        logger.error(f"Error in cleanup_old_data: {str(e)}")
         traceback.print_exc()
 
 # Configure background task for periodic cleanup

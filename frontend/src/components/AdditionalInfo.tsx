@@ -17,41 +17,9 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import { adaptApiResponse } from '../utils/adapters';
-
-/**
- * Backend API interface for analysis details
- */
-interface AnalysisDetailsApi {
-  valore: string;
-  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
-  richiede_verifica: boolean;
-}
-
-/**
- * Frontend-friendly version with camelCase properties
- */
-interface AnalysisDetails {
-  valore: string;
-  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
-  richiedeVerifica: boolean;
-}
-
-/**
- * Helper function to convert API response to frontend format
- */
-function adaptAnalysisDetails(details: AnalysisDetailsApi): AnalysisDetails {
-  return adaptApiResponse<AnalysisDetails>(details);
-}
-
-interface AdditionalInfoProps {
-  documentIds: string[];
-  extractedVariables: Record<string, string>;
-  analysisDetails: Record<string, AnalysisDetailsApi>;
-  fieldsNeedingAttention: string[];
-  onSubmit: (additionalInfo: string) => void;
-  onBack: () => void;
-}
+import { adaptApiResponse, createAnalysisResponse } from '../utils/adapters';
+import { ComponentAnalysisDetails, AnalysisResponse } from '../types';
+import { AnalysisDetails as ApiAnalysisDetails } from '../types/api';
 
 const fieldLabels: Record<string, string> = {
   nome_azienda: "Nome Azienda",
@@ -81,11 +49,24 @@ const fieldLabels: Record<string, string> = {
   lista_allegati: "Lista Allegati"
 };
 
-const confidenceColors = {
-  ALTA: 'success',
-  MEDIA: 'warning',
-  BASSA: 'error'
+// Map for confidence level display colors
+const confidenceLevelColors = {
+  high: 'success',
+  medium: 'warning',
+  low: 'error'
 } as const;
+
+/**
+ * Interface for props passed to the AdditionalInfo component
+ */
+interface AdditionalInfoProps {
+  documentIds: string[];
+  extractedVariables: Record<string, string>;
+  analysisDetails: Record<string, ApiAnalysisDetails>;
+  fieldsNeedingAttention: string[];
+  onSubmit: (additionalInfo: string) => void;
+  onBack: () => void;
+}
 
 const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
   documentIds,
@@ -107,22 +88,27 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
     setExpandedSection(isExpanded ? panel : false);
   };
 
-  const getConfidenceIcon = (confidence: 'ALTA' | 'MEDIA' | 'BASSA') => {
-    switch (confidence) {
-      case 'ALTA':
-        return <CheckCircleIcon color="success" />;
-      case 'MEDIA':
-        return <HelpOutlineIcon color="warning" />;
-      case 'BASSA':
-        return <ErrorOutlineIcon color="error" />;
+  // Create an artificial API response for our adapter function
+  const apiResponse = {
+    extracted_variables: analysisDetails,
+    fields_needing_attention: fieldsNeedingAttention,
+    status: 'success' as const,
+    message: ''
+  };
+  
+  // Use our new adapter function to get component-friendly data
+  const analysisResponse = createAnalysisResponse(apiResponse);
+
+  // Helper function to map confidence numbers to UI elements
+  const getConfidenceUI = (confidence: number) => {
+    if (confidence >= 0.8) {
+      return { icon: <CheckCircleIcon color="success" />, label: 'High', color: 'success' as const };
+    } else if (confidence >= 0.5) {
+      return { icon: <HelpOutlineIcon color="warning" />, label: 'Medium', color: 'warning' as const };
+    } else {
+      return { icon: <ErrorOutlineIcon color="error" />, label: 'Low', color: 'error' as const };
     }
   };
-
-  // Convert analysis details to frontend format
-  const frontendAnalysisDetails = Object.entries(analysisDetails).reduce((acc, [key, details]) => {
-    acc[key] = adaptAnalysisDetails(details);
-    return acc;
-  }, {} as Record<string, AnalysisDetails>);
 
   return (
     <Box sx={{ maxWidth: 1000, mx: 'auto', mt: 4, p: 2 }}>
@@ -143,7 +129,7 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
             </Typography>
           </Alert>
 
-          {fieldsNeedingAttention.length > 0 && (
+          {analysisResponse.fieldsNeedingAttention.length > 0 && (
             <Accordion
               expanded={expandedSection === 'needs-attention'}
               onChange={handleAccordionChange('needs-attention')}
@@ -154,12 +140,12 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
                 sx={{ bgcolor: 'warning.light' }}
               >
                 <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                  Campi che Richiedono Attenzione ({fieldsNeedingAttention.length})
+                  Campi che Richiedono Attenzione ({analysisResponse.fieldsNeedingAttention.length})
                 </Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Box component="ul" sx={{ mt: 1, pl: 2 }}>
-                  {fieldsNeedingAttention.map((field, index) => (
+                  {analysisResponse.fieldsNeedingAttention.map((field, index) => (
                     <Typography component="li" key={index} color="text.secondary">
                       {field}
                     </Typography>
@@ -180,7 +166,9 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
             </AccordionSummary>
             <AccordionDetails>
               <Box sx={{ display: 'grid', gap: 2 }}>
-                {Object.entries(frontendAnalysisDetails).map(([key, details]) => (
+                {Object.entries(analysisResponse.analysisDetails).map(([key, details]) => {
+                  const confidenceUI = getConfidenceUI(details.confidence);
+                  return (
                   <Box
                     key={key}
                     sx={{
@@ -188,7 +176,7 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
                       border: 1,
                       borderColor: 'divider',
                       borderRadius: 1,
-                      bgcolor: details.richiedeVerifica ? 'warning.50' : 'background.paper'
+                      bgcolor: details.source === 'needs_verification' ? 'warning.50' : 'background.paper'
                     }}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
@@ -197,16 +185,17 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
                       </Typography>
                       <Chip
                         size="small"
-                        label={details.confidenza}
-                        color={confidenceColors[details.confidenza]}
-                        icon={getConfidenceIcon(details.confidenza)}
+                        label={confidenceUI.label}
+                        color={confidenceUI.color}
+                        icon={confidenceUI.icon}
                       />
                     </Box>
                     <Typography variant="body2">
-                      {details.valore || 'Non fornito'}
+                      {details.value || 'Non fornito'}
                     </Typography>
                   </Box>
-                ))}
+                  );
+                })}
               </Box>
             </AccordionDetails>
           </Accordion>

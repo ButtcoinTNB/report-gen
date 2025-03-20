@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Head from 'next/head';
 import '../styles/globals.css';
+import { validateEnvVars } from '../config';
 
 // Create an Apple-inspired theme
 const theme = createTheme({
@@ -125,6 +126,14 @@ const theme = createTheme({
 });
 
 export default function App({ Component, pageProps }) {
+  // Validate environment variables on startup
+  useEffect(() => {
+    const { isValid, warnings } = validateEnvVars();
+    if (!isValid && process.env.NODE_ENV !== 'production') {
+      console.warn('⚠️ Application may not function correctly due to missing environment variables');
+    }
+  }, []);
+
   return (
     <>
       <Head>

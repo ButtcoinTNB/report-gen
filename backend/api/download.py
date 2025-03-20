@@ -17,6 +17,7 @@ from utils.supabase_helper import create_supabase_client, supabase_client_contex
 from typing import Optional, Dict, Any
 from fastapi import status
 from utils.error_handler import handle_exception, api_error_handler, logger
+from utils.file_utils import safe_path_join
 
 # Import format functions to avoid circular imports later
 try:
@@ -106,7 +107,7 @@ def find_report_file_locally(report_id: UUID4) -> Optional[str]:
     """
     Find a report file in the local filesystem
     """
-    report_dir = os.path.join(settings.UPLOAD_DIR, str(report_id))
+    report_dir = safe_path_join(settings.UPLOAD_DIR, str(report_id))
     if not os.path.exists(report_dir):
         return None
         
@@ -117,7 +118,7 @@ def find_report_file_locally(report_id: UUID4) -> Optional[str]:
     ]
     
     for pattern in patterns:
-        matching_files = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, pattern))
+        matching_files = glob.glob(safe_path_join(settings.GENERATED_REPORTS_DIR, pattern))
         if matching_files:
             return matching_files[0]
     
@@ -135,14 +136,14 @@ def find_docx_file_locally(report_id: UUID4) -> Optional[str]:
     ]
     
     for pattern in patterns:
-        matching_files = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, pattern))
+        matching_files = glob.glob(safe_path_join(settings.GENERATED_REPORTS_DIR, pattern))
         if matching_files:
             return matching_files[0]
     
     # Then check in the upload directory
-    report_dir = os.path.join(settings.UPLOAD_DIR, str(report_id))
+    report_dir = safe_path_join(settings.UPLOAD_DIR, str(report_id))
     if os.path.exists(report_dir):
-        docx_files = glob.glob(os.path.join(report_dir, "*.docx"))
+        docx_files = glob.glob(safe_path_join(report_dir, "*.docx"))
         if docx_files:
             return docx_files[0]
     
@@ -240,7 +241,7 @@ async def cleanup_report_files(report_id: UUID4):
         A status message indicating success or failure
     """
     # Define paths for report files
-    report_dir = os.path.join(settings.UPLOAD_DIR, str(report_id))
+    report_dir = safe_path_join(settings.UPLOAD_DIR, str(report_id))
     deleted_files = []
     
     try:
@@ -264,7 +265,7 @@ async def cleanup_report_files(report_id: UUID4):
             ]
             
             for pattern in patterns:
-                matching_files = glob.glob(os.path.join(settings.GENERATED_REPORTS_DIR, pattern))
+                matching_files = glob.glob(safe_path_join(settings.GENERATED_REPORTS_DIR, pattern))
                 for file_path in matching_files:
                     try:
                         os.remove(file_path)
@@ -282,7 +283,7 @@ async def cleanup_report_files(report_id: UUID4):
             
             # Remove all files in the directory
             for filename in files_to_delete:
-                file_path = os.path.join(report_dir, filename)
+                file_path = safe_path_join(report_dir, filename)
                 if os.path.isfile(file_path):
                     os.remove(file_path)
                     deleted_files.append(file_path)
@@ -342,7 +343,7 @@ async def download_docx_report(report_id: UUID4):
         if not file_path.lower().endswith('.docx'):
             # Try to find a matching DOCX file with the same base name
             base_name = os.path.splitext(os.path.basename(file_path))[0]
-            docx_path = os.path.join(settings.GENERATED_REPORTS_DIR, f"{base_name}.docx")
+            docx_path = safe_path_join(settings.GENERATED_REPORTS_DIR, f"{base_name}.docx")
             
             if not os.path.exists(docx_path):
                 raise HTTPException(

@@ -16,6 +16,7 @@ from reportlab.platypus.flowables import KeepTogether
 from reportlab.platypus.frames import Frame
 from reportlab.platypus.doctemplate import PageTemplate, BaseDocTemplate
 from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT, TA_RIGHT
+from utils.file_utils import safe_path_join
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ async def format_report_as_pdf(report_text, reference_metadata=None, is_preview=
             timestamp = int(time.time())
             filename = f"report_{timestamp}.pdf"
             
-        output_path = os.path.join(reports_dir, filename)
+        output_path = safe_path_join(reports_dir, filename)
         logger.info(f"Creating PDF at {output_path}")
         
         # Create the PDF document

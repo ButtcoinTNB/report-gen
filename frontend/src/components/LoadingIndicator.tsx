@@ -7,22 +7,37 @@ import {
   Button,
   Alert,
   Paper,
-  Stack
+  Stack,
+  SxProps,
+  Theme
 } from '@mui/material';
 import { Refresh as RefreshIcon } from '@mui/icons-material';
 
 export type LoadingStage = 'initial' | 'loading' | 'uploading' | 'retrying' | 'error' | 'completed' | 'generating' | 'analyzing' | 'refining';
 
+/**
+ * Interface for the loading state used throughout the application
+ */
 export interface LoadingState {
+  /** Whether the component is currently in a loading state */
   isLoading: boolean;
+  /** Optional progress value (0-100) */
   progress?: number;
+  /** The current loading stage */
   stage?: LoadingStage;
+  /** Optional message to display */
   message?: string;
+  /** Optional error message if there was an error */
   error?: string | null;
+  /** Current attempt number (for retries) */
   attempt?: number;
+  /** Maximum number of attempts allowed */
   maxAttempts?: number;
 }
 
+/**
+ * Props for the LoadingIndicator component
+ */
 export interface LoadingIndicatorProps {
   /**
    * The current loading state
@@ -42,7 +57,7 @@ export interface LoadingIndicatorProps {
   /**
    * Additional CSS styles
    */
-  sx?: any;
+  sx?: SxProps<Theme>;
   
   /**
    * Whether to show the loading indicator even when not loading

@@ -1,10 +1,46 @@
 import { adaptApiResponse } from '../utils/adapters';
 
+/**
+ * Common type conversion utilities
+ * These functions help maintain type safety when converting between API response formats
+ */
+
+/**
+ * Analysis details from backend in snake_case format
+ */
 export interface AnalysisDetails {
   valore: string;
   confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
   richiede_verifica: boolean;
 }
+
+/**
+ * Frontend-friendly version of AnalysisDetails with camelCase keys
+ * Currently identical due to Italian field names
+ */
+export interface AnalysisDetailsCamel {
+  valore: string;
+  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
+  richiede_verifica: boolean;
+}
+
+/**
+ * Base response interface for consistent error handling
+ */
+export interface ApiResponse {
+  status: 'success' | 'error';
+  message: string;
+}
+
+/**
+ * Frontend-friendly version with camelCase properties
+ */
+export interface ApiResponseCamel {
+  status: 'success' | 'error';
+  message: string;
+}
+
+// ========= GENERATE API TYPES =========
 
 /**
  * Backend API interface for GenerateRequest
@@ -59,18 +95,16 @@ export function adaptRefineRequest(request: RefineRequestCamel): RefineRequest {
 /**
  * Backend API interface for ProgressUpdate
  */
-export interface ProgressUpdate {
+export interface ProgressUpdate extends ApiResponse {
   step: number;
-  message: string;
   progress: number;
 }
 
 /**
  * Frontend-friendly version with camelCase properties
  */
-export interface ProgressUpdateCamel {
+export interface ProgressUpdateCamel extends ApiResponseCamel {
   step: number;
-  message: string;
   progress: number;
 }
 
@@ -84,7 +118,7 @@ export function adaptProgressUpdate(response: ProgressUpdate): ProgressUpdateCam
 /**
  * Backend API interface for ReportResponse
  */
-export interface ReportResponse {
+export interface ReportResponse extends ApiResponse {
   content: string;
   error?: boolean;
 }
@@ -92,7 +126,7 @@ export interface ReportResponse {
 /**
  * Frontend-friendly version with camelCase properties
  */
-export interface ReportResponseCamel {
+export interface ReportResponseCamel extends ApiResponseCamel {
   content: string;
   error?: boolean;
 }
@@ -104,21 +138,20 @@ export function adaptReportResponse(response: ReportResponse): ReportResponseCam
   return adaptApiResponse<ReportResponseCamel>(response);
 }
 
-export interface AnalysisResponse {
+/**
+ * Backend API interface for AnalysisResponse
+ */
+export interface AnalysisResponse extends ApiResponse {
   extracted_variables: Record<string, AnalysisDetails>;
   fields_needing_attention: string[];
-  status: 'success' | 'error';
-  message?: string;
 }
 
 /**
  * Frontend-friendly version with camelCase properties
  */
-export interface AnalysisResponseCamel {
+export interface AnalysisResponseCamel extends ApiResponseCamel {
   extractedVariables: Record<string, AnalysisDetails>;
   fieldsNeedingAttention: string[];
-  status: 'success' | 'error';
-  message?: string;
 }
 
 /**
@@ -131,21 +164,17 @@ export function adaptAnalysisResponse(response: AnalysisResponse): AnalysisRespo
 /**
  * Backend API interface for ReportPreview
  */
-export interface ReportPreview {
+export interface ReportPreview extends ApiResponse {
   report_id: string;
   preview_url: string;
-  status: 'success' | 'error';
-  message?: string;
 }
 
 /**
  * Frontend-friendly version with camelCase properties
  */
-export interface ReportPreviewCamel {
+export interface ReportPreviewCamel extends ApiResponseCamel {
   reportId: string;
   previewUrl: string;
-  status: 'success' | 'error';
-  message?: string;
 }
 
 /**
@@ -155,9 +184,21 @@ export function adaptReportPreview(response: ReportPreview): ReportPreviewCamel 
   return adaptApiResponse<ReportPreviewCamel>(response);
 }
 
-export interface EditReportResponseCamel {
-  reportId: string;
-  previewUrl: string;
-  status: 'success' | 'error';
-  message: string;
+/**
+ * Backend API interface for EditReportResponse
+ */
+export interface EditReportResponse extends ReportPreview {
+  // EditReportResponse extends ReportPreview with the same fields
+}
+
+/**
+ * Frontend-friendly version with camelCase properties
+ */
+export type EditReportResponseCamel = ReportPreviewCamel;
+
+/**
+ * Helper function to convert API response to frontend format
+ */
+export function adaptEditReportResponse(response: EditReportResponse): EditReportResponseCamel {
+  return adaptApiResponse<EditReportResponseCamel>(response);
 } 

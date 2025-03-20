@@ -17,6 +17,7 @@ from pydantic import UUID4, BaseModel
 from utils.auth import get_current_user
 import asyncio
 import logging
+from utils.file_utils import safe_path_join
 
 router = APIRouter()
 # Configure logging
@@ -56,8 +57,8 @@ async def process_file_in_background(file_path: str, file_metadata: Dict, report
             content = extract_text_from_file(file_path)
             
             # Update the file metadata with the extracted content
-            report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
-            metadata_path = os.path.join(report_dir, "metadata.json")
+            report_dir = safe_path_join(settings.UPLOAD_DIR, report_id)
+            metadata_path = safe_path_join(report_dir, "metadata.json")
             
             if os.path.exists(metadata_path):
                 with open(metadata_path, "r") as f:
@@ -140,7 +141,7 @@ async def upload_template(
             
             # Create unique filename using template_id
             filename = f"template_{template_id}.pdf"
-            file_path = os.path.join(settings.UPLOAD_DIR, filename)
+            file_path = safe_path_join(settings.UPLOAD_DIR, filename)
             
             # Save file
             with open(file_path, "wb") as buffer:
@@ -182,7 +183,7 @@ async def upload_files(
                 # Create unique filename using file_id
                 original_filename = secure_filename(file.filename)
                 filename = f"{file_id}_{original_filename}"
-                file_path = os.path.join(settings.UPLOAD_DIR, filename)
+                file_path = safe_path_join(settings.UPLOAD_DIR, filename)
                 
                 # Save file
                 with open(file_path, "wb") as buffer:
@@ -266,7 +267,7 @@ async def upload_documents(
         print(f"Generated report UUID: {report_uuid}")
         
         # Create a directory for this report's files using the UUID
-        report_dir = os.path.join(settings.UPLOAD_DIR, report_uuid)
+        report_dir = safe_path_join(settings.UPLOAD_DIR, report_uuid)
         os.makedirs(report_dir, exist_ok=True)
         print(f"Created report directory: {report_dir}")
 
@@ -307,7 +308,7 @@ async def upload_documents(
                 ext = os.path.splitext(file.filename)[1]
                 safe_filename = secure_filename(file.filename)
                 filename = f"{uuid.uuid4()}{ext}"
-                file_path = os.path.join(report_dir, filename)
+                file_path = safe_path_join(report_dir, filename)
                 
                 # Save original filename mapping for reference
                 original_filename = file.filename
@@ -402,7 +403,7 @@ async def upload_documents(
                 await file.close()
 
         # Store report metadata in local JSON file
-        metadata_path = os.path.join(report_dir, "metadata.json")
+        metadata_path = safe_path_join(report_dir, "metadata.json")
         metadata = {
             "report_id": report_uuid,  # Store the UUID for external reference
             "template_id": template_id,
@@ -439,7 +440,7 @@ async def upload_documents(
             if response.data and len(response.data) > 0:
                 db_id = response.data[0]["id"]
                 # Save the mapping between UUID and integer ID
-                mapping_path = os.path.join(report_dir, "id_mapping.json")
+                mapping_path = safe_path_join(report_dir, "id_mapping.json")
                 with open(mapping_path, "w") as f:
                     json.dump({"report_id": report_uuid, "db_id": db_id}, f, indent=2)
                 print(f"Created ID mapping: report_id {report_uuid} -> Database ID {db_id}")
@@ -522,7 +523,7 @@ async def upload_document(
     
     # Ensure uploads directory exists
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    file_path = os.path.join(settings.UPLOAD_DIR, new_filename)
+    file_path = safe_path_join(settings.UPLOAD_DIR, new_filename)
     
     # Save the file
     with open(file_path, "wb") as buffer:
@@ -569,11 +570,11 @@ async def upload_template_docx(file: UploadFile = File(...)):
             )
         
         # Ensure the reference_reports directory exists
-        template_dir = os.path.join("backend", "reference_reports")
+        template_dir = safe_path_join("backend", "reference_reports")
         os.makedirs(template_dir, exist_ok=True)
         
         # Define the path where the template will be saved
-        template_path = os.path.join(template_dir, "template.docx")
+        template_path = safe_path_join(template_dir, "template.docx")
         
         # Save the file
         with open(template_path, "wb") as buffer:
@@ -699,11 +700,11 @@ async def init_chunked_upload(
         report_id = upload_info.reportId or str(uuid.uuid4())
         
         # Create report directory if it doesn't exist
-        report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+        report_dir = safe_path_join(settings.UPLOAD_DIR, report_id)
         os.makedirs(report_dir, exist_ok=True)
         
         # Create a temporary directory for the chunks
-        chunks_dir = os.path.join(report_dir, f"chunks_{upload_id}")
+        chunks_dir = safe_path_join(report_dir, f"chunks_{upload_id}")
         os.makedirs(chunks_dir, exist_ok=True)
         
         # Store upload information
@@ -721,7 +722,7 @@ async def init_chunked_upload(
         }
         
         # Create or update metadata file to include this upload
-        metadata_path = os.path.join(report_dir, "metadata.json")
+        metadata_path = safe_path_join(report_dir, "metadata.json")
         if os.path.exists(metadata_path):
             with open(metadata_path, "r") as f:
                 metadata = json.load(f)
@@ -799,7 +800,7 @@ async def upload_chunk(
         
         # Save the chunk to a temporary file
         chunk_filename = f"chunk_{chunkIndex:05d}"
-        chunk_path = os.path.join(upload_info["chunks_dir"], chunk_filename)
+        chunk_path = safe_path_join(upload_info["chunks_dir"], chunk_filename)
         
         chunk_content = await chunk.read()
         with open(chunk_path, "wb") as f:
@@ -860,17 +861,17 @@ async def complete_chunked_upload(
         
         # Generate a unique filename for the complete file
         report_id = upload_info["report_id"]
-        report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+        report_dir = safe_path_join(settings.UPLOAD_DIR, report_id)
         
         safe_filename = secure_filename(upload_info["filename"])
         final_filename = f"{uuid.uuid4()}_{safe_filename}"
-        final_path = os.path.join(report_dir, final_filename)
+        final_path = safe_path_join(report_dir, final_filename)
         
         # Combine all chunks into the final file
         with open(final_path, "wb") as outfile:
             for i in range(upload_info["totalChunks"]):
                 chunk_filename = f"chunk_{i:05d}"
-                chunk_path = os.path.join(upload_info["chunks_dir"], chunk_filename)
+                chunk_path = safe_path_join(upload_info["chunks_dir"], chunk_filename)
                 
                 if os.path.exists(chunk_path):
                     with open(chunk_path, "rb") as infile:
@@ -890,7 +891,7 @@ async def complete_chunked_upload(
         shutil.rmtree(upload_info["chunks_dir"])
         
         # Update metadata
-        metadata_path = os.path.join(report_dir, "metadata.json")
+        metadata_path = safe_path_join(report_dir, "metadata.json")
         with open(metadata_path, "r") as f:
             metadata = json.load(f)
         
@@ -1047,7 +1048,7 @@ async def create_empty_report(
         logger.info(f"Creating empty report with ID: {report_uuid}")
         
         # Create a directory for this report
-        report_dir = os.path.join(settings.UPLOAD_DIR, report_uuid)
+        report_dir = safe_path_join(settings.UPLOAD_DIR, report_uuid)
         os.makedirs(report_dir, exist_ok=True)
         
         # Store report metadata
@@ -1061,7 +1062,7 @@ async def create_empty_report(
             "content": ""
         }
         
-        metadata_path = os.path.join(report_dir, "metadata.json")
+        metadata_path = safe_path_join(report_dir, "metadata.json")
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
         
@@ -1084,7 +1085,7 @@ async def create_empty_report(
             
             if response.data and len(response.data) > 0:
                 db_id = response.data[0]["id"]
-                mapping_path = os.path.join(report_dir, "id_mapping.json")
+                mapping_path = safe_path_join(report_dir, "id_mapping.json")
                 with open(mapping_path, "w") as f:
                     json.dump({"report_id": report_uuid, "db_id": db_id}, f, indent=2)
         

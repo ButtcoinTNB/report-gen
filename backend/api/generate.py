@@ -5,7 +5,16 @@ import json
 from config import settings
 from typing import Dict, Any, List, Optional
 from services.pdf_extractor import extract_text_from_files, extract_text_from_file
-from services.ai_service import generate_report_text, extract_template_variables, refine_report_text
+from services.ai_service import (
+    generate_report_text, 
+    extract_template_variables, 
+    refine_report_text, 
+    AIServiceError, 
+    AIConnectionError, 
+    AITimeoutError, 
+    AIResponseError, 
+    AIParsingError
+)
 from services.docx_formatter import format_report_as_docx
 from services.template_processor import template_processor
 import time
@@ -26,6 +35,7 @@ from pathlib import Path
 import asyncio
 from utils.supabase_helper import create_supabase_client, supabase_client_context
 from uuid import UUID
+from utils.file_utils import safe_path_join
 
 router = APIRouter(tags=["Report Generation"])
 logger = logging.getLogger(__name__)
@@ -97,9 +107,9 @@ def fetch_reference_reports():
     
     # Check different possible locations for reference reports
     possible_dirs = [
-        os.path.join("backend", "reference_reports"),  # Check inside backend folder
+        safe_path_join("backend", "reference_reports"),  # Check inside backend folder
         "reference_reports",  # Check in root folder
-        os.path.join(settings.UPLOAD_DIR, "templates")  # Check in templates directory
+        safe_path_join(settings.UPLOAD_DIR, "templates")  # Check in templates directory
     ]
     
     for dir_path in possible_dirs:
@@ -108,7 +118,7 @@ def fetch_reference_reports():
             
             # Look for PDFs, Word docs, and text files
             reference_files = [
-                os.path.join(dir_path, f) 
+                safe_path_join(dir_path, f) 
                 for f in os.listdir(dir_path) 
                 if f.lower().endswith((".pdf", ".docx", ".doc", ".txt"))
             ]
@@ -322,7 +332,19 @@ async def simple_test(data: Dict[str, Any]):
 
 @router.post("/analyze")
 async def analyze_documents(request: AnalyzeRequest):
-    """Analyze uploaded documents and extract variables."""
+    """
+    Analyze uploaded documents and extract variables.
+    
+    This endpoint processes documents and uses AI to extract structured variables.
+    
+    Returns:
+        Dictionary with extracted variables and fields needing attention
+        
+    Raises:
+        404: If documents are not found
+        503: If AI service is unavailable
+        500: For other errors
+    """
     try:
         # Get document paths - use the report_id if provided, otherwise use document_ids
         if request.report_id:
@@ -332,21 +354,76 @@ async def analyze_documents(request: AnalyzeRequest):
             # Fall back to document_ids
             document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
         
+        # Verify documents exist
+        for path in document_paths:
+            if not os.path.exists(path):
+                logger.error(f"Document not found: {path}")
+                return {
+                    "status": "error",
+                    "message": "One or more documents not found",
+                    "code": "DOCUMENT_NOT_FOUND"
+                }
+        
         # Extract variables from documents
-        result = await extract_template_variables(
-            "\n".join([str(path) for path in document_paths]),
-            request.additional_info
-        )
-        
-        return {
-            "status": "success",
-            "extracted_variables": result["variables"],
-            "fields_needing_attention": result.get("fields_needing_attention", [])
-        }
-        
+        try:
+            result = await extract_template_variables(
+                "\n".join([str(path) for path in document_paths]),
+                request.additional_info
+            )
+            
+            return {
+                "status": "success",
+                "extracted_variables": result["variables"],
+                "fields_needing_attention": result.get("fields_needing_attention", [])
+            }
+        except AIConnectionError as e:
+            logger.error(f"AI connection error: {e.message}")
+            return {
+                "status": "error",
+                "message": "AI service is currently unavailable. Please try again later.",
+                "code": "AI_SERVICE_UNAVAILABLE",
+                "retry": True
+            }
+        except AITimeoutError as e:
+            logger.error(f"AI timeout error: {e.message}")
+            return {
+                "status": "error",
+                "message": "AI service request timed out. Please try again with smaller documents or later.",
+                "code": "AI_SERVICE_TIMEOUT",
+                "retry": True
+            }
+        except AIResponseError as e:
+            logger.error(f"AI response error: {e.message}")
+            return {
+                "status": "error",
+                "message": "AI service returned an error. Please try again later.",
+                "code": "AI_SERVICE_ERROR",
+                "retry": e.status_code < 500  # Only suggest retry for 5xx errors
+            }
+        except AIParsingError as e:
+            logger.error(f"AI parsing error: {e.message}")
+            return {
+                "status": "error",
+                "message": "Failed to parse AI response. Please try again.",
+                "code": "AI_PARSING_ERROR",
+                "retry": True
+            }
+        except AIServiceError as e:
+            logger.error(f"AI service error: {e.message}")
+            return {
+                "status": "error",
+                "message": "An error occurred while processing your request with AI service.",
+                "code": "AI_SERVICE_ERROR",
+                "retry": True
+            }
+            
     except Exception as e:
-        handle_exception(e, "Document analysis")
-        raise
+        logger.error(f"Unexpected error in analyze_documents: {str(e)}")
+        return {
+            "status": "error",
+            "message": "An unexpected error occurred while analyzing documents.",
+            "code": "UNEXPECTED_ERROR"
+        }
 
 
 @router.post("/from-structure")
@@ -389,7 +466,7 @@ async def generate_from_structure(
                 continue
                 
             # Verify file existence
-            file_path = os.path.join(settings.UPLOAD_DIR, file_record.file_path)
+            file_path = safe_path_join(settings.UPLOAD_DIR, file_record.file_path)
             if not os.path.exists(file_path):
                 logger.warning(f"File not found at path: {file_path}")
                 continue
@@ -552,7 +629,7 @@ async def _generate_and_save_report(
             logger.info(f"Successfully generated report with {len(generated_text)} characters")
             
             # Save the generated text to a file
-            output_file = os.path.join(report_dir, "report.md")
+            output_file = safe_path_join(report_dir, "report.md")
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(generated_text)
                 
@@ -566,7 +643,7 @@ async def _generate_and_save_report(
                 # Update the report record
                 response = supabase.table("reports").update({
                     "content": generated_text,
-                    "file_path": os.path.join("reports", str(report_id), "report.md"),
+                    "file_path": safe_path_join("reports", str(report_id), "report.md"),
                     "status": "completed"
                 }).eq("id", report_id).execute()
                 

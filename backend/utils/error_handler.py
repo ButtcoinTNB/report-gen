@@ -27,6 +27,12 @@ ERROR_TYPE_MAPPING = {
     NotImplementedError: {"status_code": 501, "error_type": "not_implemented"},
     TimeoutError: {"status_code": 504, "error_type": "timeout_error"},
     ConnectionError: {"status_code": 503, "error_type": "connection_error"},
+    # Add custom AI service exceptions
+    "AIServiceError": {"status_code": 500, "error_type": "ai_service_error"},
+    "AIConnectionError": {"status_code": 503, "error_type": "ai_connection_error"},
+    "AITimeoutError": {"status_code": 504, "error_type": "ai_timeout_error"},
+    "AIResponseError": {"status_code": 500, "error_type": "ai_response_error"},
+    "AIParsingError": {"status_code": 422, "error_type": "ai_parsing_error"},
 }
 
 def handle_exception(
@@ -50,54 +56,52 @@ def handle_exception(
     # Log the exception
     logger.error(f"Error during {operation}: {str(exception)}")
     
-    # Get exception traceback
-    tb = traceback.format_exc()
-    logger.debug(tb)
+    # Include the full traceback for critical errors
+    if include_traceback:
+        logger.error(traceback.format_exc())
     
-    # Determine the appropriate status code and error type
-    error_info = ERROR_TYPE_MAPPING.get(type(exception), {
-        "status_code": default_status_code,
-        "error_type": "internal_error"
-    })
+    # Determine the error type and status code based on the exception class
+    exception_class = exception.__class__
+    exception_class_name = exception_class.__name__
     
-    status_code = error_info["status_code"]
-    error_type = error_info["error_type"]
+    # Check for exact match first
+    if exception_class in ERROR_TYPE_MAPPING:
+        error_info = ERROR_TYPE_MAPPING[exception_class]
+    # Then check for class name match (for custom exceptions)
+    elif exception_class_name in ERROR_TYPE_MAPPING:
+        error_info = ERROR_TYPE_MAPPING[exception_class_name]
+    # Default to internal server error if not mapped
+    else:
+        error_info = {
+            "status_code": default_status_code,
+            "error_type": "internal_error"
+        }
     
-    # Extract a simple error message string from the exception
-    error_message = str(exception)
-    # If error is a dictionary, try to simplify it to a string
-    if error_message.startswith("{") and error_message.endswith("}"):
-        try:
-            error_dict = json.loads(error_message)
-            if isinstance(error_dict, dict):
-                # Try to extract a simple message from the dictionary
-                if "detail" in error_dict:
-                    error_message = str(error_dict["detail"])
-                elif "message" in error_dict:
-                    error_message = str(error_dict["message"])
-                elif "error" in error_dict:
-                    error_message = str(error_dict["error"])
-        except:
-            # If JSON parsing fails, keep the original message
-            pass
+    # For AI service errors, use the status_code from the exception if available
+    if hasattr(exception, 'status_code') and exception_class_name.startswith('AI'):
+        error_info["status_code"] = getattr(exception, 'status_code')
     
-    # Build error response
+    # Create the standard error response
     error_response = {
         "status": "error",
-        "error_type": error_type,
-        "message": error_message,
+        "message": str(exception),
+        "code": error_info["error_type"].upper(),
         "operation": operation
     }
     
-    # Include traceback in development environments if requested
-    if include_traceback:
-        error_response["traceback"] = tb
+    # For debugging, include the exception type
+    error_response["exception_type"] = exception_class_name
     
-    # Raise HTTPException with a simplified string response if possible
-    # This helps prevent complex objects from causing issues in the frontend
+    # If there's an original exception, include its details
+    if hasattr(exception, 'original_exception') and getattr(exception, 'original_exception'):
+        original = getattr(exception, 'original_exception')
+        error_response["original_error"] = str(original)
+        error_response["original_type"] = original.__class__.__name__
+    
+    # Raise an HTTP exception with the standardized response
     raise HTTPException(
-        status_code=status_code,
-        detail=error_message if len(error_message) < 500 else f"Error during {operation}"
+        status_code=error_info["status_code"],
+        detail=error_response
     )
 
 def api_error_handler(func):

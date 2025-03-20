@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import UUID4
 from utils.error_handler import handle_exception, logger
 from config import settings
+from utils.file_utils import safe_path_join
 
 class DocxService:
     def __init__(self):
@@ -17,8 +18,8 @@ class DocxService:
         self.templates_dirs = [
             Path("reference_reports"),                # Direct reference_reports folder
             Path("templates"),                        # Direct templates folder
-            Path(cwd) / "reference_reports",          # Absolute path using current working directory
-            Path(cwd) / "backend" / "reference_reports" # Absolute path to backend/reference_reports
+            Path(safe_path_join(cwd, "reference_reports")),          # Absolute path using current working directory
+            Path(safe_path_join(cwd, "backend", "reference_reports")) # Absolute path to backend/reference_reports
         ]
         
         # Define output directories
@@ -59,12 +60,19 @@ class DocxService:
         
         # Check all potential template directories
         for template_dir in self.templates_dirs:
-            template_path = template_dir / template_name
-            if template_path.exists():
-                logger.info(f"Found template at {template_path}")
-                return template_path
-            else:
-                logger.debug(f"Template not found at {template_path}")
+            if not template_dir.exists():
+                logger.debug(f"Template directory doesn't exist: {template_dir}")
+                continue
+                
+            try:
+                template_path = safe_path_join(template_dir, template_name)
+                if Path(template_path).exists():
+                    logger.info(f"Found template at {template_path}")
+                    return Path(template_path)
+                else:
+                    logger.debug(f"Template not found at {template_path}")
+            except ValueError:
+                logger.warning(f"Skipping potentially unsafe template path: {template_dir}/{template_name}")
         
         # Special case for default template name
         if template_name == "default.docx" and self.find_template("template.docx"):
@@ -73,10 +81,18 @@ class DocxService:
         # If no template found, look for any .docx files in the templates directories
         for template_dir in self.templates_dirs:
             if template_dir.exists():
-                docx_files = list(template_dir.glob("*.docx"))
-                if docx_files:
-                    logger.info(f"Using alternative template: {docx_files[0]}")
-                    return docx_files[0]
+                # Use os.listdir and filter instead of glob for more control
+                try:
+                    for file_name in os.listdir(template_dir):
+                        if file_name.lower().endswith('.docx'):
+                            try:
+                                found_path = safe_path_join(template_dir, file_name)
+                                logger.info(f"Using alternative template: {found_path}")
+                                return Path(found_path)
+                            except ValueError:
+                                logger.warning(f"Skipping potentially unsafe template file: {file_name}")
+                except Exception as e:
+                    logger.error(f"Error listing directory {template_dir}: {e}")
         
         logger.warning(f"No suitable template found for {template_name}")
         return None
@@ -102,13 +118,19 @@ class DocxService:
                 basic_doc.add_heading("Report", 0)
                 
                 # Create a temporary template file
-                temp_template = self.output_dir / "temp_template.docx"
-                basic_doc.save(str(temp_template))
-                template_path = temp_template
+                try:
+                    temp_template = safe_path_join(self.output_dir, "temp_template.docx")
+                    basic_doc.save(str(temp_template))
+                    template_path = Path(temp_template)
+                except ValueError as e:
+                    logger.error(f"Failed to create temporary template: {e}")
+                    raise
             
             # Generate unique filename for the report
             report_id = str(UUID4())
-            output_path = self.output_dir / f"report_{report_id}.docx"
+            
+            # Use safe_path_join to ensure security
+            output_path = safe_path_join(self.output_dir, f"report_{report_id}.docx")
             
             # Load template and render with variables
             doc = DocxTemplate(str(template_path))
@@ -134,11 +156,13 @@ class DocxService:
         Returns:
             Path where the report should be stored
         """
-        return self.output_dir / f"report_{report_id}.docx"
+        report_filename = f"report_{report_id}.docx"
+        return safe_path_join(self.output_dir, report_filename)
     
     def get_preview_path(self, report_id: UUID4) -> Path:
         """Get the path where a preview should be stored"""
-        return self.preview_dir / f"preview_{report_id}.html"
+        preview_filename = f"preview_{report_id}.html"
+        return safe_path_join(self.preview_dir, preview_filename)
     
     def modify_report(self, report_id: UUID4, template_variables: Dict[str, Any]) -> str:
         """
@@ -162,7 +186,8 @@ class DocxService:
         doc.render(template_variables)
         
         # Save to a new file
-        new_path = self.output_dir / f"report_{report_id}_modified.docx"
+        new_filename = f"report_{report_id}_modified.docx"
+        new_path = safe_path_join(self.output_dir, new_filename)
         doc.save(new_path)
         
         return str(new_path)

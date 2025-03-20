@@ -26,18 +26,22 @@ import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
 import { uploadApi } from '../src/services'; // Updated import path
 import { useDropzone } from 'react-dropzone';
+import { UploadService } from '../src/services/api/UploadService';
+import { adaptApiResponse } from '../src/utils/adapters';
+import { logger } from '../src/utils/logger';
 
 interface Props {
   onUploadSuccess: (reportId: string) => void;  // UUID
   onError: (error: Error) => void;
 }
 
-interface UploadResponse {
-  report_id: string;  // UUID
+// CamelCase interface for frontend use
+interface UploadResponseCamel {
+  reportId: string;  
   files: Array<{
-    file_id: string;  // UUID
+    fileId: string;  
     filename: string;
-    file_path: string;
+    filePath: string;
   }>;
   message: string;
 }
@@ -51,11 +55,11 @@ interface ProgressUpdate {
 const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [totalSize, setTotalSize] = useState<number>(0);
   const [sizeWarning, setSizeWarning] = useState<string | null>(null);
-  // Using a default template ID of 1, no dropdown needed
-  const templateId = 1;
+  const [progress, setProgress] = useState<number>(0);
+  const [progressMessage, setProgressMessage] = useState<string>('');
   
   // Maximum allowed size in bytes (100MB)
   const MAX_TOTAL_SIZE = 100 * 1024 * 1024;
@@ -71,14 +75,14 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
       setSizeWarning(`La dimensione totale (${getFileSize(newTotalSize)}) si sta avvicinando al limite di 100MB`);
     } else if (newTotalSize > MAX_TOTAL_SIZE) {
       setSizeWarning(`La dimensione totale (${getFileSize(newTotalSize)}) supera il limite di 100MB. Rimuovi alcuni file.`);
-      setError("La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.");
+      setUploadError("La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.");
     } else {
       setSizeWarning(null);
-      if (error === "La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.") {
-        setError(null);
+      if (uploadError === "La dimensione totale dei file supera il limite di 100MB. Rimuovi alcuni file prima di caricare.") {
+        setUploadError(null);
       }
     }
-  }, [files]);
+  }, [files, uploadError]);
 
   // Get icon based on file type
   const getFileIcon = (file: File) => {
@@ -105,45 +109,66 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
     }
   };
   
-  const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (acceptedFiles.length === 0) return;
-
-    setUploading(true);
-    setError(null);
-
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    // Simply update the files state and show filename
+    setFiles((prev) => [...prev, ...acceptedFiles]);
+    setUploadError(null);
+  }, []);
+  
+  const handleSubmit = async () => {
+    if (files.length === 0) return;
+    
     try {
-      // Use the uploadApi adapter which provides the same interface but uses our new service layer
-      const response = await uploadApi.uploadFile(acceptedFiles);
+      setUploading(true);
+      setProgress(0);
+      setProgressMessage('Preparing files...');
       
-      if (response && response.report_id) {
-        onUploadSuccess(response.report_id);
-      } else {
-        throw new Error('No report ID received from server');
-      }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to upload files';
-      setError(errorMessage);
-      onError(new Error(errorMessage));
+      // Initialize the upload service
+      const uploadService = new UploadService();
+      
+      // Use the upload method with progress tracking
+      const response = await uploadService.uploadFiles(files, (progressValue: number) => {
+        // Update progress based on upload progress
+        setProgress(progressValue * 0.8); // Scale to 80% of total progress
+        setProgressMessage(`Uploading... ${progressValue}%`);
+      });
+      
+      // Convert the response to camelCase using the adapter
+      const camelResponse = adaptApiResponse<UploadResponseCamel>(response);
+      
+      // Update progress to indicate processing
+      setProgress(90);
+      setProgressMessage('Processing uploaded files...');
+      
+      // Set a timeout to simulate backend processing
+      setTimeout(() => {
+        setProgress(100);
+        setProgressMessage('Upload complete!');
+        
+        // Call the onUploadSuccess callback with the report ID
+        if (camelResponse && camelResponse.reportId) {
+          onUploadSuccess(camelResponse.reportId);
+        } else {
+          throw new Error('No report ID received from server');
+        }
+      }, 1500);
+      
+    } catch (error) {
+      logger.error('Error uploading files:', error);
+      setUploadError(error instanceof Error ? error.message : 'Unknown error during upload');
+      onError(error instanceof Error ? error : new Error('Unknown error during upload'));
     } finally {
       setUploading(false);
     }
-  }, [onUploadSuccess, onError]);
+  };
   
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: {
-      'application/pdf': ['.pdf'],
-      'application/msword': ['.doc'],
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-      'text/plain': ['.txt'],
-      'image/jpeg': ['.jpg', '.jpeg'],
-      'image/png': ['.png']
-    },
-    maxSize: 1024 * 1024 * 1024 // 1GB
+    disabled: uploading
   });
 
   const handleRemoveFile = (index: number) => {
-    setFiles(prevFiles => prevFiles.filter((_, i) => i !== index));
+    setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   // Calculate size usage percentage
@@ -257,9 +282,9 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
           </Box>
         )}
         
-        {error && (
+        {uploadError && (
           <Alert severity="error" sx={{ mt: 2 }}>
-            {error}
+            {uploadError}
           </Alert>
         )}
         

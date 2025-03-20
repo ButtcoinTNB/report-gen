@@ -9,6 +9,7 @@ import requests
 from PIL import Image
 from config import settings
 import fitz  # PyMuPDF for PDF handling
+from utils.file_utils import safe_path_join
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ def convert_document_to_images(file_path: str, output_dir: Optional[str] = None)
             return convert_docx_to_images(file_path, output_dir)
         elif file_ext in ['.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.gif', '.webp']:
             # For images, just copy to output dir with a standardized name
-            output_path = os.path.join(output_dir, f"image_page_001{file_ext}")
+            output_path = safe_path_join(output_dir, f"image_page_001{file_ext}")
             try:
                 # Use Pillow to open and resave to ensure it's valid and convert if needed
                 img = Image.open(file_path)
@@ -94,7 +95,7 @@ def convert_pdf_to_images(pdf_path: str, output_dir: str) -> List[str]:
                 pix = page.get_pixmap(dpi=300)  # Higher DPI for better quality
                 
                 # Save the image
-                image_path = os.path.join(output_dir, f"pdf_page_{page_num + 1:03d}.png")
+                image_path = safe_path_join(output_dir, f"pdf_page_{page_num + 1:03d}.png")
                 pix.save(image_path)
                 
                 # Add to list of image paths
@@ -159,7 +160,7 @@ def convert_docx_to_images(docx_path: str, output_dir: str) -> List[str]:
                 
                 if process.returncode == 0:
                     # LibreOffice puts the PDF in the same directory as the DOCX
-                    converted_pdf = os.path.join(
+                    converted_pdf = safe_path_join(
                         os.path.dirname(temp_pdf_path),
                         os.path.basename(docx_path).replace('.docx', '.pdf')
                     )
@@ -288,7 +289,7 @@ def convert_docx_to_images(docx_path: str, output_dir: str) -> List[str]:
                         y_position += line_height
                     
                     # Save the image
-                    image_path = os.path.join(output_dir, f"docx_page_{i + 1:03d}.png")
+                    image_path = safe_path_join(output_dir, f"docx_page_{i + 1:03d}.png")
                     img.save(image_path)
                     image_paths.append(image_path)
                     logger.info(f"Created image for DOCX content part {i + 1}: {image_path}")

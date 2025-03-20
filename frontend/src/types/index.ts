@@ -4,14 +4,15 @@ import { adaptApiResponse } from '../utils/adapters';
 export * from './api';
 
 /**
- * Backend API interface for Report
+ * Extended Report interface for application use
+ * Extends from the API Report interface with additional frontend properties
  */
 export interface Report {
     report_id: string;  // UUID
     template_id?: string;
     title?: string;
-    content?: string;  // Add content field needed by components
-    file_path?: string; // Add file_path needed by ReportGenerator
+    content?: string;
+    file_path?: string;
     preview_url?: string;
     is_finalized?: boolean;
     files_cleaned?: boolean;
@@ -19,14 +20,17 @@ export interface Report {
     updated_at?: string;
     status?: 'success' | 'error';
     message?: string;
-    downloadUrl?: string; // Legacy field for backward compatibility
+    
+    // Legacy fields for backward compatibility
+    // These should be replaced gradually with the proper snake_case versions
+    downloadUrl?: string;
 }
 
 /**
  * Frontend-friendly version with camelCase properties
  */
 export interface ReportCamel {
-    reportId: string;  // UUID
+    reportId: string;
     templateId?: string;
     title?: string;
     content?: string;
@@ -43,27 +47,33 @@ export interface ReportCamel {
 
 /**
  * Helper function to convert API response to frontend format
+ * @param response Report in snake_case format
+ * @returns Report in camelCase format
  */
 export function adaptReport(response: Report): ReportCamel {
     return adaptApiResponse<ReportCamel>(response);
 }
 
 /**
- * Backend API interface for ReportPreview
+ * Extended ReportPreview interface for application use
+ * Includes both snake_case and camelCase properties for compatibility
  */
 export interface ReportPreview {
     report_id: string;
     preview_url: string;
     content?: string;
-    previewUrl?: string; // Legacy field for backward compatibility
-    reportId?: string; // Legacy field for backward compatibility
-    downloadUrl?: string; // Legacy field for backward compatibility
     status: 'success' | 'error';
     message?: string;
+    
+    // Legacy fields for backward compatibility
+    // These should be replaced gradually with the proper snake_case versions
+    previewUrl?: string;
+    reportId?: string;
+    downloadUrl?: string;
 }
 
 /**
- * Frontend-friendly version with camelCase properties
+ * Frontend-friendly version with camelCase properties only
  */
 export interface ReportPreviewCamel {
     reportId: string;
@@ -75,17 +85,25 @@ export interface ReportPreviewCamel {
 
 /**
  * Helper function to convert API response to frontend format
+ * @param response ReportPreview in snake_case format
+ * @returns ReportPreview in camelCase format
  */
 export function adaptReportPreview(response: ReportPreview): ReportPreviewCamel {
     return adaptApiResponse<ReportPreviewCamel>(response);
 }
 
+/**
+ * Extended EditReportResponse interface
+ * Extends Report with additional fields for edit operations
+ */
 export interface EditReportResponse extends Report {
-    // Additional fields specific to edit response
     status: 'success' | 'error';
     message?: string;
 }
 
+/**
+ * Response for download operations
+ */
 export interface DownloadResponse {
     data: {
         download_url: string;
@@ -107,34 +125,59 @@ export interface DownloadResponseCamel {
 
 /**
  * Helper function to convert API response to frontend format
+ * @param response DownloadResponse in snake_case format
+ * @returns DownloadResponse in camelCase format
  */
 export function adaptDownloadResponse(response: DownloadResponse): DownloadResponseCamel {
     return adaptApiResponse<DownloadResponseCamel>(response);
 }
 
+/**
+ * Standard error format for API errors
+ */
 export interface ApiError {
     message: string;
     code: string;
     status: number;
 }
 
+/**
+ * Import AnalysisDetails from API types to ensure consistency
+ */
+import { AnalysisDetails as ApiAnalysisDetails } from './api';
+
+/**
+ * Extended AnalysisResponse interface for application use
+ * Aligns with the API version but includes both camelCase properties
+ */
 export interface AnalysisResponse {
+    // Snake_case fields from API
+    extracted_variables: Record<string, ApiAnalysisDetails>;
+    fields_needing_attention: string[];
+    status: 'success' | 'error';
+    message?: string;
+    
+    // CamelCase fields for frontend components (derived from snake_case)
     extractedVariables: Record<string, string>;
-    analysisDetails: Record<string, AnalysisDetails>;
+    analysisDetails: Record<string, ComponentAnalysisDetails>;
     fieldsNeedingAttention: string[];
 }
 
-export interface AnalysisDetails {
+/**
+ * Analysis details for components
+ * This is different from the API AnalysisDetails
+ */
+export interface ComponentAnalysisDetails {
     confidence: number;
     source: string;
     value: string;
 }
 
 /**
- * Backend API interface for File
+ * Extended File interface for application use
  */
 export interface File {
-    file_id: string;  // UUID
+    file_id: string;
     filename: string;
     file_path: string;
     size: number;
@@ -145,7 +188,7 @@ export interface File {
  * Frontend-friendly version with camelCase properties
  */
 export interface FileCamel {
-    fileId: string;  // UUID
+    fileId: string;
     filename: string;
     filePath: string;
     size: number;
@@ -154,16 +197,18 @@ export interface FileCamel {
 
 /**
  * Helper function to convert API response to frontend format
+ * @param response File in snake_case format
+ * @returns File in camelCase format
  */
 export function adaptFile(response: File): FileCamel {
     return adaptApiResponse<FileCamel>(response);
 }
 
 /**
- * Backend API interface for Template
+ * Extended Template interface for application use
  */
 export interface Template {
-    template_id: string;  // UUID
+    template_id: string;
     name: string;
     description?: string;
     created_at: string;
@@ -174,7 +219,7 @@ export interface Template {
  * Frontend-friendly version with camelCase properties
  */
 export interface TemplateCamel {
-    templateId: string;  // UUID
+    templateId: string;
     name: string;
     description?: string;
     createdAt: string;
@@ -183,6 +228,8 @@ export interface TemplateCamel {
 
 /**
  * Helper function to convert API response to frontend format
+ * @param response Template in snake_case format
+ * @returns Template in camelCase format
  */
 export function adaptTemplate(response: Template): TemplateCamel {
     return adaptApiResponse<TemplateCamel>(response);

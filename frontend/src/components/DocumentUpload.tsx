@@ -10,23 +10,40 @@ import { useDropzone } from 'react-dropzone';
 import { uploadApi } from '../services';
 import LoadingIndicator, { LoadingState, LoadingStage } from './LoadingIndicator';
 import { logger } from '../utils/logger';
+import { ReportResponseCamel } from '../services/api/UploadService';
 
 // Maximum total size (1GB)
 const MAX_TOTAL_SIZE = 1024 * 1024 * 1024;
 // Threshold for chunked upload (files larger than 50MB will use chunked upload)
 const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024;
 
+/**
+ * Props for the DocumentUpload component
+ */
 export interface DocumentUploadProps {
+  /** Callback triggered when file upload is complete with the report ID */
   onUploadComplete: (reportId: string) => void;
+  /** Maximum number of files that can be uploaded */
   maxFiles?: number;
+  /** Array of acceptable file types */
   acceptedFileTypes?: string[];
+  /** Optional existing report ID to add files to */
   reportId?: string;
 }
 
+/**
+ * Extended File interface with preview URL
+ */
 interface FileWithPreview extends File {
+  /** Optional preview URL for image files */
   preview?: string;
 }
 
+/**
+ * Document upload component with drag-and-drop functionality
+ * Supports single and multiple file uploads, progress tracking,
+ * and chunked uploads for large files.
+ */
 const DocumentUpload: React.FC<DocumentUploadProps> = ({
   onUploadComplete,
   maxFiles = 10,
@@ -46,13 +63,19 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     maxAttempts: 3
   });
 
-  const getFileIcon = (fileType: string) => {
+  /**
+   * Get appropriate icon for a file based on its type
+   */
+  const getFileIcon = useCallback((fileType: string) => {
     if (fileType.includes('pdf')) return <PictureAsPdfIcon />;
     if (fileType.includes('doc')) return <DescriptionIcon />;
     if (fileType.includes('image') || /\.(jpg|jpeg|png|gif)$/i.test(fileType)) return <ImageIcon />;
     return <InsertDriveFileIcon />;
-  };
+  }, []);
 
+  /**
+   * Handle dropped files
+   */
   const onDrop = useCallback(async (acceptedFiles: File[], fileRejections: any[]) => {
     // Check that we haven't exceeded the max number of files
     if (files.length + acceptedFiles.length > maxFiles) {
@@ -94,7 +117,10 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     maxFiles,
   });
 
-  const uploadFiles = async () => {
+  /**
+   * Upload selected files
+   */
+  const uploadFiles = useCallback(async () => {
     if (files.length === 0) return;
     
     setLoadingState({
@@ -106,7 +132,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     
     try {
       // Use the uploadFile adapter which handles progress
-      const response = await uploadApi.uploadFile(files, (progress) => {
+      const response: ReportResponseCamel = await uploadApi.uploadFile(files, (progress) => {
         setLoadingState(prevState => ({
           ...prevState,
           progress,
@@ -142,20 +168,26 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         message: 'Errore di caricamento'
       });
     }
-  };
+  }, [files, onUploadComplete]);
 
-  const handleRetry = () => {
+  /**
+   * Retry upload after failure
+   */
+  const handleRetry = useCallback(() => {
     uploadFiles();
-  };
+  }, [uploadFiles]);
 
+  // Cleanup preview URLs when component unmounts
   useEffect(() => {
-    // Cleanup previews when component unmounts
     return () => files.forEach(file => {
       if (file.preview) URL.revokeObjectURL(file.preview);
     });
   }, [files]);
 
-  const removeFile = (index: number) => {
+  /**
+   * Remove a file from the selection
+   */
+  const removeFile = useCallback((index: number) => {
     setFiles(prev => {
       const newFiles = [...prev];
       if (newFiles[index].preview) {
@@ -164,7 +196,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       newFiles.splice(index, 1);
       return newFiles;
     });
-  };
+  }, []);
 
   return (
     <Box sx={{ width: '100%' }}>

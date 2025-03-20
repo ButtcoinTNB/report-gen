@@ -1,32 +1,33 @@
-import { useState, useCallback, useEffect, ChangeEvent } from 'react';
+import { useState, useCallback, useEffect, ChangeEvent, FormEvent } from 'react';
 import { Container, Box, Typography, Paper, Button, TextField, Divider, Alert } from '@mui/material';
 import DocumentUpload from '../components/DocumentUpload';
 import AdditionalInfo from '../components/AdditionalInfo';
 import ReportPreview from '../components/ReportPreview';
 import LoadingIndicator from '../components/LoadingIndicator';
 import { downloadApi, generateApi, editApi } from '../services';
-import { AnalysisResponse, ReportPreview as ReportPreviewType } from '../types';
-import { ReportPreviewCamel } from '../types/api';
+import { 
+  AnalysisResponse, 
+  ReportPreviewCamel 
+} from '../types';
 import { logger } from '../utils/logger';
-import { adaptReportPreview } from '../types/api';
-
-// Define the interface matching the one in AdditionalInfo component
-interface ComponentAnalysisDetails {
-  valore: string;
-  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
-  richiede_verifica: boolean;
-}
+import { adaptApiResponse, createHybridReportPreview } from '../utils/adapters';
+import { AnalysisDetails } from '../types/api';
+import { GenerateReportRequest } from '../services/api/ReportService';
 
 type ReportStep = 'upload' | 'additional-info' | 'preview' | 'download';
 
+/**
+ * Generate Report page component
+ * Handles the multi-step process of generating a report
+ */
 const GenerateReport: React.FC = () => {
   const [step, setStep] = useState<ReportStep>('upload');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadedDocumentIds, setUploadedDocumentIds] = useState<string[]>([]);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(null);
-  const [reportPreview, setReportPreview] = useState<ReportPreviewType | null>(null);
-  const [instructions, setInstructions] = useState('');
+  const [reportPreview, setReportPreview] = useState<ReportPreviewCamel | null>(null);
+  const [instructions, setInstructions] = useState<string>('');
   
   // When document IDs change, analyze them
   useEffect(() => {
@@ -35,7 +36,11 @@ const GenerateReport: React.FC = () => {
     }
   }, [uploadedDocumentIds]);
   
-  const analyzeDocuments = async (reportId: string) => {
+  /**
+   * Analyze documents with the given report ID
+   * @param reportId - The ID of the report to analyze
+   */
+  const analyzeDocuments = async (reportId: string): Promise<void> => {
     setIsLoading(true);
     setError(null);
     
@@ -49,7 +54,7 @@ const GenerateReport: React.FC = () => {
       
       // Move to the next step
       setStep('additional-info');
-    } catch (err) {
+    } catch (err: any) {
       logger.error('Error analyzing documents:', err);
       setError('Failed to analyze documents. Please try again.');
     } finally {
@@ -57,42 +62,51 @@ const GenerateReport: React.FC = () => {
     }
   };
   
-  const handleUploadComplete = (reportId: string) => {
+  /**
+   * Handle the upload complete event
+   * @param reportId - The ID of the newly created report
+   */
+  const handleUploadComplete = useCallback((reportId: string): void => {
     setUploadedDocumentIds([reportId]);
-  };
+  }, []);
   
-  const handleAdditionalInfo = async (additionalInfo: string) => {
+  /**
+   * Handle the additional info submission
+   * @param additionalInfo - The additional info text entered by the user
+   */
+  const handleAdditionalInfo = async (additionalInfo: string): Promise<void> => {
     setIsLoading(true);
     setError(null);
     
     try {
-      // Use the new generateReport adapter
-      const response = await generateApi.generateReport(uploadedDocumentIds[0], {
+      // Create a proper request object
+      const requestData: GenerateReportRequest = {
         text: additionalInfo
-      });
+      };
       
-      // Create a ReportPreview from the camelCase response
-      const preview: ReportPreviewType = {
-        report_id: response.reportId,
-        preview_url: response.previewUrl || '',
-        status: response.status,
-        message: response.message,
-        // For backward compatibility
-        reportId: response.reportId,
-        previewUrl: response.previewUrl || ''
+      // Use the proper generateReport adapter
+      const response = await generateApi.generateReport(uploadedDocumentIds[0], requestData);
+      
+      // Ensure previewUrl is always a string
+      const preview: ReportPreviewCamel = {
+        ...response,
+        previewUrl: response.previewUrl || '' // Ensure it's never undefined
       };
       
       setReportPreview(preview);
       setStep('preview');
-    } catch (e) {
-      logger.error('Error generating report:', e);
+    } catch (err: any) {
+      logger.error('Error generating report:', err);
       setError('Failed to generate report. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
   
-  const handleRefineReport = async () => {
+  /**
+   * Handle report refinement based on user instructions
+   */
+  const handleRefineReport = async (): Promise<void> => {
     if (!instructions.trim() || !reportPreview?.reportId) return;
     
     setIsLoading(true);
@@ -101,36 +115,37 @@ const GenerateReport: React.FC = () => {
       // Use the editApi adapter, which returns the response in camelCase
       const response = await editApi.editReport(reportPreview.reportId, instructions);
       
-      // Create a ReportPreview from the camelCase response
-      const preview: ReportPreviewType = {
-        report_id: response.reportId,
-        preview_url: response.previewUrl,
-        status: response.status,
-        message: response.message,
-        // For backward compatibility
-        reportId: response.reportId,
-        previewUrl: response.previewUrl
+      // Ensure previewUrl is always a string
+      const preview: ReportPreviewCamel = {
+        ...response,
+        previewUrl: response.previewUrl || '' // Ensure it's never undefined
       };
       
       setReportPreview(preview);
       setInstructions('');
-    } catch (e) {
-      logger.error('Error refining report:', e);
+    } catch (err: any) {
+      logger.error('Error refining report:', err);
       setError('Failed to refine report. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleBack = () => {
+  /**
+   * Handle navigation back to the previous step
+   */
+  const handleBack = useCallback((): void => {
     if (step === 'additional-info') {
       setStep('upload');
     } else if (step === 'preview') {
       setStep('additional-info');
     }
-  };
+  }, [step]);
   
-  const handleDownload = () => {
+  /**
+   * Handle the report download action
+   */
+  const handleDownload = useCallback((): void => {
     if (!reportPreview?.reportId) return;
     
     setIsLoading(true);
@@ -139,9 +154,8 @@ const GenerateReport: React.FC = () => {
     try {
       logger.info('Downloading report with ID:', reportPreview.reportId);
       
-      // Use the download URL from the preview or construct one
-      const downloadUrl = reportPreview.downloadUrl || 
-        downloadApi.getDownloadUrl(reportPreview.reportId);
+      // Construct the download URL
+      const downloadUrl = downloadApi.getDownloadUrl(reportPreview.reportId);
       
       // Use the download API to trigger the download
       downloadApi.downloadToDevice(
@@ -151,15 +165,26 @@ const GenerateReport: React.FC = () => {
       
       // Show a success message
       // Note: You could redirect to a success page instead
-    } catch (err) {
+    } catch (err: any) {
       logger.error('Error downloading report:', err);
       setError('Failed to download report. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [reportPreview]);
   
-  const renderStep = () => {
+  /**
+   * Handle changes to the instructions text field
+   * @param e - The change event from the text area
+   */
+  const handleInstructionsChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>): void => {
+    setInstructions(e.target.value);
+  }, []);
+  
+  /**
+   * Render the appropriate step component based on current state
+   */
+  const renderStep = useCallback(() => {
     switch (step) {
       case 'upload':
         return (
@@ -171,12 +196,11 @@ const GenerateReport: React.FC = () => {
       case 'additional-info':
         if (!analysisResult) return null;
         
-        // Convert field names and data structure if needed
         return (
           <AdditionalInfo
             documentIds={uploadedDocumentIds}
             extractedVariables={analysisResult.extractedVariables}
-            analysisDetails={analysisResult.analysisDetails as unknown as Record<string, ComponentAnalysisDetails>}
+            analysisDetails={analysisResult.analysisDetails as unknown as Record<string, AnalysisDetails>}
             fieldsNeedingAttention={analysisResult.fieldsNeedingAttention}
             onSubmit={handleAdditionalInfo}
             onBack={handleBack}
@@ -194,7 +218,7 @@ const GenerateReport: React.FC = () => {
               onDownload={handleDownload}
               onBack={handleBack}
               instructions={instructions}
-              onInstructionsChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInstructions(e.target.value)}
+              onInstructionsChange={handleInstructionsChange}
             />
           </Box>
         );
@@ -202,38 +226,48 @@ const GenerateReport: React.FC = () => {
       default:
         return null;
     }
-  };
+  }, [
+    step, 
+    analysisResult, 
+    reportPreview, 
+    uploadedDocumentIds, 
+    handleUploadComplete, 
+    handleAdditionalInfo, 
+    handleBack, 
+    handleRefineReport, 
+    handleDownload, 
+    instructions, 
+    handleInstructionsChange
+  ]);
   
   return (
-    <Container maxWidth="lg" sx={{ pb: 4 }}>
-      <Box sx={{ mb: 4, mt: 2 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Generatore di Perizie
+    <Container maxWidth="lg">
+      <Box sx={{ mt: 4, mb: 8 }}>
+        <Typography variant="h4" gutterBottom align="center">
+          Generazione Report Assicurativo
         </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Carica i documenti, aggiungi informazioni e ottieni una perizia professionale in pochi minuti.
+        
+        <Typography variant="body1" paragraph align="center" sx={{ mb: 6 }}>
+          Carica i tuoi documenti e genera un report dettagliato
         </Typography>
+        
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {error}
+          </Alert>
+        )}
+        
+        {isLoading && (
+          <LoadingIndicator
+            loadingState={{
+              isLoading: true,
+              stage: step === 'upload' ? 'uploading' : step === 'additional-info' ? 'analyzing' : 'generating'
+            }}
+          />
+        )}
+        
+        {renderStep()}
       </Box>
-      
-      {/* Error display */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
-      
-      {/* Loading indicator */}
-      <LoadingIndicator 
-        loadingState={{ 
-          isLoading,
-          stage: step === 'upload' ? 'uploading' : 
-                 step === 'additional-info' ? 'analyzing' : 
-                 step === 'preview' ? 'generating' : 'loading'
-        }} 
-      />
-      
-      {/* Current step */}
-      {renderStep()}
     </Container>
   );
 };

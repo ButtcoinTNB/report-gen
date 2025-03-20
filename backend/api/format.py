@@ -16,6 +16,7 @@ from utils.supabase_helper import create_supabase_client
 import json
 import datetime
 import hashlib
+from utils.file_utils import safe_path_join
 
 # Export key functions for other modules
 __all__ = ['format_report_as_pdf', 'get_reference_metadata', 'update_report_file_path', 'format_final']
@@ -152,7 +153,7 @@ def get_reference_metadata():
     # List of directories to check for reference PDFs
     search_paths = [
         "reference_reports",
-        os.path.join("backend", "reference_reports")
+        safe_path_join("backend", "reference_reports")
     ]
     
     pdf_files = []
@@ -161,7 +162,7 @@ def get_reference_metadata():
     for path in search_paths:
         if os.path.exists(path) and os.path.isdir(path):
             # Find all PDF files in the directory
-            pattern = os.path.join(path, "*.pdf")
+            pattern = safe_path_join(path, "*.pdf")
             pdf_files.extend(glob.glob(pattern))
     
     if not pdf_files:
@@ -253,7 +254,7 @@ async def format_final(data: Dict = Body(...)):
     is_uuid = False
     if isinstance(report_id, str) and "-" in report_id:
         # Check if this is a directory in the uploads folder
-        report_dir = os.path.join(settings.UPLOAD_DIR, report_id)
+        report_dir = safe_path_join(settings.UPLOAD_DIR, report_id)
         if os.path.exists(report_dir) and os.path.isdir(report_dir):
             is_uuid = True
     
@@ -285,7 +286,7 @@ async def format_final(data: Dict = Body(...)):
         if is_uuid:
             # Try to find any generated report file in the directory
             report_files = []
-            metadata_path = os.path.join(report_dir, "metadata.json")
+            metadata_path = safe_path_join(report_dir, "metadata.json")
             
             if os.path.exists(metadata_path):
                 try:
@@ -304,7 +305,7 @@ async def format_final(data: Dict = Body(...)):
             except HTTPException as e:
                 if is_uuid:
                     # For UUID reports, if Supabase fetch fails, check for a content.txt file
-                    content_path = os.path.join(report_dir, "content.txt")
+                    content_path = safe_path_join(report_dir, "content.txt")
                     if os.path.exists(content_path):
                         try:
                             with open(content_path, "r") as f:
@@ -362,7 +363,7 @@ This error occurs when the system cannot locate the report content in the databa
         # For UUID reports, save the path in metadata.json too
         if is_uuid:
             try:
-                metadata_path = os.path.join(report_dir, "metadata.json")
+                metadata_path = safe_path_join(report_dir, "metadata.json")
                 metadata = {}
                 
                 if os.path.exists(metadata_path):
@@ -385,7 +386,7 @@ This error occurs when the system cannot locate the report content in the databa
                 print(f"Saved report metadata with content to: {metadata_path}")
                     
                 # Always save content.txt regardless of metadata status
-                content_path = os.path.join(report_dir, "content.txt")
+                content_path = safe_path_join(report_dir, "content.txt")
                 with open(content_path, "w") as f:
                     f.write(report_content)
                 print(f"Saved report content to: {content_path}")
@@ -517,7 +518,7 @@ async def preview_file(data: Dict = Body(...)):
         )
         
         # Create preview directory if it doesn't exist
-        preview_dir = os.path.join(settings.GENERATED_REPORTS_DIR, "previews")
+        preview_dir = safe_path_join(settings.GENERATED_REPORTS_DIR, "previews")
         os.makedirs(preview_dir, exist_ok=True)
         
         # Create a static endpoint to access this file
@@ -555,10 +556,10 @@ async def get_preview_file(preview_id: str):
         
         # Check in multiple possible locations
         possible_paths = [
-            os.path.join(settings.GENERATED_REPORTS_DIR, "previews", preview_filename),
-            os.path.join(settings.GENERATED_REPORTS_DIR, preview_filename),
-            os.path.join("generated_reports", preview_filename),
-            os.path.join("generated_reports", "previews", preview_filename)
+            safe_path_join(settings.GENERATED_REPORTS_DIR, "previews", preview_filename),
+            safe_path_join(settings.GENERATED_REPORTS_DIR, preview_filename),
+            safe_path_join("generated_reports", preview_filename),
+            safe_path_join("generated_reports", "previews", preview_filename)
         ]
         
         # Find the first path that exists

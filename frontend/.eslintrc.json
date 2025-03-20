@@ -1,9 +1,31 @@
 {
   "extends": "next/core-web-vitals",
+  "plugins": ["@typescript-eslint", "local"],
   "rules": {
     "@typescript-eslint/no-unused-vars": "warn",
     "@typescript-eslint/no-explicit-any": "warn",
     "react/no-unescaped-entities": "warn",
-    "@next/next/no-head-element": "warn"
+    "@next/next/no-head-element": "warn",
+    "local/no-snake-case-props": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["frontend/src/**/*.{ts,tsx}"],
+      "excludes": [
+        "frontend/src/types/**/*.ts",
+        "frontend/src/services/api/**/*.ts",
+        "frontend/components/FileUpload.tsx",
+        "frontend/components/ReportGenerator.tsx", 
+        "frontend/pages/edit.tsx"
+      ],
+      "rules": {
+        "local/no-snake-case-props": "error"
+      }
+    }
+  ],
+  "settings": {
+    "local": {
+      "plugins": ["./src/eslint-plugins"]
+    }
   }
 } 

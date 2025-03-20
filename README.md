@@ -18,29 +18,21 @@ This project is hosted on GitHub: [https://github.com/ButtcoinTNB/report-gen](ht
 
 ## Tech Stack
 
-### Frontend
-- Next.js (React) with TypeScript
-- Material UI for components
-- Axios for API communication
-- Deployed on Vercel
+- **Frontend**: Next.js, TypeScript, Material-UI
+- **Backend**: FastAPI, Python, SQLAlchemy
+- **Database**: Supabase (PostgreSQL)
+- **AI**: OpenRouter API (Claude 3)
+- **File Processing**: PyMuPDF, WeasyPrint, PDFrw
+- **Deployment**: Vercel (Frontend), Render (Backend)
 
-### Backend
-- FastAPI (Python) for API endpoints
-- PyMuPDF (fitz) for PDF text and layout extraction
-- WeasyPrint and pdfrw for PDF generation and formatting
-- OpenRouter API for AI text generation
-- Deployed on Render
+## Prerequisites
 
-### Storage & Database
-- Supabase PostgreSQL for database
-- Supabase Storage for file storage
-
-## Setup Instructions
-
-### Prerequisites
 - Node.js 18+ and npm
-- Python 3.9+
-- PostgreSQL (local or Supabase)
+- Python 3.8+
+- Supabase account
+- OpenRouter API key
+
+## Installation
 
 ### Backend Setup
 
@@ -61,7 +53,7 @@ This project is hosted on GitHub: [https://github.com/ButtcoinTNB/report-gen](ht
    ```
 
 4. Set up environment variables:
-   - Copy `.env.example` to `.env` (in root directory)
+   - Copy `.env.example` from the root directory to `backend/.env`
    - Fill in your API keys and database credentials
 
 5. Run the backend server:
@@ -81,128 +73,46 @@ This project is hosted on GitHub: [https://github.com/ButtcoinTNB/report-gen](ht
    npm install
    ```
 
-3. Run the development server:
+3. Set up environment variables:
+   - Copy `.env.example` from the root directory to `frontend/.env.local`
+   - Update the `NEXT_PUBLIC_API_URL` to point to your backend service
+
+4. Start the development server:
    ```
    npm run dev
    ```
-
-## Project Structure
-
-```
-insurance-report-generator/
-│── backend/                 # FastAPI backend
-│   ├── main.py              # Main FastAPI app
-│   ├── api/                 # API routes
-│   │   ├── upload.py        # File upload logic
-│   │   ├── generate.py      # AI processing
-│   │   ├── format.py        # PDF formatting
-│   │   ├── edit.py          # User modifications
-│   │   ├── download.py      # PDF download logic
-│   │   ├── services/        # Utility functions
-│   │   │   ├── pdf_extractor.py # Extracts text & layout from PDFs
-│   │   │   ├── ai_service.py    # Calls OpenRouter API for AI generation
-│   │   │   ├── pdf_formatter.py # Ensures output matches reference PDF
-│   │   ├── models.py            # Database models
-│   │   ├── config.py            # Configurations (DB, API Keys)
-│   │   └── .env.example        # Environment variables
-│   ├── .env                     # Environment variables
-│   └── .gitignore               # Ignore unnecessary files
-│   └── README.md                # Documentation
-│   └── docker-compose.yml       # (Optional) For running locally
-│── frontend/                   # Next.js frontend
-│   ├── api/                    # JavaScript API client functions
-│   ├── components/             # React components (TypeScript)
-│   │   ├── FileUpload.tsx      # File upload component
-│   │   ├── ReportPreview.tsx   # Report preview component
-│   │   ├── DownloadReport.tsx  # Report download component
-│   │   ├── Navbar.tsx          # Navigation component
-│   │   └── ReportGenerator.tsx # Report generation component
-│   ├── pages/                  # Next.js pages
-│   │   ├── index.js            # Home page
-│   │   └── edit.tsx            # Report editing page
-│   ├── utils/                  # Utility functions
-│   │   └── errorHandler.js     # Standardized error handling
-│   ├── public/                 # Static assets
-│   ├── styles/                 # CSS styling
-│   ├── .env.local              # Environment variables (local)
-│   └── README.md               # Frontend documentation
-```
-
-## Deployment
-
-### Backend
-- Deploy to Render using the provided `requirements.txt` file
-- Set environment variables in the Render dashboard
-
-### Frontend
-- Deploy to Vercel by connecting your GitHub repository
-- Set environment variables in the Vercel dashboard
-
-## License
-MIT 
 
 ## Environment Variables Configuration
 
 ### Local Development
 
-#### Frontend (.env.local)
+The project uses a consolidated `.env.example` file in the root directory that contains all necessary environment variables for both frontend and backend. This file is organized into sections:
 
-1. Navigate to the `frontend` directory
-2. Copy `.env.example` to `.env.local`
-3. Set the appropriate values in `.env.local`:
+- **Backend Configuration**: Database, API keys, file storage, and AI settings
+- **Frontend Configuration**: API URLs and public variables
+- **Development Settings**: Environment and debug modes
 
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+To set up environment variables:
 
-#### Backend (.env)
+1. **For Backend**:
+   - Copy `.env.example` from the root to `backend/.env`
+   - Update the values in `backend/.env`
 
-1. Navigate to the `backend` directory
-2. Copy `.env.example` to `.env`
-3. Set the appropriate values in `.env`:
-
-```env
-# Supabase configuration
-SUPABASE_URL=https://jkvmxxdshxyjhdoszrkv.supabase.co
-SUPABASE_KEY=your-supabase-key
-DATABASE_URL=postgresql://postgres:your-password@db.jkvmxxdshxyjhdoszrkv.supabase.co:5432/postgres
-
-# API Keys
-OPENROUTER_API_KEY=your-openrouter-api-key
-
-# File storage settings
-UPLOAD_DIR=./uploads
-MAX_UPLOAD_SIZE=104857600  # 100MB
-
-# API settings
-API_RATE_LIMIT=100
-
-# LLM settings
-DEFAULT_MODEL=google/gemini-2.0-pro-exp-02-05:free
-
-# CORS settings
-FRONTEND_URL=http://localhost:3000
-```
+2. **For Frontend**:
+   - Copy `.env.example` from the root to `frontend/.env.local`
+   - Update the values in `frontend/.env.local`
 
 ### Production Deployment
 
-#### Frontend (Vercel)
+When deploying the application:
 
-When deploying the frontend to Vercel, set the following environment variables in the Vercel dashboard:
+1. **Backend (Render/Heroku)**:
+   - Set all backend variables from the `.env.example` file in your hosting platform's dashboard
+   - Ensure `FRONTEND_URL` points to your production frontend URL
 
-1. Go to your Vercel project settings
-2. Navigate to Environment Variables
-3. Add the following variables:
-   - `NEXT_PUBLIC_API_URL`: Your backend URL (e.g., https://insurance-api.onrender.com)
-
-#### Backend (Render/Heroku)
-
-When deploying the backend to Render or Heroku, set the environment variables in your hosting platform's dashboard:
-
-1. Go to your app's dashboard in Render/Heroku
-2. Navigate to Environment Variables or Config Vars section
-3. Add all the variables from the `.env.example` file with appropriate production values:
-   - Make sure `FRONTEND_URL` points to your production frontend URL (e.g., https://insurance-app.vercel.app)
+2. **Frontend (Vercel)**:
+   - Set all frontend variables from the `.env.example` file in your Vercel project settings
+   - Update `NEXT_PUBLIC_API_URL` to point to your production backend URL
 
 ## Development
 
@@ -220,28 +130,29 @@ npm run dev
 
 ```bash
 cd backend
-pip install -r requirements.txt
-python main.py
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+uvicorn main:app --reload
 ```
 
-## Production Build
+### Testing
 
-#### Frontend
-
-```bash
-cd frontend
-npm install
-npm run build
-npm start
-```
-
-#### Backend
+Run tests using pytest:
 
 ```bash
 cd backend
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port $PORT
-``` 
+pytest
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+MIT 
 
 # Insurance Report Generator - Template System
 

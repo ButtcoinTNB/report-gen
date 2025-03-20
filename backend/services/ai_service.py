@@ -14,6 +14,40 @@ import requests
 from datetime import datetime
 
 
+# Custom exception classes for AI service
+class AIServiceError(Exception):
+    """Base exception for all AI service errors"""
+    def __init__(self, message: str, status_code: int = 500, original_exception: Optional[Exception] = None):
+        self.message = message
+        self.status_code = status_code
+        self.original_exception = original_exception
+        super().__init__(self.message)
+
+
+class AIConnectionError(AIServiceError):
+    """Raised when there's a connection error with the AI provider"""
+    def __init__(self, message: str, original_exception: Optional[Exception] = None):
+        super().__init__(message, status_code=503, original_exception=original_exception)
+
+
+class AITimeoutError(AIServiceError):
+    """Raised when an AI request times out"""
+    def __init__(self, message: str, original_exception: Optional[Exception] = None):
+        super().__init__(message, status_code=504, original_exception=original_exception)
+
+
+class AIResponseError(AIServiceError):
+    """Raised when the AI provider returns an error response"""
+    def __init__(self, message: str, status_code: int, original_exception: Optional[Exception] = None):
+        super().__init__(message, status_code=status_code, original_exception=original_exception)
+
+
+class AIParsingError(AIServiceError):
+    """Raised when there's an error parsing the AI response"""
+    def __init__(self, message: str, original_exception: Optional[Exception] = None):
+        super().__init__(message, status_code=422, original_exception=original_exception)
+
+
 async def call_openrouter_api(
     messages: List[Dict[str, str]],
     model: str = None,
@@ -31,6 +65,12 @@ async def call_openrouter_api(
         
     Returns:
         API response as a dictionary
+        
+    Raises:
+        AIConnectionError: When there's a network connection error
+        AITimeoutError: When the request times out
+        AIResponseError: When the AI provider returns an error response
+        AIServiceError: For other AI service errors
     """
     if model is None:
         model = settings.DEFAULT_MODEL
@@ -76,39 +116,46 @@ async def call_openrouter_api(
         except retry_exceptions as e:
             # Log the error
             logger.warning(
-                "API call failed (attempt " + str(attempt+1) + "/" + str(max_retries) + "): " + str(e)
+                f"API call failed (attempt {attempt+1}/{max_retries}): {str(e)}"
             )
             
             if attempt < max_retries - 1:
                 # Calculate backoff time: 2^attempt * 1 second (1, 2, 4, 8, ...)
                 backoff_time = min(2 ** attempt, 10)  # Cap at 10 seconds
-                logger.info("Retrying in " + str(backoff_time) + " seconds...")
+                logger.info(f"Retrying in {backoff_time} seconds...")
                 await asyncio.sleep(backoff_time)
             else:
                 # This was the last attempt
-                handle_exception(
-                    e, 
-                    "OpenRouter API call (after " + str(max_retries) + " attempts)",
-                    default_status_code=503
-                )
+                if isinstance(e, (httpx.ReadTimeout, httpx.WriteTimeout, httpx.ConnectTimeout, asyncio.TimeoutError)):
+                    raise AITimeoutError(
+                        f"OpenRouter API request timed out after {max_retries} attempts",
+                        original_exception=e
+                    )
+                else:
+                    raise AIConnectionError(
+                        f"Failed to connect to OpenRouter API after {max_retries} attempts: {str(e)}",
+                        original_exception=e
+                    )
         except httpx.HTTPStatusError as e:
             # Handle HTTP error responses (4xx, 5xx)
-            error_detail = "API returned " + str(e.response.status_code) + ": " + e.response.text
+            error_detail = f"API returned {e.response.status_code}: {e.response.text}"
             logger.error(error_detail)
-            handle_exception(
-                Exception(error_detail),
-                "OpenRouter API request",
-                default_status_code=e.response.status_code
+            
+            raise AIResponseError(
+                error_detail,
+                status_code=e.response.status_code,
+                original_exception=e
             )
         except Exception as e:
             # Handle unexpected errors
-            handle_exception(e, "OpenRouter API request")
+            logger.error(f"Unexpected error in OpenRouter API call: {str(e)}")
+            raise AIServiceError(
+                f"Unexpected error in OpenRouter API call: {str(e)}",
+                original_exception=e
+            )
     
     # This should not be reached due to the exception handling above
-    handle_exception(
-        Exception("All API call attempts failed with no specific error"),
-        "OpenRouter API call"
-    )
+    raise AIServiceError("All API call attempts failed with no specific error")
 
 
 async def extract_template_variables(content: str, additional_info: str = "") -> Dict[str, Any]:
@@ -121,6 +168,10 @@ async def extract_template_variables(content: str, additional_info: str = "") ->
         
     Returns:
         Dictionary containing extracted variables
+        
+    Raises:
+        AIParsingError: When there's an error parsing the AI response
+        AIServiceError: For other AI service errors
     """
     try:
         messages = [
@@ -130,11 +181,26 @@ async def extract_template_variables(content: str, additional_info: str = "") ->
         
         response = await call_openrouter_api(messages)
         
-        return json.loads(response["choices"][0]["message"]["content"])
+        try:
+            return json.loads(response["choices"][0]["message"]["content"])
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            raise AIParsingError(
+                f"Failed to parse AI response: {str(e)}",
+                original_exception=e
+            )
         
-    except Exception as e:
-        handle_exception(e, "Variable extraction")
+    except (AIConnectionError, AITimeoutError, AIResponseError) as e:
+        # Re-raise specific AI errors
         raise
+    except AIParsingError as e:
+        # Re-raise parsing errors
+        raise
+    except Exception as e:
+        # Convert generic exceptions to AIServiceError
+        raise AIServiceError(
+            f"Error in variable extraction: {str(e)}",
+            original_exception=e
+        )
 
 
 class StyleAnalysisCache:
@@ -347,6 +413,13 @@ async def generate_report_text(
         
     Returns:
         Dictionary containing the generated report text and metadata
+        
+    Raises:
+        AIConnectionError: When there's a network connection error to the AI service
+        AITimeoutError: When the request to the AI service times out
+        AIResponseError: When the AI service returns an error response
+        AIParsingError: When there's an error parsing the AI response
+        AIServiceError: For other AI service errors
     """
     try:
         # Extract variables from documents
@@ -378,14 +451,29 @@ async def generate_report_text(
         
         response = await call_openrouter_api(messages)
         
-        return {
-            "content": response["choices"][0]["message"]["content"],
-            "variables": variables
-        }
+        try:
+            content = response["choices"][0]["message"]["content"]
+            return {
+                "content": content,
+                "variables": variables
+            }
+        except (KeyError, IndexError) as e:
+            raise AIParsingError(
+                f"Failed to parse AI response: {str(e)}",
+                original_exception=e
+            )
         
-    except Exception as e:
-        handle_exception(e, "Report text generation")
+    except (AIConnectionError, AITimeoutError, AIResponseError, AIParsingError) as e:
+        # Re-raise specific AI errors
+        logger.error(f"AI service error in generate_report_text: {e.message}")
         raise
+    except Exception as e:
+        # Convert other exceptions to AIServiceError
+        logger.error(f"Error in generate_report_text: {str(e)}")
+        raise AIServiceError(
+            f"Error generating report text: {str(e)}",
+            original_exception=e
+        )
 
 
 async def refine_report_text(
@@ -403,6 +491,13 @@ async def refine_report_text(
         
     Returns:
         Dictionary containing the refined report text
+        
+    Raises:
+        AIConnectionError: When there's a network connection error to the AI service
+        AITimeoutError: When the request to the AI service times out
+        AIResponseError: When the AI service returns an error response
+        AIParsingError: When there's an error parsing the AI response
+        AIServiceError: For other AI service errors
     """
     try:
         messages = [
@@ -410,15 +505,29 @@ async def refine_report_text(
             {"role": "user", "content": f"Here is the current report:\n\n{current_content}\n\nPlease refine it based on these instructions:\n{instructions}"}
         ]
         
+        # Call the OpenRouter API
         response = await call_openrouter_api(messages)
         
-        return {
-            "content": response["choices"][0]["message"]["content"]
-        }
+        try:
+            content = response["choices"][0]["message"]["content"]
+            return {"content": content}
+        except (KeyError, IndexError) as e:
+            raise AIParsingError(
+                f"Failed to parse AI response during report refinement: {str(e)}",
+                original_exception=e
+            )
             
-    except Exception as e:
-        handle_exception(e, "Report refinement")
+    except (AIConnectionError, AITimeoutError, AIResponseError, AIParsingError) as e:
+        # Re-raise specific AI errors
+        logger.error(f"AI service error in refine_report_text: {e.message}")
         raise
+    except Exception as e:
+        # Convert other exceptions to AIServiceError
+        logger.error(f"Error in refine_report_text: {str(e)}")
+        raise AIServiceError(
+            f"Error refining report text: {str(e)}",
+            original_exception=e
+        )
 
 
 async def analyze_template(template_id: UUID4) -> Dict[str, Any]:
@@ -429,58 +538,94 @@ async def analyze_template(template_id: UUID4) -> Dict[str, Any]:
         template_id: UUID of the template to analyze
         
     Returns:
-        Dictionary containing template analysis results
+        Dictionary containing the template structure and formatting
+        
+    Raises:
+        AIConnectionError: When there's a network connection error to the AI service
+        AITimeoutError: When the request to the AI service times out
+        AIResponseError: When the AI service returns an error response
+        AIParsingError: When there's an error parsing the AI response
+        AIServiceError: For other AI service errors
     """
     try:
         # Get template content
         from utils.supabase_helper import create_supabase_client
         supabase = create_supabase_client()
+        
         response = supabase.table("templates").select("content").eq("template_id", str(template_id)).execute()
         
         if not response.data:
-            raise ValueError(f"Template {template_id} not found")
-            
+            raise AIServiceError(f"Template with ID {template_id} not found")
+        
         template_content = response.data[0]["content"]
         
-        # Analyze template structure
+        # Analyze template
         messages = [
-            {"role": "system", "content": "You are an expert at analyzing document templates."},
-            {"role": "user", "content": f"Analyze this template and extract its structure and formatting rules:\n\n{template_content}"}
+            {"role": "system", "content": "You are an expert document analyzer."},
+            {"role": "user", "content": f"Analyze this template and identify its structure, sections, and any placeholders:\n\n{template_content}\n\nProvide a JSON response with keys 'structure', 'sections', and 'placeholders'."}
         ]
         
         response = await call_openrouter_api(messages)
         
-        return {
-            "analysis": response["choices"][0]["message"]["content"],
-            "template_content": template_content
-        }
-        
-    except Exception as e:
-        handle_exception(e, "Template analysis")
+        try:
+            content = response["choices"][0]["message"]["content"]
+            
+            # Try to parse as JSON, if it's not valid JSON, return as text
+            try:
+                result = json.loads(content)
+                return result
+            except json.JSONDecodeError:
+                # If not valid JSON, return as text
+                return {"analysis": content}
+                
+        except (KeyError, IndexError) as e:
+            raise AIParsingError(
+                f"Failed to parse AI response during template analysis: {str(e)}",
+                original_exception=e
+            )
+            
+    except (AIConnectionError, AITimeoutError, AIResponseError, AIParsingError) as e:
+        # Re-raise specific AI errors
+        logger.error(f"AI service error in analyze_template: {e.message}")
         raise
+    except Exception as e:
+        # Convert other exceptions to AIServiceError
+        logger.error(f"Error in analyze_template: {str(e)}")
+        raise AIServiceError(
+            f"Error analyzing template: {str(e)}",
+            original_exception=e
+        )
 
 
-async def get_report_files(report_id: UUID4) -> List[Dict[str, Any]]:
+async def get_report_files(report_id: UUID4) -> List[str]:
     """
     Get all files associated with a report.
     
     Args:
-        report_id: UUID of the report
+        report_id: The UUID of the report
         
     Returns:
-        List of file information dictionaries
+        List of file paths
+        
+    Raises:
+        AIServiceError: When there's an error retrieving the files
     """
     try:
         from utils.supabase_helper import create_supabase_client
         supabase = create_supabase_client()
         
-        response = supabase.table("files").select("*").eq("report_id", str(report_id)).execute()
+        response = supabase.table("documents").select("file_path").eq("report_id", str(report_id)).execute()
         
-        return response.data
+        if not response.data:
+            return []
         
+        return [item["file_path"] for item in response.data]
     except Exception as e:
-        handle_exception(e, "Getting report files")
-        raise
+        logger.error(f"Error retrieving report files: {str(e)}")
+        raise AIServiceError(
+            f"Error retrieving files for report {report_id}: {str(e)}",
+            original_exception=e
+        )
 
 
 async def get_template_content(template_id: UUID4) -> str:
@@ -488,10 +633,13 @@ async def get_template_content(template_id: UUID4) -> str:
     Get the content of a template.
     
     Args:
-        template_id: UUID of the template
+        template_id: The UUID of the template
         
     Returns:
         Template content as string
+        
+    Raises:
+        AIServiceError: When the template is not found or there's an error retrieving it
     """
     try:
         from utils.supabase_helper import create_supabase_client
@@ -500,10 +648,15 @@ async def get_template_content(template_id: UUID4) -> str:
         response = supabase.table("templates").select("content").eq("template_id", str(template_id)).execute()
         
         if not response.data:
-            raise ValueError(f"Template {template_id} not found")
-            
+            raise AIServiceError(f"Template with ID {template_id} not found")
+        
         return response.data[0]["content"]
-            
-    except Exception as e:
-        handle_exception(e, "Getting template content")
+    except AIServiceError:
+        # Re-raise AIServiceError exceptions
         raise
+    except Exception as e:
+        logger.error(f"Error retrieving template content: {str(e)}")
+        raise AIServiceError(
+            f"Error retrieving content for template {template_id}: {str(e)}",
+            original_exception=e
+        )

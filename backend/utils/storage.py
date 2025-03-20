@@ -7,6 +7,7 @@ import re
 from typing import Optional, Tuple
 from pydantic import UUID4
 from config import settings
+from utils.file_utils import safe_path_join
 
 def validate_path(path: str, base_dir: str) -> Tuple[bool, str]:
     """
@@ -38,14 +39,12 @@ def validate_path(path: str, base_dir: str) -> Tuple[bool, str]:
                 if not re.match(uuid_pattern, part.lower()):
                     return False, ""
     
-    # Combine with base_dir and normalize
-    full_path = os.path.normpath(os.path.join(base_dir, cleaned_path))
-    
-    # Ensure the path is inside the base directory
-    if not full_path.startswith(base_dir):
+    try:
+        # Use safe_path_join which will validate the path
+        full_path = safe_path_join(base_dir, cleaned_path)
+        return True, str(full_path)
+    except ValueError:
         return False, ""
-    
-    return True, full_path
 
 
 def get_report_path(report_id: UUID4) -> str:
@@ -62,17 +61,16 @@ def get_report_path(report_id: UUID4) -> str:
     report_id_str = str(report_id)
     
     # Define the base directory for reports
-    reports_dir = os.path.join(os.getcwd(), "generated_reports")
+    reports_dir = os.path.abspath("generated_reports")
     
     # Ensure the directory exists
     os.makedirs(reports_dir, exist_ok=True)
     
-    # Validate and get the full path
-    is_valid, full_path = validate_path(f"{report_id_str}.docx", reports_dir)
-    if not is_valid:
-        raise ValueError(f"Invalid report ID format: {report_id_str}")
-    
-    return full_path
+    try:
+        # Use safe_path_join to get a secure path
+        return str(safe_path_join(reports_dir, f"{report_id_str}.docx"))
+    except ValueError as e:
+        raise ValueError(f"Invalid report ID format: {report_id_str}") from e
 
 
 def get_document_path(document_id: UUID4) -> str:
@@ -91,16 +89,17 @@ def get_document_path(document_id: UUID4) -> str:
     # Get the uploads directory from settings
     uploads_dir = os.path.abspath(settings.UPLOAD_DIR)
     
-    # Construct a path for the document directory
-    document_dir = os.path.join(uploads_dir, document_id_str)
-    
-    # This is a directory, so no need to validate the path itself
-    # Create it if it doesn't exist
-    if not os.path.exists(document_dir):
+    try:
+        # Construct a path for the document directory using safe_path_join
+        document_dir = safe_path_join(uploads_dir, document_id_str)
+        
+        # Create it if it doesn't exist
         os.makedirs(document_dir, exist_ok=True)
-    
-    # Return the directory path
-    return document_dir
+        
+        # Return the directory path
+        return str(document_dir)
+    except ValueError as e:
+        raise ValueError(f"Invalid document ID format: {document_id_str}") from e
 
 
 def does_file_exist(file_path: str) -> bool:
@@ -117,11 +116,11 @@ def does_file_exist(file_path: str) -> bool:
     base_dir = os.path.dirname(file_path)
     file_name = os.path.basename(file_path)
     
-    is_valid, validated_path = validate_path(file_name, base_dir)
-    if not is_valid:
+    try:
+        validated_path = safe_path_join(base_dir, file_name)
+        return os.path.isfile(validated_path)
+    except ValueError:
         return False
-    
-    return os.path.isfile(validated_path)
 
 
 def get_safe_file_path(base_dir: str, file_path: str) -> Optional[str]:
@@ -135,8 +134,7 @@ def get_safe_file_path(base_dir: str, file_path: str) -> Optional[str]:
     Returns:
         Optional[str]: The safe absolute path or None if path is invalid
     """
-    is_valid, validated_path = validate_path(file_path, base_dir)
-    if not is_valid:
-        return None
-    
-    return validated_path 
+    try:
+        return str(safe_path_join(base_dir, file_path))
+    except ValueError:
+        return None 

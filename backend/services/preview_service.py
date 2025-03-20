@@ -1,10 +1,12 @@
 from pathlib import Path
 import mammoth
 import asyncio
+import os
 from uuid import UUID
 from pydantic import UUID4
 from utils.error_handler import handle_exception, logger
 from services.docx_service import docx_service
+from utils.file_utils import safe_path_join
 
 class PreviewService:
     def __init__(self):
@@ -215,16 +217,44 @@ class PreviewService:
             raise
     
     def cleanup_old_previews(self, max_age_hours: int = 24):
-        """Clean up preview files older than the specified age."""
+        """
+        Clean up preview files older than the specified age.
+        
+        Args:
+            max_age_hours: Maximum age in hours before files are deleted
+        """
         try:
             import time
             current_time = time.time()
+            files_cleaned = 0
             
-            for preview_file in self.preview_dir.glob("*.html"):
-                file_age_hours = (current_time - preview_file.stat().st_mtime) / 3600
-                if file_age_hours > max_age_hours:
-                    preview_file.unlink()
-                    logger.info(f"Cleaned up old preview: {preview_file.name}")
+            # Make sure the preview directory exists
+            if not self.preview_dir.exists():
+                logger.warning("Preview directory does not exist, nothing to clean up")
+                return
+                
+            for file_name in os.listdir(self.preview_dir):
+                try:
+                    # Use safe path joining to prevent directory traversal
+                    preview_file = safe_path_join(self.preview_dir, file_name)
+                    
+                    # Only process HTML files
+                    if preview_file.suffix.lower() != '.html':
+                        continue
+                        
+                    # Check file age
+                    file_age_hours = (current_time - preview_file.stat().st_mtime) / 3600
+                    if file_age_hours > max_age_hours:
+                        preview_file.unlink()
+                        files_cleaned += 1
+                        logger.info(f"Cleaned up old preview: {preview_file.name} (Age: {file_age_hours:.1f} hours)")
+                except ValueError as e:
+                    logger.warning(f"Skipping invalid preview file path: {e}")
+                except Exception as e:
+                    logger.error(f"Error cleaning up preview file {file_name}: {str(e)}")
+            
+            if files_cleaned > 0:
+                logger.info(f"Preview cleanup complete. Removed {files_cleaned} old preview files.")
                     
         except Exception as e:
             logger.error(f"Error cleaning up previews: {str(e)}")

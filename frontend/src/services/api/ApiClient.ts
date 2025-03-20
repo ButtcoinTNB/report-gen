@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config } from '../../../config';
 import { logger } from '../../utils/logger';
-import { adaptApiRequest, adaptApiResponse } from '../../utils/adapters';
+import { adaptApiRequest, adaptApiResponse, camelToSnakeObject, snakeToCamelObject } from '../../utils/adapters';
 
 /**
  * Configuration options for API requests
@@ -22,6 +22,8 @@ export interface ApiRequestOptions {
     /** Function called when a retry is attempted */
     onRetry?: (attempt: number, maxRetries: number) => void;
   };
+  /** Whether to skip automatic conversion of request/response data */
+  skipConversion?: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export interface ApiClientConfigCamel {
 /**
  * Base class for all API service clients
  * Provides common functionality for API requests with retry capabilities
+ * Automatically converts between snake_case (backend) and camelCase (frontend)
  */
 export class ApiClient {
   protected axios: AxiosInstance;
@@ -76,6 +79,36 @@ export class ApiClient {
     this.axios = axios.create({
       baseURL: this.baseUrl
     });
+
+    // Add request interceptor to convert camelCase to snake_case
+    this.axios.interceptors.request.use((config) => {
+      // Skip conversion for multipart/form-data requests
+      if (config.headers?.['Content-Type'] === 'multipart/form-data') {
+        return config;
+      }
+      
+      // Convert request data from camelCase to snake_case if it exists
+      if (config.data && typeof config.data === 'object' && !(config as any).skipConversion) {
+        config.data = camelToSnakeObject(config.data);
+      }
+      
+      return config;
+    });
+
+    // Add response interceptor to convert snake_case to camelCase
+    this.axios.interceptors.response.use((response) => {
+      // Skip conversion if requested
+      if ((response.config as any).skipConversion) {
+        return response;
+      }
+      
+      // Convert response data from snake_case to camelCase
+      if (response.data && typeof response.data === 'object') {
+        response.data = snakeToCamelObject(response.data);
+      }
+      
+      return response;
+    });
   }
 
   /**
@@ -84,13 +117,24 @@ export class ApiClient {
    * @param options Request options including retry configuration
    * @returns Promise with the API response
    */
-  protected async get<T = any>(path: string, options: ApiRequestOptions = {}): Promise<AxiosResponse<T>> {
+  protected async get<T = any, R = any>(path: string, options: ApiRequestOptions = {}): Promise<AxiosResponse<T>> {
     const { retryOptions, ...requestOptions } = options;
     const url = path.startsWith('/') ? path : `/${path}`;
     
     const config = this.createRequestConfig(requestOptions);
     
-    return this.withRetry<T>(() => this.axios.get<T>(url, config), retryOptions);
+    const response = await this.withRetry<R>(() => this.axios.get<R>(url, config), retryOptions);
+    
+    // If skipConversion is true, return response as is
+    if (options.skipConversion) {
+      return response as unknown as AxiosResponse<T>;
+    }
+    
+    // Otherwise, convert the response data to the expected type T
+    return {
+      ...response,
+      data: adaptApiResponse<T>(response.data)
+    };
   }
 
   /**
@@ -100,13 +144,31 @@ export class ApiClient {
    * @param options Request options including retry configuration
    * @returns Promise with the API response
    */
-  protected async post<T = any>(path: string, data: any, options: ApiRequestOptions = {}): Promise<AxiosResponse<T>> {
+  protected async post<T = any, R = any>(
+    path: string, 
+    data: any, 
+    options: ApiRequestOptions = {}
+  ): Promise<AxiosResponse<T>> {
     const { retryOptions, ...requestOptions } = options;
     const url = path.startsWith('/') ? path : `/${path}`;
     
     const config = this.createRequestConfig(requestOptions);
     
-    return this.withRetry<T>(() => this.axios.post<T>(url, data, config), retryOptions);
+    // Convert request data if needed
+    const requestData = options.skipConversion ? data : adaptApiRequest(data);
+    
+    const response = await this.withRetry<R>(() => this.axios.post<R>(url, requestData, config), retryOptions);
+    
+    // If skipConversion is true, return response as is
+    if (options.skipConversion) {
+      return response as unknown as AxiosResponse<T>;
+    }
+    
+    // Otherwise, convert the response data to the expected type T
+    return {
+      ...response,
+      data: adaptApiResponse<T>(response.data)
+    };
   }
 
   /**
@@ -116,13 +178,31 @@ export class ApiClient {
    * @param options Request options including retry configuration
    * @returns Promise with the API response
    */
-  protected async put<T = any>(path: string, data: any, options: ApiRequestOptions = {}): Promise<AxiosResponse<T>> {
+  protected async put<T = any, R = any>(
+    path: string, 
+    data: any, 
+    options: ApiRequestOptions = {}
+  ): Promise<AxiosResponse<T>> {
     const { retryOptions, ...requestOptions } = options;
     const url = path.startsWith('/') ? path : `/${path}`;
     
     const config = this.createRequestConfig(requestOptions);
     
-    return this.withRetry<T>(() => this.axios.put<T>(url, data, config), retryOptions);
+    // Convert request data if needed
+    const requestData = options.skipConversion ? data : adaptApiRequest(data);
+    
+    const response = await this.withRetry<R>(() => this.axios.put<R>(url, requestData, config), retryOptions);
+    
+    // If skipConversion is true, return response as is
+    if (options.skipConversion) {
+      return response as unknown as AxiosResponse<T>;
+    }
+    
+    // Otherwise, convert the response data to the expected type T
+    return {
+      ...response,
+      data: adaptApiResponse<T>(response.data)
+    };
   }
 
   /**
@@ -219,6 +299,14 @@ export class ApiClient {
 
 /**
  * Create an API client instance
+ * 
+ * Factory function to create an ApiClient instance with appropriate configuration.
+ * This function handles endpoint resolution and configuration standardization.
+ * 
+ * @example
+ * // Create a client for the report API
+ * const reportClient = createApiClient('report', { retries: 3, retryDelay: 2000 });
+ * 
  * @param endpoint The API endpoint to connect to
  * @param options Optional configuration
  * @returns API client instance
@@ -231,8 +319,8 @@ export function createApiClient(
     timeout?: number;
   } = {}
 ): ApiClient {
-  // Convert options to camelCase (though in this case they're already camelCase)
-  const camelOptions = adaptApiRequest(options);
+  // Convert options to snake_case for the backend config format
+  const snakeOptions = adaptApiRequest(options);
   
   let baseUrl: string;
   
@@ -260,10 +348,13 @@ export function createApiClient(
     }
   }
   
-  return new ApiClient({
+  // Create ApiClientConfig using the properly adapted options
+  const clientConfig: ApiClientConfig = {
     baseUrl,
-    defaultRetries: camelOptions.retries,
-    defaultRetryDelay: camelOptions.retry_delay,
-    defaultTimeout: camelOptions.timeout
-  });
+    defaultRetries: options.retries,
+    defaultRetryDelay: options.retryDelay,
+    defaultTimeout: options.timeout
+  };
+  
+  return new ApiClient(clientConfig);
 } 
