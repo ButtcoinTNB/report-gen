@@ -27,7 +27,7 @@ interface GenerateRequest {
 }
 
 interface RefineRequest {
-    reportId: string;  // UUID
+    report_id: string;  // UUID (renamed from reportId to match backend)
     instructions: string;
 }
 
@@ -86,10 +86,16 @@ export const generateReport = async (
 };
 
 export const refineReport = async (reportId: string, instructions: string): Promise<ReportPreview> => {
+    // Convert to snake_case for backend consistency
+    const payload = {
+        report_id: reportId,
+        instructions: instructions
+    };
+    
     const response = await fetch(`/api/reports/${reportId}/refine`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instructions })
+        body: JSON.stringify(payload)
     });
     
     if (!response.ok) {

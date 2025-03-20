@@ -48,7 +48,10 @@ export async function refineReport(reportId, instructions) {
     const response = await fetch(`${config.endpoints.reports}/${reportId}/refine`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instructions })
+        body: JSON.stringify({ 
+            report_id: reportId,
+            instructions 
+        })
     });
     
     if (!response.ok) {

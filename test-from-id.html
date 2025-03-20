@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test /from-id Endpoint</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test /from-id Endpoint</h1>
+    
+    <div class="container">
+        <h2>Valid Report ID Test</h2>
+        <div class="form-group">
+            <label for="report-id">Report ID:</label>
+            <input type="text" id="report-id" placeholder="Enter a valid report ID" value="">
+        </div>
+        <button id="test-valid">Test with Valid ID</button>
+        <div id="valid-result" style="margin-top: 15px;">
+            <h3>Result:</h3>
+            <pre id="valid-response"></pre>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Missing Report ID Test</h2>
+        <button id="test-missing">Test with Missing ID</button>
+        <div id="missing-result" style="margin-top: 15px;">
+            <h3>Result:</h3>
+            <pre id="missing-response"></pre>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Invalid Report ID Test</h2>
+        <button id="test-invalid">Test with Invalid ID</button>
+        <div id="invalid-result" style="margin-top: 15px;">
+            <h3>Result:</h3>
+            <pre id="invalid-response"></pre>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api/generate/from-id';
+
+        // Test with valid report ID
+        document.getElementById('test-valid').addEventListener('click', async () => {
+            const reportId = document.getElementById('report-id').value.trim();
+            if (!reportId) {
+                document.getElementById('valid-response').innerHTML = 'Please enter a report ID';
+                document.getElementById('valid-response').className = 'error';
+                return;
+            }
+            
+            try {
+                document.getElementById('valid-response').innerHTML = 'Loading...';
+                document.getElementById('valid-response').className = '';
+                
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        report_id: reportId
+                    })
+                });
+                
+                const responseData = await response.json();
+                document.getElementById('valid-response').innerHTML = JSON.stringify(responseData, null, 2);
+                
+                if (!response.ok) {
+                    document.getElementById('valid-response').className = 'error';
+                }
+            } catch (error) {
+                document.getElementById('valid-response').innerHTML = `Error: ${error.message}`;
+                document.getElementById('valid-response').className = 'error';
+            }
+        });
+
+        // Test with missing report ID
+        document.getElementById('test-missing').addEventListener('click', async () => {
+            try {
+                document.getElementById('missing-response').innerHTML = 'Loading...';
+                document.getElementById('missing-response').className = '';
+                
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({}) // Empty body, missing report_id
+                });
+                
+                const responseData = await response.json();
+                document.getElementById('missing-response').innerHTML = JSON.stringify(responseData, null, 2);
+                
+                if (!response.ok) {
+                    document.getElementById('missing-response').className = 'error';
+                }
+            } catch (error) {
+                document.getElementById('missing-response').innerHTML = `Error: ${error.message}`;
+                document.getElementById('missing-response').className = 'error';
+            }
+        });
+
+        // Test with invalid report ID
+        document.getElementById('test-invalid').addEventListener('click', async () => {
+            try {
+                document.getElementById('invalid-response').innerHTML = 'Loading...';
+                document.getElementById('invalid-response').className = '';
+                
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        report_id: 'not-a-valid-uuid'
+                    })
+                });
+                
+                const responseData = await response.json();
+                document.getElementById('invalid-response').innerHTML = JSON.stringify(responseData, null, 2);
+                
+                if (!response.ok) {
+                    document.getElementById('invalid-response').className = 'error';
+                }
+            } catch (error) {
+                document.getElementById('invalid-response').innerHTML = `Error: ${error.message}`;
+                document.getElementById('invalid-response').className = 'error';
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -197,6 +197,7 @@ export async function refineReport(reportId, instructions, onProgress) {
     }
     
     const response = await axios.post(`${config.endpoints.generate}/reports/${reportId}/refine`, {
+      report_id: reportId, // Add this to be consistent with naming convention
       instructions: instructions
     });
     
