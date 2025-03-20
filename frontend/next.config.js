@@ -44,8 +44,7 @@ const nextConfig = {
     ];
   },
   typescript: {
-    // This will allow the build to succeed even with TypeScript errors
-    // You can remove this once all TypeScript issues are fixed
+    // This allows the build to succeed even with TypeScript errors
     ignoreBuildErrors: true,
   },
   webpack: (config, { isServer }) => {
