@@ -84,15 +84,23 @@ This project is hosted on GitHub: [https://github.com/ButtcoinTNB/report-gen](ht
 
 ## Environment Variables Configuration
 
-### Local Development
+### Setup Script (Recommended)
 
-The project uses a consolidated `.env.example` file in the root directory that contains all necessary environment variables for both frontend and backend. This file is organized into sections:
+The project now includes a setup script that automatically configures environment variables for both frontend and backend:
 
-- **Backend Configuration**: Database, API keys, file storage, and AI settings
-- **Frontend Configuration**: API URLs and public variables
-- **Development Settings**: Environment and debug modes
+```bash
+# From the project root:
+python backend/scripts/setup_env.py --env local  # For local development
+python backend/scripts/setup_env.py --env production  # For production setup
+```
 
-To set up environment variables:
+This script will:
+1. Copy the appropriate `.env.example` file to `backend/.env`
+2. Create a filtered version for frontend in `frontend/.env.local`
+
+### Manual Setup
+
+For manual setup, follow these steps:
 
 1. **For Backend**:
    - Copy `.env.example` from the root to `backend/.env`
@@ -100,6 +108,7 @@ To set up environment variables:
 
 2. **For Frontend**:
    - Copy `.env.example` from the root to `frontend/.env.local`
+   - Extract only the `NEXT_PUBLIC_*` variables
    - Update the values in `frontend/.env.local`
 
 ### Production Deployment
@@ -111,7 +120,7 @@ When deploying the application:
    - Ensure `FRONTEND_URL` points to your production frontend URL
 
 2. **Frontend (Vercel)**:
-   - Set all frontend variables from the `.env.example` file in your Vercel project settings
+   - Set all `NEXT_PUBLIC_*` variables from the `.env.example` file in your Vercel project settings
    - Update `NEXT_PUBLIC_API_URL` to point to your production backend URL
 
 ## Development

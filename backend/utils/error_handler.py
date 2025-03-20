@@ -6,12 +6,23 @@ This ensures consistent error responses and logging throughout the application.
 import logging
 import traceback
 import json
-from typing import Dict, Any, Optional, Type, Union
-from fastapi import HTTPException
+from typing import Dict, Any, Optional, Type, Union, Callable
+from functools import wraps
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 # Import the standard APIResponse model
 from api.schemas import APIResponse
+
+# Import our custom exceptions
+from utils.exceptions import (
+    BaseAPIException,
+    ValidationException,
+    BadRequestException,
+    NotFoundException,
+    InternalServerException
+)
 
 # Configure logger
 logging.basicConfig(
@@ -20,41 +31,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Error type mapping for common exceptions
-ERROR_TYPE_MAPPING = {
-    ValidationError: {"status_code": 422, "error_type": "validation_error"},
-    ValueError: {"status_code": 400, "error_type": "value_error"},
-    KeyError: {"status_code": 400, "error_type": "key_error"},
-    FileNotFoundError: {"status_code": 404, "error_type": "file_not_found"},
-    PermissionError: {"status_code": 403, "error_type": "permission_error"},
-    NotImplementedError: {"status_code": 501, "error_type": "not_implemented"},
-    TimeoutError: {"status_code": 504, "error_type": "timeout_error"},
-    ConnectionError: {"status_code": 503, "error_type": "connection_error"},
-    # Add custom AI service exceptions
-    "AIServiceError": {"status_code": 500, "error_type": "ai_service_error"},
-    "AIConnectionError": {"status_code": 503, "error_type": "ai_connection_error"},
-    "AITimeoutError": {"status_code": 504, "error_type": "ai_timeout_error"},
-    "AIResponseError": {"status_code": 500, "error_type": "ai_response_error"},
-    "AIParsingError": {"status_code": 422, "error_type": "ai_parsing_error"},
+# Exception mapping for converting standard exceptions to our custom exceptions
+EXCEPTION_MAPPING = {
+    ValidationError: lambda e: ValidationException(str(e), details=str(e.errors())),
+    ValueError: lambda e: BadRequestException(str(e)),
+    KeyError: lambda e: BadRequestException(f"Missing required key: {str(e)}"),
+    FileNotFoundError: lambda e: NotFoundException(f"File not found: {str(e)}"),
+    PermissionError: lambda e: ForbiddenException(str(e)),
+    NotImplementedError: lambda e: InternalServerException(f"Not implemented: {str(e)}"),
+    TimeoutError: lambda e: GatewayTimeoutException(str(e)),
+    ConnectionError: lambda e: ServiceUnavailableException(f"Connection error: {str(e)}"),
 }
 
 def handle_exception(
     exception: Exception, 
     operation: str, 
-    default_status_code: int = 500,
     include_traceback: bool = False,
-) -> Dict[str, Any]:
+) -> BaseAPIException:
     """
     Handles exceptions in a standardized way across all API endpoints.
+    Converts standard exceptions to our custom exception hierarchy.
     
     Args:
         exception: The exception that was raised
         operation: Description of the operation that failed (e.g., "fetching report")
-        default_status_code: HTTP status code to use if the exception type isn't mapped
-        include_traceback: Whether to include the full traceback in the response
+        include_traceback: Whether to include the full traceback in the log
         
     Returns:
-        A dictionary with standardized error details
+        A BaseAPIException instance suitable for raising
     """
     # Log the exception
     logger.error(f"Error during {operation}: {str(exception)}")
@@ -63,96 +67,78 @@ def handle_exception(
     if include_traceback:
         logger.error(traceback.format_exc())
     
-    # Determine the error type and status code based on the exception class
+    # If it's already a BaseAPIException, return it directly
+    if isinstance(exception, BaseAPIException):
+        return exception
+    
+    # Determine the appropriate exception based on the exception class
     exception_class = exception.__class__
-    exception_class_name = exception_class.__name__
     
-    # Check for exact match first
-    if exception_class in ERROR_TYPE_MAPPING:
-        error_info = ERROR_TYPE_MAPPING[exception_class]
-    # Then check for class name match (for custom exceptions)
-    elif exception_class_name in ERROR_TYPE_MAPPING:
-        error_info = ERROR_TYPE_MAPPING[exception_class_name]
+    # Check if we have a mapping for this exception
+    if exception_class in EXCEPTION_MAPPING:
+        # Convert to our custom exception
+        return EXCEPTION_MAPPING[exception_class](exception)
+    
     # Default to internal server error if not mapped
-    else:
-        error_info = {
-            "status_code": default_status_code,
-            "error_type": "internal_error"
-        }
-    
-    # For AI service errors, use the status_code from the exception if available
-    if hasattr(exception, 'status_code') and exception_class_name.startswith('AI'):
-        error_info["status_code"] = getattr(exception, 'status_code')
-    
-    # Create the standard error response using APIResponse model
-    error_response = APIResponse(
-        status="error",
-        message=str(exception),
-        code=error_info["error_type"].upper()
-    ).dict()
-    
-    # Add additional fields for debugging
-    error_response["operation"] = operation
-    error_response["exception_type"] = exception_class_name
-    
-    # If there's an original exception, include its details
-    if hasattr(exception, 'original_exception') and getattr(exception, 'original_exception'):
-        original = getattr(exception, 'original_exception')
-        error_response["original_error"] = str(original)
-        error_response["original_type"] = original.__class__.__name__
-    
-    # Raise an HTTP exception with the standardized response
-    raise HTTPException(
-        status_code=error_info["status_code"],
-        detail=error_response
+    return InternalServerException(
+        message=f"Internal error during {operation}: {str(exception)}",
+        details={"exception_type": exception_class.__name__}
     )
 
-def api_error_handler(func):
+def api_error_handler(func: Callable):
     """
-    Decorator for API route handlers that standardizes error handling.
-    Wraps the function in a try-except block and handles exceptions using handle_exception.
-    """
-    from functools import wraps
+    Decorator that standardizes error handling for API endpoints.
+    Catches exceptions, converts them to appropriate responses using our custom exceptions.
     
+    Usage:
+        @router.get("/items/{item_id}")
+        @api_error_handler
+        async def get_item(item_id: str):
+            # Implementation
+    """
     @wraps(func)
     async def wrapper(*args, **kwargs):
         try:
-            # Call the original function
-            result = await func(*args, **kwargs)
-            
-            # If the result is already an APIResponse, return it as is
-            if isinstance(result, APIResponse):
-                return result
-                
-            # If the result is a dict, wrap it in an APIResponse
-            if isinstance(result, dict):
-                return APIResponse(
-                    status="success",
-                    data=result
-                )
-            
-            # Otherwise, just return the result (for other response types)
-            return result
-            
+            return await func(*args, **kwargs)
         except Exception as e:
-            # Handle any exceptions that occur
-            error_details = handle_exception(e, f"{func.__name__}")
+            # Get the function name for the error message
+            operation = func.__name__
             
-            # Determine the appropriate status code
-            exception_class = e.__class__
-            exception_class_name = exception_class.__name__
+            # Convert to our custom exception
+            api_exception = handle_exception(e, operation)
             
-            if exception_class in ERROR_TYPE_MAPPING:
-                status_code = ERROR_TYPE_MAPPING[exception_class]["status_code"]
-            elif exception_class_name in ERROR_TYPE_MAPPING:
-                status_code = ERROR_TYPE_MAPPING[exception_class_name]["status_code"]
-            else:
-                status_code = 500
-                
-            # Raise HTTPException with the error details
-            raise HTTPException(status_code=status_code, detail=error_details)
+            # Return standardized error response
+            return JSONResponse(
+                status_code=api_exception.status_code,
+                content=APIResponse(
+                    status="error",
+                    message=api_exception.detail["message"],
+                    code=api_exception.code
+                ).dict()
+            )
     
     return wrapper
+
+async def api_exception_handler(request: Request, exc: BaseAPIException):
+    """
+    Global exception handler for FastAPI that handles our custom exceptions.
+    Ensures consistent error responses even for unhandled exceptions.
+    
+    Usage:
+        # In main.py
+        app.add_exception_handler(BaseAPIException, api_exception_handler)
+    """
+    logger.error(f"API Exception: {exc.detail}")
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=APIResponse(
+            status="error",
+            message=exc.detail["message"],
+            code=exc.code,
+            data=exc.details
+        ).dict()
+    )
 
 def retry_operation(
     operation_func,
@@ -161,42 +147,48 @@ def retry_operation(
     retry_exceptions: Optional[Union[Type[Exception], tuple]] = None,
 ):
     """
-    Retries an operation multiple times before giving up.
+    Retry helper that attempts to execute an operation multiple times before giving up.
     
     Args:
         operation_func: The function to execute
         max_retries: Maximum number of retry attempts
-        operation_name: Name of the operation for error reporting
+        operation_name: Name of the operation for error messages
         retry_exceptions: Exception types that should trigger a retry
         
     Returns:
-        The result of the operation function
+        The result of the operation if successful
         
     Raises:
-        HTTPException: If all retries fail
+        BaseAPIException: If all retry attempts fail
     """
+    # Default to retrying on connection and timeout errors
     if retry_exceptions is None:
         retry_exceptions = (ConnectionError, TimeoutError)
     
+    retry_count = 0
     last_exception = None
     
-    for attempt in range(max_retries):
+    while retry_count < max_retries:
         try:
             return operation_func()
         except retry_exceptions as e:
+            retry_count += 1
             last_exception = e
+            
+            # Log the retry attempt
             logger.warning(
-                f"Retry attempt {attempt + 1}/{max_retries} for {operation_name} failed: {str(e)}"
+                f"Retry {retry_count}/{max_retries} for {operation_name} after error: {str(e)}"
             )
-    
+            
+            # If we've reached max retries, break out
+            if retry_count >= max_retries:
+                break
+                
     # If we get here, all retries failed
-    if last_exception:
-        handle_exception(
-            last_exception, 
-            f"{operation_name} (after {max_retries} retries)"
-        )
-    else:
-        handle_exception(
-            Exception(f"All {max_retries} retry attempts failed"), 
-            operation_name
-        ) 
+    api_exception = handle_exception(
+        last_exception, 
+        f"{operation_name} after {max_retries} retries",
+        include_traceback=True
+    )
+    
+    raise api_exception 

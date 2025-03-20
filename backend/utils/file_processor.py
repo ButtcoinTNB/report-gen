@@ -20,6 +20,8 @@ import fitz
 import docx
 import docx2txt
 import pytesseract
+import json
+import time
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -43,6 +45,12 @@ class FileProcessor:
         "image/gif", 
         "image/webp"
     ]
+    
+    # Default chunk size for chunked operations (1MB)
+    DEFAULT_CHUNK_SIZE = 1024 * 1024
+    
+    # Chunked operation tracking - in production, use Redis or a database
+    _chunked_uploads = {}
     
     @staticmethod
     def get_mime_type(file_path: Union[str, Path]) -> str:
@@ -695,4 +703,296 @@ class FileProcessor:
             
         except Exception as e:
             logger.error(f"Error copying file from {source_str} to {target_str}: {str(e)}")
-            return False 
+            return False
+    
+    @staticmethod
+    def init_chunked_upload(
+        upload_id: str, 
+        filename: str, 
+        total_chunks: int, 
+        file_size: int, 
+        mime_type: str, 
+        directory: Union[str, Path]
+    ) -> Dict[str, Any]:
+        """
+        Initialize a chunked upload operation
+        
+        Args:
+            upload_id: Unique ID for this upload operation
+            filename: Original filename
+            total_chunks: Expected number of chunks
+            file_size: Total file size in bytes
+            mime_type: File MIME type
+            directory: Directory where chunks will be stored
+            
+        Returns:
+            Dictionary with upload metadata
+        """
+        # Create a temporary directory for chunks if it doesn't exist
+        chunks_dir = os.path.join(str(directory), f"chunks_{upload_id}")
+        os.makedirs(chunks_dir, exist_ok=True)
+        
+        # Track this upload
+        upload_info = {
+            "upload_id": upload_id,
+            "filename": filename,
+            "original_filename": filename,
+            "chunks_dir": chunks_dir,
+            "total_chunks": total_chunks,
+            "received_chunks": 0,
+            "file_size": file_size,
+            "mime_type": mime_type,
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "status": "initialized",
+            "completed": False
+        }
+        
+        # Store metadata
+        FileProcessor._chunked_uploads[upload_id] = upload_info
+        
+        # Also save metadata to a file for persistence
+        metadata_path = os.path.join(chunks_dir, "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(upload_info, f)
+            
+        logger.info(f"Initialized chunked upload {upload_id} for {filename} with {total_chunks} chunks")
+        return upload_info
+    
+    @staticmethod
+    def save_chunk(
+        upload_id: str, 
+        chunk_index: int, 
+        chunk_data: BinaryIO
+    ) -> Dict[str, Any]:
+        """
+        Save a chunk of data for a chunked upload
+        
+        Args:
+            upload_id: Upload ID from init_chunked_upload
+            chunk_index: Index of this chunk (0-based)
+            chunk_data: Binary data for this chunk
+            
+        Returns:
+            Dictionary with updated upload info
+            
+        Raises:
+            ValueError: If upload_id is not valid or chunk_index is out of range
+        """
+        # Check if we have this upload
+        if upload_id not in FileProcessor._chunked_uploads:
+            # Try to load from file
+            for root, dirs, files in os.walk(os.path.dirname(os.path.dirname(__file__))):
+                for dir_name in dirs:
+                    if dir_name.startswith(f"chunks_{upload_id}"):
+                        chunks_dir = os.path.join(root, dir_name)
+                        metadata_path = os.path.join(chunks_dir, "metadata.json")
+                        if os.path.exists(metadata_path):
+                            with open(metadata_path, "r") as f:
+                                FileProcessor._chunked_uploads[upload_id] = json.load(f)
+                            break
+            
+            # If still not found, raise error
+            if upload_id not in FileProcessor._chunked_uploads:
+                raise ValueError(f"Upload ID {upload_id} not found")
+        
+        upload_info = FileProcessor._chunked_uploads[upload_id]
+        
+        # Validate chunk index
+        if chunk_index < 0 or chunk_index >= upload_info["total_chunks"]:
+            raise ValueError(f"Chunk index {chunk_index} is out of range (0-{upload_info['total_chunks']-1})")
+        
+        # Save chunk to file
+        chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{chunk_index}")
+        with open(chunk_path, "wb") as chunk_file:
+            shutil.copyfileobj(chunk_data, chunk_file)
+        
+        # Update upload info
+        upload_info["received_chunks"] += 1
+        upload_info["last_updated"] = time.time()
+        
+        # Update status
+        if upload_info["received_chunks"] == upload_info["total_chunks"]:
+            upload_info["status"] = "ready_to_combine"
+        else:
+            upload_info["status"] = "in_progress"
+        
+        # Update metadata file
+        metadata_path = os.path.join(upload_info["chunks_dir"], "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(upload_info, f)
+        
+        logger.info(f"Saved chunk {chunk_index} for upload {upload_id} ({upload_info['received_chunks']}/{upload_info['total_chunks']})")
+        return upload_info
+    
+    @staticmethod
+    def complete_chunked_upload(
+        upload_id: str,
+        target_directory: Union[str, Path],
+        target_filename: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Complete a chunked upload by combining all chunks
+        
+        Args:
+            upload_id: Upload ID from init_chunked_upload
+            target_directory: Directory where the final file will be saved
+            target_filename: Optional custom filename for the final file
+            
+        Returns:
+            Dictionary with information about the final file
+            
+        Raises:
+            ValueError: If upload is not complete or some chunks are missing
+        """
+        # Check if we have this upload
+        if upload_id not in FileProcessor._chunked_uploads:
+            # Try to load from file
+            for root, dirs, files in os.walk(os.path.dirname(os.path.dirname(__file__))):
+                for dir_name in dirs:
+                    if dir_name.startswith(f"chunks_{upload_id}"):
+                        chunks_dir = os.path.join(root, dir_name)
+                        metadata_path = os.path.join(chunks_dir, "metadata.json")
+                        if os.path.exists(metadata_path):
+                            with open(metadata_path, "r") as f:
+                                FileProcessor._chunked_uploads[upload_id] = json.load(f)
+                            break
+            
+            # If still not found, raise error
+            if upload_id not in FileProcessor._chunked_uploads:
+                raise ValueError(f"Upload ID {upload_id} not found")
+        
+        upload_info = FileProcessor._chunked_uploads[upload_id]
+        
+        # Check if all chunks have been received
+        if upload_info["received_chunks"] != upload_info["total_chunks"]:
+            raise ValueError(
+                f"Upload not complete: received {upload_info['received_chunks']} of {upload_info['total_chunks']} chunks"
+            )
+        
+        # Generate a filename if not provided
+        if not target_filename:
+            target_filename = upload_info["original_filename"]
+            
+        # Make the filename safe
+        safe_filename = secure_filename(target_filename)
+        
+        # Add a unique prefix to avoid collisions
+        unique_filename = f"{uuid.uuid4()}_{safe_filename}"
+        
+        # Create full target path
+        target_path = FileProcessor.safe_path_join(target_directory, unique_filename)
+        
+        # Ensure target directory exists
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        
+        # Combine all chunks into the final file
+        with open(target_path, "wb") as target_file:
+            for i in range(upload_info["total_chunks"]):
+                chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{i}")
+                if not os.path.exists(chunk_path):
+                    raise ValueError(f"Chunk {i} is missing")
+                
+                with open(chunk_path, "rb") as chunk_file:
+                    shutil.copyfileobj(chunk_file, target_file)
+        
+        # Update upload info
+        upload_info["status"] = "completed"
+        upload_info["completed"] = True
+        upload_info["final_path"] = target_path
+        upload_info["last_updated"] = time.time()
+        
+        # Update metadata file
+        metadata_path = os.path.join(upload_info["chunks_dir"], "metadata.json")
+        with open(metadata_path, "w") as f:
+            json.dump(upload_info, f)
+        
+        # Return file info for the combined file
+        file_info = FileProcessor.get_file_info(target_path)
+        
+        # Clean up chunk files (keep metadata for reference)
+        # This could be done asynchronously or by a cleanup task
+        for i in range(upload_info["total_chunks"]):
+            chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{i}")
+            if os.path.exists(chunk_path):
+                os.unlink(chunk_path)
+        
+        logger.info(f"Completed chunked upload {upload_id}. Final file saved to {target_path}")
+        return {
+            "upload_id": upload_id,
+            "file_path": target_path,
+            "file_info": file_info,
+            "original_filename": upload_info["original_filename"],
+            "mime_type": upload_info["mime_type"],
+            "size_bytes": file_info["size_bytes"]
+        }
+    
+    @staticmethod
+    def get_chunked_upload_status(upload_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get status information for a chunked upload
+        
+        Args:
+            upload_id: Upload ID from init_chunked_upload
+            
+        Returns:
+            Dictionary with upload status or None if not found
+        """
+        if upload_id in FileProcessor._chunked_uploads:
+            return FileProcessor._chunked_uploads[upload_id]
+        
+        # Try to load from file
+        for root, dirs, files in os.walk(os.path.dirname(os.path.dirname(__file__))):
+            for dir_name in dirs:
+                if dir_name.startswith(f"chunks_{upload_id}"):
+                    chunks_dir = os.path.join(root, dir_name)
+                    metadata_path = os.path.join(chunks_dir, "metadata.json")
+                    if os.path.exists(metadata_path):
+                        with open(metadata_path, "r") as f:
+                            upload_info = json.load(f)
+                            FileProcessor._chunked_uploads[upload_id] = upload_info
+                            return upload_info
+        
+        return None
+    
+    @staticmethod
+    def cleanup_chunked_upload(upload_id: str) -> bool:
+        """
+        Clean up all files associated with a chunked upload
+        
+        Args:
+            upload_id: Upload ID from init_chunked_upload
+            
+        Returns:
+            True if cleanup was successful, False otherwise
+        """
+        if upload_id in FileProcessor._chunked_uploads:
+            upload_info = FileProcessor._chunked_uploads[upload_id]
+            chunks_dir = upload_info["chunks_dir"]
+            
+            # Remove all files in the chunks directory
+            try:
+                if os.path.exists(chunks_dir) and os.path.isdir(chunks_dir):
+                    shutil.rmtree(chunks_dir)
+                
+                # Remove from memory
+                del FileProcessor._chunked_uploads[upload_id]
+                return True
+            except Exception as e:
+                logger.error(f"Error cleaning up chunked upload {upload_id}: {str(e)}")
+                return False
+        
+        # Try to find it on disk
+        for root, dirs, files in os.walk(os.path.dirname(os.path.dirname(__file__))):
+            for dir_name in dirs:
+                if dir_name.startswith(f"chunks_{upload_id}"):
+                    chunks_dir = os.path.join(root, dir_name)
+                    try:
+                        shutil.rmtree(chunks_dir)
+                        return True
+                    except Exception as e:
+                        logger.error(f"Error cleaning up chunked upload {upload_id}: {str(e)}")
+                        return False
+        
+        # Not found
+        return False 

@@ -19,6 +19,11 @@ from api import upload, generate, format, edit, download
 from config import settings
 from utils.file_utils import safe_path_join
 from api.schemas import APIResponse
+from utils.exceptions import BaseAPIException
+from utils.error_handler import api_exception_handler
+from utils.openapi import custom_openapi
+from api.openapi_examples import ENDPOINT_EXAMPLES
+from utils.middleware import setup_middleware
 
 # Debug imports
 import traceback
@@ -220,24 +225,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         ).dict()
     )
 
-# Get allowed origins - split by comma if it's a list
-frontend_urls = settings.FRONTEND_URL.split(',') if ',' in settings.FRONTEND_URL else [settings.FRONTEND_URL]
+# Register our custom exception handler
+app.add_exception_handler(BaseAPIException, api_exception_handler)
 
-# Add Vercel domain explicitly
-allowed_origins = frontend_urls + [
-    "https://report-gen-liard.vercel.app",
-    "https://report-gen.vercel.app",
-    "https://report-gen-5wtl.onrender.com",  # Add Render domain
-    "http://localhost:3000",
-    "http://127.0.0.1:3000"
-]
+# Set up middleware
+setup_middleware(app)
 
-print(f"CORS allowed origins: {allowed_origins}")
+# Use the new settings property for allowed origins
+print(f"CORS allowed origins: {settings.allowed_origins}")
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Use wildcard for simplicity, more reliable in CORS debugging
+    allow_origins=settings.allowed_origins,  # Use the new property from settings
     allow_credentials=False,  # Set to False when using "*" for allowed origins
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Include OPTIONS for preflight
     allow_headers=["*"],  # Allow all headers
@@ -252,6 +252,8 @@ app.include_router(format.router, prefix="/api/format", tags=["Format"])
 app.include_router(edit.router, prefix="/api/edit", tags=["Edit"])
 app.include_router(download.router, prefix="/api/download", tags=["Download"])
 
+# Apply custom OpenAPI documentation
+app.openapi = lambda: custom_openapi(app, ENDPOINT_EXAMPLES)
 
 @app.get("/", tags=["Root"])
 async def root():

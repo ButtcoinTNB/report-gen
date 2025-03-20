@@ -60,8 +60,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # File storage - use absolute paths
-    UPLOAD_DIR: str = os.path.abspath(os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(BASE_DIR), "uploads")))
-    GENERATED_REPORTS_DIR: str = os.path.abspath(os.getenv("GENERATED_REPORTS_DIR", os.path.join(os.path.dirname(BASE_DIR), "generated_reports")))
+    UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(BASE_DIR), "uploads"))
+    GENERATED_REPORTS_DIR: str = os.getenv("GENERATED_REPORTS_DIR", os.path.join(os.path.dirname(BASE_DIR), "generated_reports"))
     MAX_UPLOAD_SIZE: int = int(
         os.getenv("MAX_UPLOAD_SIZE", "1073741824")
     )  # 1GB default
@@ -87,6 +87,43 @@ class Settings(BaseSettings):
     
     # CORS Settings
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    
+    # Parse allowed origins from environment
+    @validator('FRONTEND_URL')
+    def parse_frontend_url(cls, v):
+        if not v:
+            logger.warning("FRONTEND_URL is missing")
+            return ["http://localhost:3000"]
+        
+        # Split by comma if it's a comma-separated list
+        urls = v.split(',') if ',' in v else [v]
+        
+        # Add common local development URLs if they're not already included
+        common_local_urls = ["http://localhost:3000", "http://127.0.0.1:3000"]
+        for local_url in common_local_urls:
+            if local_url not in urls:
+                urls.append(local_url)
+                
+        return urls
+    
+    # Additional allowed origins beyond the FRONTEND_URL
+    ADDITIONAL_ALLOWED_ORIGINS: List[str] = Field(
+        default=[
+            "https://report-gen-liard.vercel.app",
+            "https://report-gen.vercel.app",
+            "https://report-gen-5wtl.onrender.com"
+        ],
+        description="Additional allowed origins for CORS"
+    )
+    
+    # All allowed origins combining FRONTEND_URL and ADDITIONAL_ALLOWED_ORIGINS
+    @property
+    def allowed_origins(self) -> List[str]:
+        """Get all allowed origins for CORS configuration"""
+        if os.getenv("CORS_ALLOW_ALL", "").lower() in ("true", "1", "yes"):
+            return ["*"]
+            
+        return self.FRONTEND_URL + self.ADDITIONAL_ALLOWED_ORIGINS
 
     # Validators for critical settings
     @validator('OPENROUTER_API_KEY')

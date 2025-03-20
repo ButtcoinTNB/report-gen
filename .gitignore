@@ -4,6 +4,7 @@
 .env.development.local
 .env.test.local
 .env.production.local
+.env*.local
 
 # Python
 __pycache__/
@@ -88,6 +89,8 @@ supabase/
 # OS specific
 .DS_Store
 Thumbs.db
+.directory
+Desktop.ini
 
 # IDE
 .idea/
@@ -100,9 +103,40 @@ Thumbs.db
 *.sublime-project
 *.sublime-workspace 
 .cursorrules
+
+# Application specific
 AI_SERVICE.md
 instructions.md
 API_SPECS.md
 CURSOR_RULES.md
 UX_FLOW.md
 frontend/cypress
+
+# Certificate and key files
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.priv
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*~
+*.swp
+*.swo
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage/
+.nyc_output
+
+# Local configuration
+config.local.js
+config.dev.js

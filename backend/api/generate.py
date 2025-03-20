@@ -22,6 +22,13 @@ import re
 from sqlalchemy.orm import Session
 from models import Report, File as FileModel, User, Template
 from utils.error_handler import logger, handle_exception, api_error_handler, retry_operation
+from utils.exceptions import (
+    NotFoundException, 
+    BadRequestException, 
+    InternalServerException, 
+    AIServiceException, 
+    DatabaseException
+)
 from utils.auth import get_current_user
 from utils.db import get_db
 from pydantic import BaseModel, UUID4
@@ -250,7 +257,10 @@ async def generate_report(
         
         report_response = await supabase.table("reports").insert(report_data).execute()
         if not report_response.data:
-            raise HTTPException(status_code=500, detail="Failed to create report")
+            raise DatabaseException(
+                message="Failed to create report",
+                details={"operation": "Insert report"}
+            )
         
         report = report_response.data[0]
         report_id = UUID(report["report_id"])
@@ -292,9 +302,9 @@ async def generate_report_content(
         report_id = request.report_id
         
     if not report_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Report ID is required"
+        raise BadRequestException(
+            message="Report ID is required",
+            details={"field": "report_id", "reason": "missing"}
         )
         
     additional_info = request.additional_info
@@ -304,9 +314,9 @@ async def generate_report_content(
         # Get report
         report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
         if not report_response.data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Report not found with ID: {report_id}"
+            raise NotFoundException(
+                message=f"Report not found with ID: {report_id}",
+                details={"resource_type": "report", "resource_id": str(report_id)}
             )
         
         report = report_response.data[0]
@@ -322,19 +332,31 @@ async def generate_report_content(
         # Get associated files
         files = await get_report_files(report_id)
         
-        # Generate report content
-        content = await generate_report_text(
-            files=files,
-            additional_info=additional_info or "",
-            template=template
-        )
+        try:
+            # Generate report content
+            content = await generate_report_text(
+                files=files,
+                additional_info=additional_info or "",
+                template=template
+            )
+        except AIServiceError as e:
+            raise AIServiceException(
+                message="Failed to generate report content with AI service",
+                details={"error_type": e.__class__.__name__, "original_error": str(e)}
+            )
         
         # Update report
-        await supabase.table("reports").update({
-            "content": content,
-            "status": "generated",
-            "updated_at": "now()"
-        }).eq("report_id", str(report_id)).execute()
+        try:
+            await supabase.table("reports").update({
+                "content": content,
+                "status": "generated",
+                "updated_at": "now()"
+            }).eq("report_id", str(report_id)).execute()
+        except Exception as e:
+            raise DatabaseException(
+                message=f"Failed to update report: {str(e)}",
+                details={"report_id": str(report_id), "operation": "update"}
+            )
         
         return {
             "report_id": str(report_id),
@@ -365,22 +387,41 @@ async def refine_report(
         # Get report
         report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
         if not report_response.data:
-            raise HTTPException(status_code=404, detail="Report not found")
+            raise NotFoundException(
+                message="Report not found",
+                details={"resource_type": "report", "resource_id": str(report_id)}
+            )
         
         report = report_response.data[0]
         
-        # Refine content
-        refined_content = await refine_report_text(
-            original_content=report["content"],
-            instructions=request.instructions
-        )
+        try:
+            # Refine content
+            refined_content = await refine_report_text(
+                original_content=report["content"],
+                instructions=request.instructions
+            )
+        except AIServiceError as e:
+            raise AIServiceException(
+                message="Failed to refine report content with AI service",
+                details={
+                    "error_type": e.__class__.__name__, 
+                    "original_error": str(e),
+                    "report_id": str(report_id)
+                }
+            )
         
         # Update report
-        await supabase.table("reports").update({
-            "content": refined_content,
-            "status": "refined",
-            "updated_at": "now()"
-        }).eq("report_id", str(report_id)).execute()
+        try:
+            await supabase.table("reports").update({
+                "content": refined_content,
+                "status": "refined",
+                "updated_at": "now()"
+            }).eq("report_id", str(report_id)).execute()
+        except Exception as e:
+            raise DatabaseException(
+                message="Failed to update report in database",
+                details={"report_id": str(report_id), "operation": "update"}
+            )
                 
     return {
         "report_id": str(report_id),

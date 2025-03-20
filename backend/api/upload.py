@@ -19,6 +19,13 @@ import asyncio
 import logging
 from utils.file_utils import safe_path_join
 from utils.error_handler import api_error_handler, logger
+from utils.exceptions import (
+    BadRequestException,
+    InternalServerException,
+    ValidationException,
+    FileProcessingException,
+    DatabaseException
+)
 from api.schemas import APIResponse
 from utils.file_processor import FileProcessor
 
@@ -26,9 +33,6 @@ router = APIRouter()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# In-memory storage for tracking chunked uploads (should use Redis in production)
-chunked_uploads = {}
 
 # Background tasks queue
 background_tasks = {}
@@ -109,16 +113,17 @@ async def upload_template(
     """
     # Check file type
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400, detail="Only PDF files are accepted"
+        raise ValidationException(
+            message="Only PDF files are accepted",
+            details={"file_extension": file.filename.split(".")[-1], "allowed_extensions": ["pdf"]}
         )
 
     # Check file size
     if file.size > settings.MAX_UPLOAD_SIZE:
         max_size_mb = settings.MAX_UPLOAD_SIZE / (1024 * 1024)
-        raise HTTPException(
-            status_code=400,
-            detail=f"File size exceeds the {max_size_mb:.1f} MB limit",
+        raise ValidationException(
+            message=f"File size exceeds the {max_size_mb:.1f} MB limit",
+            details={"file_size": file.size, "max_size": settings.MAX_UPLOAD_SIZE}
         )
 
     async with supabase_client_context() as supabase:
@@ -131,31 +136,55 @@ async def upload_template(
             "meta_data": {}
         }
         
-        template_response = await supabase.table("templates").insert(template_data).execute()
-        if not template_response.data:
-            raise HTTPException(status_code=500, detail="Failed to create template record")
-        
-        template = template_response.data[0]
-        template_id = UUID4(template["template_id"])
-        
-        # Create unique filename using template_id
-        filename = f"template_{template_id}.pdf"
-        file_path = safe_path_join(settings.UPLOAD_DIR, filename)
-        
-        # Save file
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        try:
+            template_response = await supabase.table("templates").insert(template_data).execute()
+            if not template_response.data:
+                raise DatabaseException(
+                    message="Failed to create template record",
+                    details={"operation": "insert", "table": "templates"}
+                )
             
-        # Extract content from PDF
-        content = extract_text_from_file(file_path)
-        
-        # Update template with file info
-        await supabase.table("templates").update({
-            "file_path": file_path,
-            "content": content
-        }).eq("template_id", str(template_id)).execute()
-        
-        return template
+            template = template_response.data[0]
+            template_id = UUID4(template["template_id"])
+            
+            # Create unique filename using template_id
+            filename = f"template_{template_id}.pdf"
+            file_path = safe_path_join(settings.UPLOAD_DIR, filename)
+            
+            try:
+                # Save file
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+            except Exception as e:
+                raise FileProcessingException(
+                    message=f"Failed to save template file: {str(e)}",
+                    details={"file_path": file_path}
+                )
+                
+            try:
+                # Extract content from PDF
+                content = extract_text_from_file(file_path)
+            except Exception as e:
+                raise FileProcessingException(
+                    message=f"Failed to extract text from template: {str(e)}",
+                    details={"file_path": file_path}
+                )
+            
+            # Update template with file info
+            await supabase.table("templates").update({
+                "file_path": file_path,
+                "content": content
+            }).eq("template_id", str(template_id)).execute()
+            
+            return template
+        except Exception as e:
+            # If this is not one of our custom exceptions, wrap it
+            if not isinstance(e, (ValidationException, DatabaseException, FileProcessingException)):
+                raise InternalServerException(
+                    message=f"Error processing template upload: {str(e)}",
+                    details={"template_name": name}
+                )
+            raise e
 
 
 @router.post("/files", status_code=201)
@@ -248,13 +277,15 @@ async def upload_documents(
     total_size = sum(file.size for file in files)
     max_total_size = settings.MAX_UPLOAD_SIZE  # 100MB by default
     
-    logger.info(f"Total size of all files: {total_size} bytes / {total_size/(1024*1024):.2f} MB")
-    logger.info(f"Maximum allowed combined size: {max_total_size} bytes / {max_total_size/(1024*1024):.2f} MB")
-    
     if total_size > max_total_size:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Total size of all files ({total_size/(1024*1024):.2f} MB) exceeds the {max_total_size/(1024*1024):.2f} MB combined limit"
+        max_size_mb = max_total_size / (1024 * 1024)
+        raise ValidationException(
+            message=f"Total file size exceeds the {max_size_mb:.1f} MB limit",
+            details={
+                "total_size": total_size, 
+                "max_size": max_total_size,
+                "file_count": len(files)
+            }
         )
     
     uploaded_files = []
@@ -651,365 +682,284 @@ async def debug_upload(request: Request):
         traceback.print_exc()
         return {"error": str(e)}
 
-@router.post("/init-chunked-upload", status_code=201)
-async def init_chunked_upload(
-    upload_info: ChunkedUploadInit,
-    current_user: Optional[User] = Depends(get_current_user),
-):
+@router.post("/chunked/init", response_model=APIResponse[Dict[str, Any]])
+@api_error_handler
+async def init_chunked_upload(request: ChunkedUploadInit):
     """
-    Initialize a chunked upload for a large file
+    Initialize a chunked file upload
     
-    This endpoint creates a new upload session for a large file that will be uploaded in chunks.
-    It returns an uploadId that must be used for all subsequent chunk uploads.
+    This endpoint prepares the server to receive a large file in multiple chunks.
+    It creates a unique upload ID and tracking information for the upload.
     
-    Authentication:
-        This endpoint uses optional authentication. When authenticated, files will be associated
-        with the user's account.
+    Args:
+        request: Upload initialization details
+        
+    Returns:
+        Standardized API response with upload ID and tracking information
     """
     try:
-        logger.info(f"Initializing chunked upload for {upload_info.filename} ({upload_info.fileSize} bytes)")
-        
-        # Validate file size
-        if upload_info.fileSize > settings.MAX_UPLOAD_SIZE:
-            max_size_gb = settings.MAX_UPLOAD_SIZE / (1024 * 1024 * 1024)
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds the {max_size_gb:.2f} GB limit"
-            )
-        
-        # Generate a unique upload ID
+        # Generate a unique ID for this upload
         upload_id = str(uuid.uuid4())
         
-        # If no report_id was provided, create one
-        report_id = upload_info.reportId or str(uuid.uuid4())
+        # Determine upload directory
+        upload_dir = settings.UPLOAD_DIR
         
-        # Create report directory if it doesn't exist
-        report_dir = safe_path_join(settings.UPLOAD_DIR, report_id)
-        os.makedirs(report_dir, exist_ok=True)
+        # If associated with a report, use that subdirectory
+        if request.reportId:
+            upload_dir = safe_path_join(settings.UPLOAD_DIR, request.reportId)
+            os.makedirs(upload_dir, exist_ok=True)
         
-        # Create a temporary directory for the chunks
-        chunks_dir = safe_path_join(report_dir, f"chunks_{upload_id}")
-        os.makedirs(chunks_dir, exist_ok=True)
+        # If associated with a template, use template directory
+        if request.templateId:
+            upload_dir = safe_path_join(settings.TEMPLATES_DIR, request.templateId)
+            os.makedirs(upload_dir, exist_ok=True)
         
-        # Store upload information
-        chunked_uploads[upload_id] = {
-            "filename": upload_info.filename,
-            "fileSize": upload_info.fileSize,
-            "fileType": upload_info.fileType,
-            "totalChunks": upload_info.totalChunks,
-            "receivedChunks": 0,
-            "chunks_dir": chunks_dir,
-            "report_id": report_id,
-            "template_id": upload_info.templateId,
-            "started_at": datetime.datetime.now().isoformat(),
-            "user_id": current_user.id if current_user else None
-        }
-        
-        # Create or update metadata file to include this upload
-        metadata_path = safe_path_join(report_dir, "metadata.json")
-        if os.path.exists(metadata_path):
-            with open(metadata_path, "r") as f:
-                metadata = json.load(f)
-        else:
-            metadata = {
-                "report_id": report_id,
-                "template_id": upload_info.templateId,
-                "files": [],
-                "created_at": datetime.datetime.now().isoformat(),
-                "status": "uploading",
-                "title": f"Report #{report_id[:8]}",
-                "content": "",
-                "processing_log": []
-            }
-        
-        # Add entry for this chunked upload
-        metadata["chunked_uploads"] = metadata.get("chunked_uploads", [])
-        metadata["chunked_uploads"].append({
-            "upload_id": upload_id,
-            "filename": upload_info.filename,
-            "fileSize": upload_info.fileSize,
-            "fileType": upload_info.fileType,
-            "totalChunks": upload_info.totalChunks,
-            "status": "initialized",
-            "started_at": datetime.datetime.now().isoformat()
-        })
-        
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-        
-        logger.info(f"Chunked upload initialized with ID: {upload_id} for report {report_id}")
-        
-        return {
-            "uploadId": upload_id,
-            "reportId": report_id,
-            "message": "Chunked upload initialized successfully"
-        }
-    
-    except Exception as e:
-        logger.error(f"Error initializing chunked upload: {str(e)}")
-        # Clean up if necessary
-        if 'upload_id' in locals() and upload_id in chunked_uploads:
-            chunks_dir = chunked_uploads[upload_id].get("chunks_dir")
-            if chunks_dir and os.path.exists(chunks_dir):
-                shutil.rmtree(chunks_dir)
-            del chunked_uploads[upload_id]
-        
-        raise HTTPException(status_code=500, detail=f"Failed to initialize chunked upload: {str(e)}")
-
-@router.post("/upload-chunk", status_code=200)
-async def upload_chunk(
-    chunk: UploadFile = File(...),
-    chunkIndex: int = Form(...),
-    uploadId: str = Form(...),
-    current_user: Optional[User] = Depends(get_current_user),
-):
-    """
-    Upload a single chunk of a large file
-    
-    Authentication:
-        This endpoint uses optional authentication. When authenticated, files will be associated
-        with the user's account.
-    """
-    try:
-        # Verify that the upload exists
-        if uploadId not in chunked_uploads:
-            raise HTTPException(status_code=404, detail="Upload ID not found or expired")
-        
-        upload_info = chunked_uploads[uploadId]
-        logger.info(f"Received chunk {chunkIndex+1}/{upload_info['totalChunks']} for upload {uploadId}")
-        
-        # Validate chunk index
-        if chunkIndex < 0 or chunkIndex >= upload_info["totalChunks"]:
-            raise HTTPException(status_code=400, detail=f"Invalid chunk index: {chunkIndex}")
-        
-        # Save the chunk to a temporary file
-        chunk_filename = f"chunk_{chunkIndex:05d}"
-        chunk_path = safe_path_join(upload_info["chunks_dir"], chunk_filename)
-        
-        chunk_content = await chunk.read()
-        with open(chunk_path, "wb") as f:
-            f.write(chunk_content)
-        
-        # Update received chunks count
-        upload_info["receivedChunks"] += 1
-        
-        # Update last activity timestamp
-        upload_info["last_activity"] = datetime.datetime.now().isoformat()
-        
-        # Calculate and return progress
-        progress = (upload_info["receivedChunks"] / upload_info["totalChunks"]) * 100
-        
-        return {
-            "success": True,
-            "chunkIndex": chunkIndex,
-            "receivedChunks": upload_info["receivedChunks"],
-            "totalChunks": upload_info["totalChunks"],
-            "progress": progress
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading chunk: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to upload chunk: {str(e)}")
-
-@router.post("/complete-chunked-upload", status_code=200)
-async def complete_chunked_upload(
-    complete_info: ChunkUploadComplete,
-    background_tasks: BackgroundTasks,
-    current_user: Optional[User] = Depends(get_current_user),
-):
-    """
-    Complete a chunked upload by assembling all chunks into the final file
-    
-    Authentication:
-        This endpoint uses optional authentication. When authenticated, files will be associated
-        with the user's account.
-    """
-    upload_id = complete_info.uploadId
-    
-    try:
-        # Verify that the upload exists
-        if upload_id not in chunked_uploads:
-            raise HTTPException(status_code=404, detail="Upload ID not found or expired")
-        
-        upload_info = chunked_uploads[upload_id]
-        logger.info(f"Completing chunked upload {upload_id} with {upload_info['receivedChunks']} chunks")
-        
-        # Check if all chunks were received
-        if upload_info["receivedChunks"] != upload_info["totalChunks"]:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Not all chunks received. Got {upload_info['receivedChunks']}/{upload_info['totalChunks']}"
-            )
-        
-        # Generate a unique filename for the complete file
-        report_id = upload_info["report_id"]
-        report_dir = safe_path_join(settings.UPLOAD_DIR, report_id)
-        
-        safe_filename = secure_filename(upload_info["filename"])
-        final_filename = f"{uuid.uuid4()}_{safe_filename}"
-        final_path = safe_path_join(report_dir, final_filename)
-        
-        # Combine all chunks into the final file
-        with open(final_path, "wb") as outfile:
-            for i in range(upload_info["totalChunks"]):
-                chunk_filename = f"chunk_{i:05d}"
-                chunk_path = safe_path_join(upload_info["chunks_dir"], chunk_filename)
-                
-                if os.path.exists(chunk_path):
-                    with open(chunk_path, "rb") as infile:
-                        outfile.write(infile.read())
-                else:
-                    raise HTTPException(
-                        status_code=500, 
-                        detail=f"Chunk {i} is missing. Cannot complete the upload."
-                    )
-        
-        # Verify the file size
-        actual_size = os.path.getsize(final_path)
-        if actual_size != upload_info["fileSize"]:
-            logger.warning(f"File size mismatch. Expected: {upload_info['fileSize']}, Got: {actual_size}")
-        
-        # Clean up chunks directory
-        shutil.rmtree(upload_info["chunks_dir"])
-        
-        # Update metadata
-        metadata_path = safe_path_join(report_dir, "metadata.json")
-        with open(metadata_path, "r") as f:
-            metadata = json.load(f)
-        
-        # Update chunked upload status
-        for chunked_upload in metadata.get("chunked_uploads", []):
-            if chunked_upload.get("upload_id") == upload_id:
-                chunked_upload["status"] = "completed"
-                chunked_upload["completed_at"] = datetime.datetime.now().isoformat()
-                chunked_upload["final_path"] = final_path
-                break
-        
-        # Add file information
-        file_info = {
-            "filename": upload_info["filename"],
-            "path": final_path,
-            "type": os.path.splitext(upload_info["filename"])[1].lower().replace(".", ""),
-            "size": actual_size,
-            "mime_type": upload_info["fileType"],
-            "chunked": True,
-            "uploaded_at": datetime.datetime.now().isoformat(),
-        }
-        
-        metadata["files"].append(file_info)
-        
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-        
-        # Update Supabase database
-        try:
-            supabase = create_supabase_client()
-            
-            # Create file record
-            file_id = str(uuid.uuid4())
-            file_data = {
-                "file_id": file_id,
-                "report_id": report_id,
-                "filename": upload_info["filename"],
-                "file_path": final_path,
-                "file_type": file_info["type"],
-                "mime_type": upload_info["fileType"],
-                "file_size": actual_size,
-                "content": "",  # Content will be extracted in background
-                "processed": False
-            }
-            
-            response = supabase.table("files").insert(file_data).execute()
-            logger.info(f"Created Supabase file record: {file_id}")
-            
-            # Also store in Supabase storage if possible
-            try:
-                storage_path = f"reports/{report_id}/{final_filename}"
-                
-                with open(final_path, "rb") as f:
-                    file_data = f.read()
-                
-                response = supabase.storage.from_("reports").upload(
-                    path=storage_path,
-                    file=file_data,
-                    file_options={"content-type": upload_info["fileType"]}
-                )
-                
-                # Get public URL
-                public_url = supabase.storage.from_("reports").get_public_url(storage_path)
-                file_info["public_url"] = public_url
-                
-                # Update metadata with URL
-                with open(metadata_path, "r") as f:
-                    metadata = json.load(f)
-                
-                for file_entry in metadata["files"]:
-                    if file_entry["path"] == final_path:
-                        file_entry["public_url"] = public_url
-                        break
-                
-                with open(metadata_path, "w") as f:
-                    json.dump(metadata, f, indent=2)
-                
-                logger.info(f"Uploaded to Supabase storage: {public_url}")
-            
-            except Exception as storage_error:
-                logger.error(f"Error uploading to Supabase storage: {str(storage_error)}")
-        
-        except Exception as db_error:
-            logger.error(f"Error creating file record in Supabase: {str(db_error)}")
-        
-        # Schedule background processing for file content extraction
-        background_tasks.add_task(
-            process_file_in_background,
-            final_path,
-            {
-                "mime_type": upload_info["fileType"],
-                "file_id": file_id if 'file_id' in locals() else None
-            },
-            report_id
+        # Initialize the chunked upload using FileProcessor
+        upload_info = FileProcessor.init_chunked_upload(
+            upload_id=upload_id,
+            filename=request.filename,
+            total_chunks=request.totalChunks,
+            file_size=request.fileSize,
+            mime_type=request.fileType,
+            directory=upload_dir
         )
         
-        # Get report data to return
-        try:
-            supabase = create_supabase_client()
-            response = supabase.table("reports").select("*").eq("report_id", report_id).execute()
-            report_data = response.data[0] if response.data else {"report_id": report_id}
-        except Exception as e:
-            logger.error(f"Error fetching report data: {str(e)}")
-            report_data = {"report_id": report_id}
+        return {
+            "status": "success",
+            "data": {
+                "uploadId": upload_id,
+                "status": "initialized",
+                "chunksReceived": 0,
+                "totalChunks": request.totalChunks
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error initializing chunked upload: {str(e)}")
+        raise InternalServerException(
+            message="Failed to initialize chunked upload",
+            details={"error": str(e)}
+        )
+
+@router.post("/chunked/chunk/{upload_id}/{chunk_index}", response_model=APIResponse[Dict[str, Any]])
+@api_error_handler
+async def upload_chunk(
+    upload_id: str,
+    chunk_index: int,
+    file: UploadFile = File(...)
+):
+    """
+    Upload a chunk of a file
+    
+    This endpoint receives a chunk of a file being uploaded in parts.
+    
+    Args:
+        upload_id: Unique ID for this upload from init_chunked_upload
+        chunk_index: Index of this chunk (0-based)
+        file: The chunk data
         
-        # Remove upload from memory
-        del chunked_uploads[upload_id]
+    Returns:
+        Standardized API response with updated upload status
+    """
+    try:
+        # Process the chunk using FileProcessor
+        upload_info = FileProcessor.save_chunk(
+            upload_id=upload_id,
+            chunk_index=chunk_index,
+            chunk_data=file.file
+        )
         
         return {
-            "success": True,
-            "message": "File upload completed successfully",
-            "report_id": report_id,
-            "file": {
-                "filename": upload_info["filename"],
-                "size": actual_size,
-                "type": file_info["type"],
-                "path": final_path,
-                "public_url": file_info.get("public_url")
-            },
-            **report_data
+            "status": "success",
+            "data": {
+                "uploadId": upload_id,
+                "chunkIndex": chunk_index,
+                "received": upload_info["received_chunks"],
+                "total": upload_info["total_chunks"],
+                "status": upload_info["status"]
+            }
         }
+    except ValueError as e:
+        logger.error(f"Invalid chunk upload request: {str(e)}")
+        raise ValidationException(
+            message=str(e),
+            details={
+                "uploadId": upload_id,
+                "chunkIndex": chunk_index
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error uploading chunk {chunk_index} for upload {upload_id}: {str(e)}")
+        raise InternalServerException(
+            message=f"Failed to save chunk {chunk_index}",
+            details={"error": str(e)}
+        )
+
+@router.post("/chunked/complete", response_model=APIResponse[Dict[str, Any]])
+@api_error_handler
+async def complete_chunked_upload(
+    request: ChunkUploadComplete,
+    background_tasks: BackgroundTasks
+):
+    """
+    Complete a chunked file upload
     
-    except HTTPException:
-        raise
+    This endpoint combines all uploaded chunks into a single file and processes it.
+    
+    Args:
+        request: Upload completion details with upload ID
+        
+    Returns:
+        Standardized API response with file information
+    """
+    try:
+        # Determine upload directory and report ID if available
+        upload_id = request.uploadId
+        
+        # Get upload status
+        upload_info = FileProcessor.get_chunked_upload_status(upload_id)
+        
+        if not upload_info:
+            raise ValidationException(
+                message=f"Upload {upload_id} not found",
+                details={"uploadId": upload_id}
+            )
+        
+        # Check if upload is complete
+        if upload_info["status"] != "ready_to_combine" or upload_info["received_chunks"] != upload_info["total_chunks"]:
+            raise ValidationException(
+                message=f"Upload {upload_id} is not ready to complete",
+                details={
+                    "uploadId": upload_id,
+                    "status": upload_info["status"],
+                    "received": upload_info["received_chunks"],
+                    "total": upload_info["total_chunks"]
+                }
+            )
+        
+        # Extract report ID if it's in the chunks directory path
+        chunks_dir = upload_info["chunks_dir"]
+        report_id = None
+        
+        # Try to extract report ID from path
+        path_parts = chunks_dir.split(os.path.sep)
+        for part in path_parts:
+            if len(part) == 36 and '-' in part:  # Simple UUID check
+                try:
+                    # Validate it's a proper UUID
+                    uuid_obj = uuid.UUID(part)
+                    report_id = str(uuid_obj)
+                    break
+                except ValueError:
+                    continue
+        
+        # Determine target directory
+        target_dir = os.path.dirname(chunks_dir)
+        
+        # Complete the upload using FileProcessor
+        result = FileProcessor.complete_chunked_upload(
+            upload_id=upload_id,
+            target_directory=target_dir
+        )
+        
+        # Create a database record for the file
+        file_path = result["file_path"]
+        file_info = result["file_info"]
+        file_id = str(uuid.uuid4())
+        
+        file_record = {
+            "file_id": file_id,
+            "original_filename": result["original_filename"],
+            "file_path": file_path,
+            "file_size": file_info["size_bytes"],
+            "mime_type": result["mime_type"],
+            "uploaded_at": datetime.datetime.now().isoformat(),
+            "processed": False
+        }
+        
+        # Store file record in database
+        async with supabase_client_context() as supabase:
+            file_response = await supabase.table("files").insert(file_record).execute()
+            
+            if not file_response.data:
+                raise DatabaseException(
+                    message="Failed to create file record",
+                    details={"operation": "insert", "table": "files"}
+                )
+        
+        # Process file in background if it's a document
+        if report_id and FileProcessor.is_text_file(file_path):
+            background_tasks.add_task(process_file_in_background, file_path, file_record, report_id)
+        
+        # Cleanup chunked upload data (keep metadata for troubleshooting)
+        # This could be done by a periodic cleanup task instead
+        
+        return {
+            "status": "success",
+            "data": {
+                "fileId": file_id,
+                "filename": result["original_filename"],
+                "filePath": file_path,
+                "fileSize": file_info["size_bytes"],
+                "mimeType": result["mime_type"],
+                "reportId": report_id
+            }
+        }
+    except ValueError as e:
+        logger.error(f"Error completing chunked upload: {str(e)}")
+        raise ValidationException(
+            message=str(e),
+            details={"uploadId": request.uploadId}
+        )
     except Exception as e:
         logger.error(f"Error completing chunked upload: {str(e)}")
-        # Clean up if possible
-        if upload_id in chunked_uploads:
-            chunks_dir = chunked_uploads[upload_id].get("chunks_dir")
-            if chunks_dir and os.path.exists(chunks_dir):
-                shutil.rmtree(chunks_dir)
-            del chunked_uploads[upload_id]
+        raise InternalServerException(
+            message="Failed to complete chunked upload",
+            details={"error": str(e)}
+        )
+
+@router.get("/chunked/status/{upload_id}", response_model=APIResponse[Dict[str, Any]])
+@api_error_handler
+async def get_chunked_upload_status(upload_id: str):
+    """
+    Get status of a chunked upload
+    
+    Args:
+        upload_id: Upload ID from init_chunked_upload
         
-        raise HTTPException(status_code=500, detail=f"Failed to complete upload: {str(e)}")
+    Returns:
+        Standardized API response with upload status
+    """
+    try:
+        # Get upload status using FileProcessor
+        upload_info = FileProcessor.get_chunked_upload_status(upload_id)
+        
+        if not upload_info:
+            raise ValidationException(
+                message=f"Upload {upload_id} not found",
+                details={"uploadId": upload_id}
+            )
+        
+        return {
+            "status": "success",
+            "data": {
+                "uploadId": upload_id,
+                "status": upload_info["status"],
+                "filename": upload_info["filename"],
+                "fileSize": upload_info["file_size"],
+                "received": upload_info["received_chunks"],
+                "total": upload_info["total_chunks"],
+                "progress": (upload_info["received_chunks"] / upload_info["total_chunks"]) * 100,
+                "completed": upload_info["completed"]
+            }
+        }
+    except ValidationException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting chunked upload status: {str(e)}")
+        raise InternalServerException(
+            message="Failed to get upload status",
+            details={"error": str(e)}
+        )
 
 @router.post("/reports", status_code=201)
 async def create_empty_report(
