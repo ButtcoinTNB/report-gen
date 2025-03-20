@@ -662,3 +662,59 @@ async def generate_report_docx(
     except Exception as e:
         logger.error(f"Error generating DOCX: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/from-id")
+async def generate_report_from_id(
+    data: Dict[str, Any] = Body(...),
+) -> Dict[str, Any]:
+    """Generate report content based on report_id"""
+    try:
+        # Extract report_id from request
+        if "report_id" not in data:
+            raise HTTPException(status_code=400, detail="report_id is required")
+            
+        report_id = data["report_id"]
+        
+        # Extract any additional options from request
+        options = {k: v for k, v in data.items() if k != "report_id"}
+        
+        async with supabase_client_context() as supabase:
+            # Get report from database
+            report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+            if not report_response.data:
+                raise HTTPException(status_code=404, detail="Report not found")
+            
+            report = report_response.data[0]
+            
+            # Get associated files
+            files = await get_report_files(report_id)
+            
+            # Generate or retrieve content
+            if report.get("content"):
+                # Use existing content if available
+                content = report["content"]
+            else:
+                # Generate new content
+                content = await generate_report_text(
+                    files=files,
+                    additional_info=options.get("additional_info", ""),
+                    template=options.get("template", None)
+                )
+                
+                # Update report with generated content
+                await supabase.table("reports").update({
+                    "content": content,
+                    "status": "generated",
+                    "updated_at": "now()"
+                }).eq("report_id", str(report_id)).execute()
+            
+            return {
+                "report_id": str(report_id),
+                "content": content,
+                "status": report.get("status", "generated")
+            }
+            
+    except Exception as e:
+        logger.error(f"Error generating report from ID: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

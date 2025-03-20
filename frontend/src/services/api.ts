@@ -20,10 +20,10 @@ interface AnalysisDetails {
 }
 
 interface GenerateRequest {
-    reportId: string;  // UUID
-    documentIds: string[];  // UUIDs
-    additionalInfo?: string;
-    templateId?: string;  // UUID
+    report_id: string;  // UUID (renamed from reportId to match backend)
+    document_ids: string[];  // UUIDs (renamed from documentIds to match backend)
+    additional_info?: string;
+    template_id?: string;  // UUID (renamed from templateId to match backend)
 }
 
 interface RefineRequest {
@@ -61,12 +61,20 @@ export const generateReport = async (
     options = {},
     onProgress?: (update: ProgressUpdate) => void
 ): Promise<ReportResponse> => {
+    // Convert property names to snake_case if they aren't already
+    const payload = {
+        report_id: request.report_id,
+        document_ids: request.document_ids,
+        additional_info: request.additional_info,
+        template_id: request.template_id
+    };
+    
     const response = await fetch('/api/generate', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
