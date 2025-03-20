@@ -7,8 +7,8 @@ import ImageIcon from '@mui/icons-material/Image';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useDropzone } from 'react-dropzone';
-import { uploadFile } from '../../api/upload';
-import LoadingIndicator from './LoadingIndicator';
+import { uploadApi } from '../services';
+import LoadingIndicator, { LoadingState, LoadingStage } from './LoadingIndicator';
 
 // Maximum total size (1GB)
 const MAX_TOTAL_SIZE = 1024 * 1024 * 1024;
@@ -35,7 +35,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const [files, setFiles] = useState<FileWithPreview[]>([]);
   const [rejectedFiles, setRejectedFiles] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loadingState, setLoadingState] = useState({
+  const [loadingState, setLoadingState] = useState<LoadingState>({
     isLoading: false,
     progress: 0,
     stage: 'initial',
@@ -107,14 +107,21 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     });
 
     try {
-      const response = await uploadFile(files, reportId, (progressEvent) => {
-        // Update progress
-        setLoadingState(prev => ({
-          ...prev,
-          progress: progressEvent.progress || 0,
-          message: progressEvent.message || prev.message,
-          stage: progressEvent.stage || prev.stage
-        }));
+      // Use the adapter which provides the same interface but uses our new service layer
+      const response = await uploadApi.uploadFile(files, {
+        onProgress: (progress) => {
+          // Update progress
+          const stage: LoadingStage = progress < 100 ? 'loading' : 'analyzing';
+          
+          setLoadingState(prev => ({
+            ...prev,
+            progress: progress || 0,
+            message: progress < 100 
+              ? 'Caricamento dei documenti in corso...' 
+              : 'Analisi dei documenti in corso...',
+            stage
+          }));
+        }
       });
 
       if (response && response.report_id) {
