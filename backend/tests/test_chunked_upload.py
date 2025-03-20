@@ -7,8 +7,17 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 import io
 from pathlib import Path
+import sys
+from os.path import dirname, abspath
 
+# Add backend directory to the path so imports work correctly
+backend_dir = dirname(dirname(abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+# Now we can import from utils
 from utils.file_processor import FileProcessor
+from utils.exceptions import NotFoundException, ValidationException, FileProcessingException
 
 # Create a test file of a specific size
 def create_test_file(size_bytes=1024*1024):
@@ -189,7 +198,7 @@ class TestFileProcessorChunkedUpload:
     def test_error_handling(self):
         """Test error handling in chunked uploads"""
         # Test non-existent upload
-        with pytest.raises(ValueError):
+        with pytest.raises(NotFoundException):
             FileProcessor.save_chunk(
                 upload_id="nonexistent",
                 chunk_index=0,
@@ -207,7 +216,7 @@ class TestFileProcessorChunkedUpload:
             directory=self.test_dir
         )
         
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationException):
             FileProcessor.save_chunk(
                 upload_id=upload_id,
                 chunk_index=10,  # Out of range
@@ -215,7 +224,7 @@ class TestFileProcessorChunkedUpload:
             )
         
         # Test completing upload before all chunks received
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationException):
             FileProcessor.complete_chunked_upload(
                 upload_id=upload_id,
                 target_directory=self.test_dir

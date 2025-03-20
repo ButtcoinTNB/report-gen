@@ -27,10 +27,13 @@ export interface ReportResponseCamel {
  * Response for a chunked upload initialization
  */
 export interface ChunkedUploadInitResponse {
-  upload_id: string;
-  message: string;
   status: 'success' | 'error';
-  chunk_size: number;
+  data: {
+    uploadId: string;
+    status: string;
+    chunksReceived: number;
+    totalChunks: number;
+  };
 }
 
 /**
@@ -38,9 +41,13 @@ export interface ChunkedUploadInitResponse {
  */
 export interface ChunkUploadResponse {
   status: 'success' | 'error';
-  message: string;
-  upload_id: string;
-  chunk_index: number;
+  data: {
+    uploadId: string;
+    chunkIndex: number;
+    received: number;
+    total: number;
+    status: string;
+  };
 }
 
 /**
@@ -48,11 +55,14 @@ export interface ChunkUploadResponse {
  */
 export interface CompletedUploadResponse {
   status: 'success' | 'error';
-  message: string;
-  upload_id: string;
-  file_id: string;
-  file_name: string;
-  file_size: number;
+  data: {
+    fileId: string;
+    filename: string;
+    filePath: string;
+    fileSize: number;
+    mimeType: string;
+    reportId?: string;
+  };
 }
 
 /**
@@ -80,10 +90,13 @@ export const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
  * Frontend-friendly version with camelCase properties
  */
 export interface ChunkedUploadInitResponseCamel {
-  uploadId: string;
-  message: string;
   status: 'success' | 'error';
-  chunkSize: number;
+  data: {
+    uploadId: string;
+    status: string;
+    chunksReceived: number;
+    totalChunks: number;
+  };
 }
 
 /**
@@ -91,9 +104,13 @@ export interface ChunkedUploadInitResponseCamel {
  */
 export interface ChunkUploadResponseCamel {
   status: 'success' | 'error';
-  message: string;
-  uploadId: string;
-  chunkIndex: number;
+  data: {
+    uploadId: string;
+    chunkIndex: number;
+    received: number;
+    total: number;
+    status: string;
+  };
 }
 
 /**
@@ -101,11 +118,14 @@ export interface ChunkUploadResponseCamel {
  */
 export interface CompletedUploadResponseCamel {
   status: 'success' | 'error';
-  message: string;
-  uploadId: string;
-  fileId: string;
-  fileName: string;
-  fileSize: number;
+  data: {
+    fileId: string;
+    filename: string;
+    filePath: string;
+    fileSize: number;
+    mimeType: string;
+    reportId?: string;
+  };
 }
 
 /**
@@ -226,84 +246,24 @@ export class UploadService extends ApiClient {
       const largeFiles = files.filter(file => this.shouldUseChunkedUpload(file));
       const smallFiles = files.filter(file => !this.shouldUseChunkedUpload(file));
       
-      // If we only have small files, use the standard upload
-      if (largeFiles.length === 0) {
-        const formData = new FormData();
-        
-        for (const file of files) {
-          formData.append('files', file);
-        }
-        
-        const response = await this.post<ReportResponse>('/documents', formData, {
-          isMultipart: true,
-          onUploadProgress: event => {
-            if (onProgress && event.total) {
-              const progress = Math.round((event.loaded * 100) / event.total);
-              onProgress(progress);
-            }
-          },
-          retryOptions: {
-            maxRetries: 3,
-            retryDelay: 2000
-          }
-        });
-        
-        // Convert response to camelCase
-        return adaptApiResponse<ReportResponseCamel>(response.data);
-      }
-      
-      // If we have large files, we need to handle them differently
-      // 1. Create a report first
+      // Create a new report ID first
       const reportId = await this.createReport();
       
-      // 2. Upload each large file using chunked upload
-      let completedFiles = 0;
-      const totalFiles = files.length;
-      
-      // Calculate weights for progress tracking
-      // Large files get more weight in the progress calculation
-      const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-      const fileWeights = files.map(file => file.size / totalSize);
-      
-      // Array to track each file's progress
-      const fileProgress = new Array(files.length).fill(0);
-      
-      // Function to update overall progress
-      const updateProgress = () => {
-        if (onProgress) {
-          const weightedProgress = fileProgress.reduce(
-            (sum, progress, index) => sum + progress * fileWeights[index], 
-            0
-          );
-          onProgress(Math.floor(weightedProgress));
-        }
+      // Keep track of overall progress
+      let totalProgress = 0;
+      const updateProgress = (fileProgress: number, fileIndex: number, fileCount: number) => {
+        if (!onProgress) return;
+        
+        // Calculate weighted progress for this file
+        const fileWeight = 1 / fileCount;
+        const weightedProgress = fileProgress * fileWeight;
+        
+        // Update total progress by adding the weighted progress of the current file
+        totalProgress = (fileIndex * fileWeight * 100) + weightedProgress;
+        onProgress(Math.floor(totalProgress));
       };
       
-      // 3. Upload large files with chunking
-      for (let i = 0; i < largeFiles.length; i++) {
-        const file = largeFiles[i];
-        const fileIndex = files.indexOf(file);
-        
-        try {
-          await this.uploadLargeFile({
-            file,
-            reportId,
-            onProgress: (progress) => {
-              fileProgress[fileIndex] = progress;
-              updateProgress();
-            }
-          });
-          
-          completedFiles++;
-          fileProgress[fileIndex] = 100;
-          updateProgress();
-        } catch (error) {
-          logger.error(`Error uploading large file ${file.name}:`, error);
-          throw error;
-        }
-      }
-      
-      // 4. Upload small files if any (as a batch)
+      // Handle small files first with regular upload
       if (smallFiles.length > 0) {
         const formData = new FormData();
         
@@ -311,48 +271,65 @@ export class UploadService extends ApiClient {
           formData.append('files', file);
         }
         
+        // Add report ID to formData
         formData.append('report_id', reportId);
         
-        try {
-          // Track progress for small files
-          const smallFilesStartIndex = files.length - smallFiles.length;
-          
-          await this.post<ReportResponse>('/documents', formData, {
-            isMultipart: true,
-            onUploadProgress: event => {
-              if (event.total) {
-                const progress = Math.round((event.loaded * 100) / event.total);
-                // Update progress for all small files
-                for (let i = 0; i < smallFiles.length; i++) {
-                  const fileIndex = files.indexOf(smallFiles[i]);
-                  fileProgress[fileIndex] = progress;
-                }
-                updateProgress();
+        await this.post<ReportResponse>('/documents', formData, {
+          isMultipart: true,
+          onUploadProgress: event => {
+            if (onProgress && event.total) {
+              const smallFilesProgress = Math.round((event.loaded * 100) / event.total);
+              // If we have large files too, small files are only part of the total progress
+              if (largeFiles.length > 0) {
+                const smallFilesWeight = smallFiles.length / files.length;
+                onProgress(Math.floor(smallFilesProgress * smallFilesWeight));
+              } else {
+                onProgress(smallFilesProgress);
               }
             }
-          });
-          
-          // Mark all small files as complete
-          for (const file of smallFiles) {
-            const fileIndex = files.indexOf(file);
-            fileProgress[fileIndex] = 100;
+          },
+          retryOptions: {
+            maxRetries: 3,
+            retryDelay: 2000
           }
-          updateProgress();
+        });
+      }
+      
+      // Handle large files with chunked upload
+      if (largeFiles.length > 0) {
+        // Upload each large file using chunked upload
+        for (let i = 0; i < largeFiles.length; i++) {
+          const file = largeFiles[i];
           
-          completedFiles += smallFiles.length;
-        } catch (error) {
-          logger.error('Error uploading small files:', error);
-          throw error;
+          // Calculate file's weight in progress calculation
+          const fileStartIndex = smallFiles.length + i;
+          const totalFileCount = files.length;
+          
+          await this.uploadLargeFile({
+            file,
+            reportId,
+            onProgress: (fileProgress) => {
+              updateProgress(fileProgress, fileStartIndex, totalFileCount);
+            },
+            onRetry: (attempt, maxRetries) => {
+              logger.info(`Retrying large file upload (${attempt}/${maxRetries})...`);
+            }
+          });
         }
       }
       
-      // Return a formatted response
-      return adaptApiResponse<ReportResponseCamel>({
-        report_id: reportId,
-        message: `Uploaded ${completedFiles} files successfully`,
+      // Set progress to 100% when all uploads are complete
+      if (onProgress) {
+        onProgress(100);
+      }
+      
+      // Return the response with the report ID
+      return {
+        reportId,
         status: 'success',
-        file_count: completedFiles
-      });
+        message: `Successfully uploaded ${files.length} file(s)`,
+        fileCount: files.length
+      };
     } catch (error) {
       logger.error('Error uploading files:', error);
       throw error;
@@ -403,37 +380,38 @@ export class UploadService extends ApiClient {
       // 1. Initialize chunked upload - convert request to snake_case
       const initRequest = adaptApiRequest({
         filename: file.name,
-        filesize: file.size,
-        mimetype: file.type,
+        fileSize: file.size,
+        totalChunks: Math.ceil(file.size / chunkSize),
+        fileType: file.type,
         reportId: reportId || null
       });
 
-      const initResponse = await this.post<ChunkedUploadInitResponse>('/init-chunked-upload', initRequest);
+      const initResponse = await this.post<ChunkedUploadInitResponse>('/chunked/init', initRequest);
       
       // Convert response to camelCase
       const camelInitResponse = adaptApiResponse<ChunkedUploadInitResponseCamel>(initResponse.data);
       
-      const { uploadId, chunkSize: responseChunkSize } = camelInitResponse;
-      const actualChunkSize = responseChunkSize || chunkSize;
+      const uploadId = camelInitResponse.data.uploadId;
       
       // 2. Calculate number of chunks
-      const totalChunks = Math.ceil(file.size / actualChunkSize);
+      const totalChunks = Math.ceil(file.size / chunkSize);
       let uploadedChunks = 0;
       
       // 3. Upload each chunk
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const start = chunkIndex * actualChunkSize;
-        const end = Math.min(file.size, start + actualChunkSize);
+        const start = chunkIndex * chunkSize;
+        const end = Math.min(file.size, start + chunkSize);
         const chunk = file.slice(start, end);
         
         const formData = new FormData();
-        formData.append('chunk', chunk);
-        formData.append('upload_id', uploadId);
-        formData.append('chunk_index', chunkIndex.toString());
+        formData.append('file', new File([chunk], file.name));
         
         try {
+          // Use specific URL pattern for each chunk that matches backend
+          const url = `/chunked/chunk/${uploadId}/${chunkIndex}`;
+          
           // Use retry logic for each chunk
-          await this.post<ChunkUploadResponse>('/upload-chunk', formData, {
+          await this.post<ChunkUploadResponse>(url, formData, {
             isMultipart: true,
             onUploadProgress: (event) => {
               if (onProgress && event.total) {
@@ -469,12 +447,10 @@ export class UploadService extends ApiClient {
       
       // 4. Complete the chunked upload - convert request to snake_case
       const completeRequest = adaptApiRequest({
-        uploadId,
-        filename: file.name,
-        totalChunks
+        uploadId
       });
 
-      const completeResponse = await this.post<CompletedUploadResponse>('/complete-chunked-upload', completeRequest);
+      const completeResponse = await this.post<CompletedUploadResponse>('/chunked/complete', completeRequest);
       
       // Convert response to camelCase
       return adaptApiResponse<CompletedUploadResponseCamel>(completeResponse.data);

@@ -157,11 +157,16 @@ class AIServiceException(BaseAPIException):
 
 
 class FileProcessingException(BaseAPIException):
-    """File Processing Error"""
-    def __init__(self, message: str = "File processing error", details: Any = None):
+    """Exception raised when there's an error processing files"""
+    def __init__(
+        self, 
+        message: str = "File processing error", 
+        code: str = "file_processing_error",
+        details: Optional[Dict[str, Any]] = None
+    ):
         super().__init__(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, 
-            code="FILE_PROCESSING_ERROR", 
+            status_code=500,
+            code=code,
             message=message, 
             details=details
         )

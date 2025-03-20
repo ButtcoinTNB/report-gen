@@ -4,6 +4,9 @@ from supabase import create_client
 import json
 from dotenv import load_dotenv
 
+# Check if we're in production mode
+IS_PRODUCTION = os.getenv("NODE_ENV") == "production"
+
 def check_table(supabase, table_name, required_columns=None):
     print(f"\n--- Checking '{table_name}' table ---")
     try:
@@ -83,6 +86,52 @@ def check_uuid_generation(supabase, table_name, required_fields):
     except Exception as e:
         print(f"❓ Unable to verify UUID generation: {str(e)}")
     return False
+
+def get_test_data(table_name):
+    """
+    Get test data for a specific table, ensuring safe values for testing
+    that won't disrupt production data.
+    
+    Args:
+        table_name: Name of the table to get test data for
+        
+    Returns:
+        Dictionary with test data for the table or None if not available
+    """
+    # Define test data for each table with production-safe values
+    test_data = {
+        'files': {
+            "filename": "_test_check_supabase.txt",
+            "file_type": "text/plain",
+            "content": "test content - will be deleted",
+            "report_id": "00000000-0000-0000-0000-000000000000",
+            "file_size": 123,
+            "file_path": "/test/path",
+            "mime_type": "text/plain"
+        },
+        'reports': {
+            "title": "_TEST_Report - will be deleted",
+            "content": "test content - will be deleted",
+            "status": "draft",
+            "template_id": "00000000-0000-0000-0000-000000000000",
+            "metadata": {"test": True, "will_be_deleted": True}
+        },
+        'templates': {
+            "name": "_TEST_Template - will be deleted",
+            "content": "test content - will be deleted",
+            "version": "1.0",
+            "metadata": {"test": True, "will_be_deleted": True}
+        },
+        'reference_reports': {
+            "title": "_TEST_Reference - will be deleted",
+            "content": "test content - will be deleted",
+            "category": "test",
+            "tags": ["test"],
+            "metadata": {"test": True, "will_be_deleted": True}
+        }
+    }
+    
+    return test_data.get(table_name)
 
 def check_table_detailed(supabase, table_name):
     print(f"\n{'='*50}")
@@ -218,59 +267,33 @@ def check_table_detailed(supabase, table_name):
                         # Try a test insert to check UUID generation
                         print("\n🧪 Testing UUID generation:")
                         try:
-                            # Define test data for each table
-                            test_data = {
-                                'files': {
-                                    "filename": "test.txt",
-                                    "file_type": "text/plain",
-                                    "content": "test content",
-                                    "report_id": "00000000-0000-0000-0000-000000000000",
-                                    "file_size": 123,
-                                    "file_path": "/test/path",
-                                    "mime_type": "text/plain"
-                                },
-                                'reports': {
-                                    "title": "Test Report",
-                                    "content": "test content",
-                                    "status": "draft",
-                                    "template_id": "00000000-0000-0000-0000-000000000000",
-                                    "metadata": {}
-                                },
-                                'templates': {
-                                    "name": "Test Template",
-                                    "content": "test content",
-                                    "version": "1.0",
-                                    "metadata": {}
-                                },
-                                'reference_reports': {
-                                    "title": "Test Reference",
-                                    "content": "test content",
-                                    "category": "test",
-                                    "tags": ["test"],
-                                    "metadata": {}
-                                }
-                            }
-                            
-                            if table_name in test_data:
-                                test_insert = supabase.table(table_name).insert(test_data[table_name]).execute()
-                                if test_insert.data and len(test_insert.data) > 0:
-                                    # Get the appropriate UUID column name for the table
-                                    uuid_column = {
-                                        'files': 'file_id',
-                                        'reports': 'report_id',
-                                        'templates': 'template_id',
-                                        'reference_reports': 'reference_id'
-                                    }.get(table_name)
-                                    
-                                    inserted_id = test_insert.data[0].get(uuid_column)
-                                    if inserted_id:
-                                        print(f"  ✅ UUID generation works (got: {inserted_id})")
-                                        # Clean up test record
-                                        supabase.table(table_name).delete().eq(uuid_column, inserted_id).execute()
+                            if IS_PRODUCTION:
+                                print("  ⚠️ Skipping insert test in production mode")
+                            else:
+                                # Get test data for this table
+                                data = get_test_data(table_name)
+                                if data:
+                                    test_insert = supabase.table(table_name).insert(data).execute()
+                                    if test_insert.data and len(test_insert.data) > 0:
+                                        # Get the appropriate UUID column name for the table
+                                        uuid_column = {
+                                            'files': 'file_id',
+                                            'reports': 'report_id',
+                                            'templates': 'template_id',
+                                            'reference_reports': 'reference_id'
+                                        }.get(table_name)
+                                        
+                                        inserted_id = test_insert.data[0].get(uuid_column)
+                                        if inserted_id:
+                                            print(f"  ✅ UUID generation works (got: {inserted_id})")
+                                            # Clean up test record
+                                            supabase.table(table_name).delete().eq(uuid_column, inserted_id).execute()
+                                        else:
+                                            print(f"  ❌ No {uuid_column} generated on insert")
                                     else:
-                                        print(f"  ❌ No {uuid_column} generated on insert")
+                                        print("  ❓ Unable to verify UUID generation (no data returned from insert)")
                                 else:
-                                    print("  ❓ Unable to verify UUID generation (no data returned from insert)")
+                                    print(f"  ⚠️ No test data defined for table {table_name}")
                         except Exception as e:
                             print(f"  ❌ Unable to verify UUID generation: {str(e)}")
                             

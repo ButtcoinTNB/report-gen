@@ -23,6 +23,15 @@ import pytesseract
 import json
 import time
 
+# Import custom exceptions
+from utils.exceptions import (
+    NotFoundException, 
+    ValidationException, 
+    BadRequestException, 
+    InternalServerException, 
+    FileProcessingException
+)
+
 # Setup logging
 logger = logging.getLogger(__name__)
 
@@ -777,7 +786,9 @@ class FileProcessor:
             Dictionary with updated upload info
             
         Raises:
-            ValueError: If upload_id is not valid or chunk_index is out of range
+            NotFoundException: If upload_id is not found
+            ValidationException: If chunk_index is out of range
+            FileProcessingException: If there's an error saving the chunk
         """
         # Check if we have this upload
         if upload_id not in FileProcessor._chunked_uploads:
@@ -794,18 +805,30 @@ class FileProcessor:
             
             # If still not found, raise error
             if upload_id not in FileProcessor._chunked_uploads:
-                raise ValueError(f"Upload ID {upload_id} not found")
+                raise NotFoundException(
+                    message=f"Upload ID {upload_id} not found",
+                    details={"upload_id": upload_id}
+                )
         
         upload_info = FileProcessor._chunked_uploads[upload_id]
         
         # Validate chunk index
         if chunk_index < 0 or chunk_index >= upload_info["total_chunks"]:
-            raise ValueError(f"Chunk index {chunk_index} is out of range (0-{upload_info['total_chunks']-1})")
+            raise ValidationException(
+                message=f"Chunk index {chunk_index} is out of range (0-{upload_info['total_chunks']-1})",
+                details={"chunk_index": chunk_index, "total_chunks": upload_info["total_chunks"]}
+            )
         
         # Save chunk to file
         chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{chunk_index}")
-        with open(chunk_path, "wb") as chunk_file:
-            shutil.copyfileobj(chunk_data, chunk_file)
+        try:
+            with open(chunk_path, "wb") as chunk_file:
+                shutil.copyfileobj(chunk_data, chunk_file)
+        except Exception as e:
+            raise FileProcessingException(
+                message=f"Failed to save chunk {chunk_index} for upload {upload_id}",
+                details={"error": str(e), "chunk_index": chunk_index, "upload_id": upload_id}
+            )
         
         # Update upload info
         upload_info["received_chunks"] += 1
@@ -818,9 +841,13 @@ class FileProcessor:
             upload_info["status"] = "in_progress"
         
         # Update metadata file
-        metadata_path = os.path.join(upload_info["chunks_dir"], "metadata.json")
-        with open(metadata_path, "w") as f:
-            json.dump(upload_info, f)
+        try:
+            metadata_path = os.path.join(upload_info["chunks_dir"], "metadata.json")
+            with open(metadata_path, "w") as f:
+                json.dump(upload_info, f)
+        except Exception as e:
+            logger.error(f"Failed to update metadata for upload {upload_id}: {str(e)}")
+            # Continue despite metadata update failure
         
         logger.info(f"Saved chunk {chunk_index} for upload {upload_id} ({upload_info['received_chunks']}/{upload_info['total_chunks']})")
         return upload_info
@@ -843,7 +870,9 @@ class FileProcessor:
             Dictionary with information about the final file
             
         Raises:
-            ValueError: If upload is not complete or some chunks are missing
+            NotFoundException: If upload_id is not found
+            ValidationException: If upload is not complete or some chunks are missing
+            FileProcessingException: If there's an error combining chunks
         """
         # Check if we have this upload
         if upload_id not in FileProcessor._chunked_uploads:
@@ -860,14 +889,22 @@ class FileProcessor:
             
             # If still not found, raise error
             if upload_id not in FileProcessor._chunked_uploads:
-                raise ValueError(f"Upload ID {upload_id} not found")
+                raise NotFoundException(
+                    message=f"Upload ID {upload_id} not found",
+                    details={"upload_id": upload_id}
+                )
         
         upload_info = FileProcessor._chunked_uploads[upload_id]
         
         # Check if all chunks have been received
         if upload_info["received_chunks"] != upload_info["total_chunks"]:
-            raise ValueError(
-                f"Upload not complete: received {upload_info['received_chunks']} of {upload_info['total_chunks']} chunks"
+            raise ValidationException(
+                message=f"Upload not complete: received {upload_info['received_chunks']} of {upload_info['total_chunks']} chunks",
+                details={
+                    "upload_id": upload_id,
+                    "received_chunks": upload_info["received_chunks"],
+                    "total_chunks": upload_info["total_chunks"]
+                }
             )
         
         # Generate a filename if not provided
@@ -883,18 +920,30 @@ class FileProcessor:
         # Create full target path
         target_path = FileProcessor.safe_path_join(target_directory, unique_filename)
         
-        # Ensure target directory exists
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        
-        # Combine all chunks into the final file
-        with open(target_path, "wb") as target_file:
-            for i in range(upload_info["total_chunks"]):
-                chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{i}")
-                if not os.path.exists(chunk_path):
-                    raise ValueError(f"Chunk {i} is missing")
-                
-                with open(chunk_path, "rb") as chunk_file:
-                    shutil.copyfileobj(chunk_file, target_file)
+        try:
+            # Ensure target directory exists
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            
+            # Combine all chunks into the final file
+            with open(target_path, "wb") as target_file:
+                for i in range(upload_info["total_chunks"]):
+                    chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{i}")
+                    if not os.path.exists(chunk_path):
+                        raise ValidationException(
+                            message=f"Chunk {i} is missing",
+                            details={"upload_id": upload_id, "missing_chunk": i}
+                        )
+                    
+                    with open(chunk_path, "rb") as chunk_file:
+                        shutil.copyfileobj(chunk_file, target_file)
+        except ValidationException:
+            # Re-raise validation exceptions
+            raise
+        except Exception as e:
+            raise FileProcessingException(
+                message=f"Failed to combine chunks for upload {upload_id}",
+                details={"error": str(e), "upload_id": upload_id}
+            )
         
         # Update upload info
         upload_info["status"] = "completed"
@@ -903,19 +952,27 @@ class FileProcessor:
         upload_info["last_updated"] = time.time()
         
         # Update metadata file
-        metadata_path = os.path.join(upload_info["chunks_dir"], "metadata.json")
-        with open(metadata_path, "w") as f:
-            json.dump(upload_info, f)
+        try:
+            metadata_path = os.path.join(upload_info["chunks_dir"], "metadata.json")
+            with open(metadata_path, "w") as f:
+                json.dump(upload_info, f)
+        except Exception as e:
+            logger.error(f"Failed to update metadata for upload {upload_id}: {str(e)}")
+            # Continue despite metadata update failure
         
         # Return file info for the combined file
         file_info = FileProcessor.get_file_info(target_path)
         
         # Clean up chunk files (keep metadata for reference)
         # This could be done asynchronously or by a cleanup task
-        for i in range(upload_info["total_chunks"]):
-            chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{i}")
-            if os.path.exists(chunk_path):
-                os.unlink(chunk_path)
+        try:
+            for i in range(upload_info["total_chunks"]):
+                chunk_path = os.path.join(upload_info["chunks_dir"], f"chunk_{i}")
+                if os.path.exists(chunk_path):
+                    os.unlink(chunk_path)
+        except Exception as e:
+            logger.error(f"Error cleaning up chunk files for upload {upload_id}: {str(e)}")
+            # Continue despite cleanup failure
         
         logger.info(f"Completed chunked upload {upload_id}. Final file saved to {target_path}")
         return {
@@ -948,10 +1005,14 @@ class FileProcessor:
                     chunks_dir = os.path.join(root, dir_name)
                     metadata_path = os.path.join(chunks_dir, "metadata.json")
                     if os.path.exists(metadata_path):
-                        with open(metadata_path, "r") as f:
-                            upload_info = json.load(f)
-                            FileProcessor._chunked_uploads[upload_id] = upload_info
-                            return upload_info
+                        try:
+                            with open(metadata_path, "r") as f:
+                                upload_info = json.load(f)
+                                FileProcessor._chunked_uploads[upload_id] = upload_info
+                                return upload_info
+                        except Exception as e:
+                            logger.error(f"Error loading metadata for upload {upload_id}: {str(e)}")
+                            return None
         
         return None
     

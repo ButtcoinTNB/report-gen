@@ -1,317 +1,202 @@
-# Scrittore Automatico di Perizie
+# Insurance Report Generator
 
-A web-based AI-powered tool that helps insurance workers generate structured claim reports by processing uploaded files and maintaining the exact format of reference PDFs.
+An advanced web application for generating, editing, and managing insurance reports using AI-powered document analysis.
 
-## Repository
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-This project is hosted on GitHub: [https://github.com/ButtcoinTNB/report-gen](https://github.com/ButtcoinTNB/report-gen)
+## 🚀 Features
 
-## Features
+- **Document Upload**: Support for various file formats (PDF, DOCX, JPG, PNG)
+- **Chunked Uploads**: Handle large files efficiently
+- **AI-Powered Analysis**: Extract relevant information from insurance documents
+- **Report Generation**: Create structured reports based on document analysis
+- **Interactive Editing**: Edit and refine generated reports
+- **Multiple Export Formats**: Download reports in various formats (PDF, DOCX, TXT)
+- **Real-time Updates**: WebSocket integration for progress tracking
+- **Responsive UI**: Modern interface that works on desktop and mobile
 
-- Upload reference PDFs to define report formatting and layout
-- Upload case-specific documents (PDFs, Word docs, text files) for AI processing
-- Generate structured reports using AI (via OpenRouter API)
-- Preview reports before finalization
-- Edit generated reports manually or via AI refinement
-- Export reports as professionally formatted PDFs that match reference templates
-- Store reports for future retrieval
+## 📋 Prerequisites
 
-## Tech Stack
+- Python 3.9+
+- Node.js 16+
+- PostgreSQL 13+ (or Supabase account)
+- OpenAI API key or compatible AI service
 
-- **Frontend**: Next.js, TypeScript, Material-UI
-- **Backend**: FastAPI, Python, SQLAlchemy
-- **Database**: Supabase (PostgreSQL)
-- **AI**: OpenRouter API (Claude 3)
-- **File Processing**: PyMuPDF, WeasyPrint, PDFrw, FileProcessor utility class
-- **Deployment**: Vercel (Frontend), Render (Backend)
+## 🛠️ Installation
 
-## Prerequisites
-
-- Node.js 18+ and npm
-- Python 3.8+
-- Supabase account
-- OpenRouter API key
-
-## Installation
-
-### Backend Setup
-
-1. Navigate to the backend directory:
-   ```
-   cd insurance-report-generator/backend
-   ```
-
-2. Create a virtual environment:
-   ```
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
-   ```
-   pip install fastapi uvicorn sqlalchemy pydantic python-dotenv pymupdf weasyprint pdfrw httpx
-   ```
-
-4. Set up environment variables:
-   - Copy `.env.example` from the root directory to `backend/.env`
-   - Fill in your API keys and database credentials
-
-5. Run the backend server:
-   ```
-   uvicorn main:app --reload
-   ```
-
-### Frontend Setup
-
-1. Navigate to the frontend directory:
-   ```
-   cd insurance-report-generator/frontend
-   ```
-
-2. Install dependencies:
-   ```
-   npm install
-   ```
-
-3. Set up environment variables:
-   - Copy `.env.example` from the root directory to `frontend/.env.local`
-   - Update the `NEXT_PUBLIC_API_URL` to point to your backend service
-
-4. Start the development server:
-   ```
-   npm run dev
-   ```
-
-## Environment Variables Configuration
-
-### Setup Script (Recommended)
-
-The project now includes a setup script that automatically configures environment variables for both frontend and backend:
+### Clone the Repository
 
 ```bash
-# From the project root:
-python backend/scripts/setup_env.py --env local  # For local development
-python backend/scripts/setup_env.py --env production  # For production setup
+git clone https://github.com/yourusername/insurance-report-generator.git
+cd insurance-report-generator
 ```
 
-This script will:
-1. Copy the appropriate `.env.example` file to `backend/.env`
-2. Create a filtered version for frontend in `frontend/.env.local`
+### Setting Up the Backend
 
-### Manual Setup
+1. Create and activate a virtual environment:
 
-For manual setup, follow these steps:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
 
-1. **For Backend**:
-   - Copy `.env.example` from the root to `backend/.env`
-   - Update the values in `backend/.env`
+2. Install dependencies:
 
-2. **For Frontend**:
-   - Copy `.env.example` from the root to `frontend/.env.local`
-   - Extract only the `NEXT_PUBLIC_*` variables
-   - Update the values in `frontend/.env.local`
+```bash
+pip install -r backend/requirements.txt
+```
 
-### Production Deployment
+3. Configure environment variables:
 
-When deploying the application:
+```bash
+# Run the environment setup script
+python backend/scripts/setup_env.py --env local
 
-1. **Backend (Render/Heroku)**:
-   - Set all backend variables from the `.env.example` file in your hosting platform's dashboard
-   - Ensure `FRONTEND_URL` points to your production frontend URL
+# Edit the environment variables
+nano backend/.env
+```
 
-2. **Frontend (Vercel)**:
-   - Set all `NEXT_PUBLIC_*` variables from the `.env.example` file in your Vercel project settings
-   - Update `NEXT_PUBLIC_API_URL` to point to your production backend URL
+4. Run the backend server:
 
-## Development
+```bash
+cd backend
+uvicorn main:app --reload
+```
 
-### Running Locally
+### Setting Up the Frontend
 
-#### Frontend
+1. Install dependencies:
 
 ```bash
 cd frontend
 npm install
+```
+
+2. Run the development server:
+
+```bash
 npm run dev
 ```
 
-#### Backend
+## 🚀 Using the Application
+
+1. Open your browser and navigate to `http://localhost:3000`
+2. Upload insurance-related documents
+3. Wait for the AI to process the documents
+4. Review and edit the generated report
+5. Export the report in your preferred format
+
+## 🌍 Production Deployment
+
+### Backend Deployment on Render
+
+For detailed instructions on deploying the backend to Render, see [Render Deployment Guide](docs/RENDER_DEPLOYMENT.md).
+
+### Frontend Deployment on Vercel
+
+For detailed instructions on deploying the frontend to Vercel, see [Vercel Deployment Guide](docs/VERCEL_DEPLOYMENT.md).
+
+### Production Checklist
+
+Before deploying to production, go through the [Production Checklist](docs/PRODUCTION_CHECKLIST.md) to ensure your application is properly configured.
+
+## �� Configuration
+
+### Backend Configuration
+
+Key environment variables for the backend:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| OPENAI_API_KEY | API key for OpenAI | - |
+| SUPABASE_URL | URL for Supabase | - |
+| SUPABASE_KEY | API key for Supabase | - |
+| UPLOAD_DIR | Directory for uploaded files | ./uploads |
+| GENERATED_DIR | Directory for generated reports | ./generated |
+| DATA_RETENTION_HOURS | Hours to keep data before cleanup | 24 |
+| DEBUG | Enable debug mode | false |
+| ALLOWED_ORIGINS | CORS allowed origins | http://localhost:3000 |
+| API_RATE_LIMIT | Rate limit for API requests | 100 |
+| AI_SERVICE | AI service provider | openai |
+
+See `.env.example` for a complete list of configuration options.
+
+### Frontend Configuration
+
+Key environment variables for the frontend:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| NEXT_PUBLIC_API_URL | URL of the backend API | http://localhost:8000 |
+| NEXT_PUBLIC_WS_URL | WebSocket URL | ws://localhost:8000 |
+
+## 🧪 Testing
+
+Run backend tests:
 
 ```bash
-cd backend
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-uvicorn main:app --reload
+cd insurance-report-generator
+./run_tests.sh
 ```
 
-### Testing
-
-Run tests using pytest:
+Run frontend tests:
 
 ```bash
-cd backend
-pytest
+cd frontend
+npm test
 ```
 
-## Contributing
+## 🔒 Security Considerations
+
+- API rate limiting is enabled by default
+- Input validation on all endpoints
+- File type and size restrictions
+- Sanitization of user inputs
+- Regular data cleanup to prevent storage overflow
+
+## 📖 API Documentation
+
+For detailed API documentation, see [API_DOCUMENTATION.md](backend/API_DOCUMENTATION.md).
+
+## 🏗️ Architecture
+
+The application follows a client-server architecture:
+
+- **Frontend**: Next.js React application
+- **Backend**: FastAPI Python application
+- **Database**: PostgreSQL (via Supabase)
+- **File Storage**: Local filesystem or Supabase Storage
+- **AI Processing**: OpenAI API or compatible service
+
+### Backend Components:
+
+- **API Layer**: FastAPI routes handling requests
+- **Service Layer**: Business logic and AI integration
+- **Data Layer**: Database access and file handling
+- **Background Tasks**: Processing long-running operations
+
+### Frontend Components:
+
+- **Upload Module**: File upload and chunking
+- **Editor Module**: Report viewing and editing
+- **Export Module**: Report formatting and downloading
+- **Notification System**: Real-time updates via WebSockets
+
+## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## License
-MIT 
+## 📄 License
 
-# Insurance Report Generator - Template System
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-This system uses AI to dynamically generate insurance reports in DOCX format based on uploaded documents and user inputs.
+## 👏 Acknowledgments
 
-## Key Features
-
-- **Dynamic Variable Extraction**: Automatically extracts key information from uploaded documents using AI and OCR.
-- **Rich Text Formatting**: Supports bullet points, bold, italic, and other formatting in the generated reports.
-- **Template-Based Generation**: Uses DOCX templates with variable placeholders that are filled by the AI.
-- **Preview and Refinement**: Allows users to preview and refine generated reports before final download.
-
-## How It Works
-
-1. **Upload Documents**: Users upload PDFs, images, DOCX files, or text files containing relevant information.
-2. **OCR Processing**: The system extracts text from all documents, including images and scanned PDFs.
-3. **AI Analysis**: An AI model (via OpenRouter API) extracts structured data from the text.
-4. **Template Filling**: The extracted data is used to fill a DOCX template with placeholders.
-5. **Refinement**: Users can provide instructions to refine the report content.
-6. **Download**: The final DOCX report is generated for download.
-
-## Templates
-
-Templates are DOCX files with Jinja2-style variables using the syntax `{{ variable_name }}`. For example:
-
-```
-Nome azienda: {{ nome_azienda }}
-Indirizzo: {{ indirizzo_azienda }}, {{ cap }} {{ city }}
-Data: {{ data_oggi }}
-
-Riferimento cliente: {{ vs_rif }}
-Numero polizza: {{ polizza }}
-
-Dinamica degli eventi:
-{{ dinamica_eventi_accertamenti }}
-```
-
-### Variable Types
-
-The system supports various variable types:
-
-- **Text fields**: Basic text replacement (`{{ nome_azienda }}`)
-- **Rich text fields**: Fields that support formatting like bullet points (`{{ dinamica_eventi_accertamenti }}`)
-- **Date fields**: Automatically formatted in Italian style (`{{ data_oggi }}`)
-- **Monetary fields**: Properly formatted with euro symbol (`{{ totale_danno }}`)
-
-### Common Variables
-
-These are the most commonly used variables in templates:
-
-- `nome_azienda`: Company name
-- `indirizzo_azienda`: Company address
-- `cap`: Postal code
-- `city`: City
-- `data_oggi`: Current date in Italian format (e.g., "18 Marzo 2025")
-- `vs_rif`: Customer reference
-- `rif_broker`: Broker reference
-- `polizza`: Policy number
-- `ns_rif`: Internal reference
-- `oggetto_polizza`: Policy object
-- `assicurato`: Insured name
-- `data_sinistro`: Date of incident
-- `titolo_breve`: Brief description
-- `luogo_sinistro`: Location of incident
-- `dinamica_eventi_accertamenti`: Detailed description of events (with bullet points)
-- `totale_danno`: Total damage amount
-- `causa_danno`: Cause of damage
-- `lista_allegati`: List of attachments (with bullet points)
-
-## Testing Templates
-
-You can test templates with the provided script:
-
-```bash
-python test_template_processing.py --template templates/template.docx --output output.docx
-```
-
-This will generate a sample report using example data.
-
-## Integration
-
-The template system is integrated into the main API through these endpoints:
-
-- `POST /api/generate`: Generates a report from uploaded documents
-- `POST /api/reports/{report_id}/refine`: Refines an existing report based on user instructions
-
-## Requirements
-
-- Python 3.8+
-- Tesseract OCR
-- Required Python packages listed in `requirements.txt`
-
-## Installation
-
-1. Install required dependencies:
-   ```bash
-   pip install -r backend/requirements.txt
-   ```
-
-2. Install Tesseract OCR:
-   ```bash
-   # On macOS
-   brew install tesseract
-   
-   # On Ubuntu/Debian
-   apt-get install tesseract-ocr
-   ```
-
-3. Place your template.docx in the templates directory.
-
-4. Configure environment variables in `.env`.
-
-5. Run the API server:
-   ```bash
-   uvicorn backend.main:app --reload
-   ``` 
-
-## Utilities
-
-### FileProcessor Utility Class
-
-The `FileProcessor` class in `backend/utils/file_processor.py` provides a centralized way to handle file operations throughout the application. This utility eliminates code duplication and standardizes file handling.
-
-#### Key Features
-
-- **MIME Type Handling**: Detect file types, get MIME types, and determine appropriate file extensions
-- **Text Extraction**: Extract text from PDFs, Word documents, images (via OCR), and plain text files
-- **File Information**: Retrieve comprehensive file metadata including size, modification times, and type detection
-- **Image Processing**: Convert images between formats and prepare for processing
-- **Base64 Encoding**: Convert files to base64 for embedding in responses or web display
-- **Security**: Safely join paths to prevent directory traversal attacks
-- **Upload Handling**: Process uploaded files with proper permissions and path validation
-
-#### Usage Examples
-
-```python
-# Get MIME type of a file
-mime_type = FileProcessor.get_mime_type("document.pdf")  # Returns "application/pdf"
-
-# Extract text from any supported file
-text = FileProcessor.extract_text("document.pdf")
-
-# Get file information
-file_info = FileProcessor.get_file_info("image.jpg")
-# Returns a dict with name, size, mime_type, etc.
-
-# Convert image to base64 for web display
-base64_data = FileProcessor.get_file_as_base64("image.jpg")
-# Returns "data:image/jpeg;base64,..."
-
-# Safely handle file paths
-safe_path = FileProcessor.safe_path_join(upload_dir, user_provided_filename)
-``` 
+- OpenAI for providing the AI capabilities
+- FastAPI for the efficient backend framework
+- Next.js team for the frontend framework
+- All contributors who have helped with the project 

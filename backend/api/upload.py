@@ -1,38 +1,33 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, Request, Query, Header, Depends, BackgroundTasks
-from typing import List, Dict, Optional, Any
-from fastapi.responses import JSONResponse
+"""
+Upload API endpoints for file uploads
+"""
+
 import os
 import uuid
 import json
-from config import settings
-import datetime
-from supabase import create_client, Client
-import mimetypes
-import shutil
-from models import Template, File as FileModel, User
-from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
-from werkzeug.utils import secure_filename
-from utils.supabase_helper import create_supabase_client, supabase_client_context
-from pydantic import UUID4, BaseModel
-from utils.auth import get_current_user
 import asyncio
-import logging
-from utils.file_utils import safe_path_join
-from utils.error_handler import api_error_handler, logger
-from utils.exceptions import (
-    BadRequestException,
-    InternalServerException,
-    ValidationException,
-    FileProcessingException,
+from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body
+from fastapi.responses import JSONResponse
+
+from backend.config import get_settings
+from backend.utils.file_handler import save_uploaded_file, delete_uploaded_file, get_file_info
+from backend.utils.logger import get_logger
+from backend.api.schemas import APIResponse, UploadQueryResult  # Using absolute imports
+from backend.utils.file_processor import FileProcessor
+from backend.utils.exceptions import (
+    FileNotFoundError, 
+    ProcessingError,
     DatabaseException
 )
-from api.schemas import APIResponse
-from utils.file_processor import FileProcessor
 
-router = APIRouter()
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Create logger
+logger = get_logger(__name__)
+
+# Create router
+router = APIRouter(prefix="/upload", tags=["upload"])
 
 # Background tasks queue
 background_tasks = {}
@@ -1098,8 +1093,14 @@ async def upload_query(
         
         created_query = query_response.data[0]
         
+        # Return structured response matching the UploadQueryResult model
         return {
-            "query_id": created_query["query_id"],
-            "name": created_query["name"],
-            "description": created_query["description"]
+            "status": "success",
+            "data": {
+                "upload_id": created_query["query_id"],
+                "filename": file.filename,
+                "status": "completed",
+                "progress": 100.0,
+                "created_at": datetime.now().isoformat()
+            }
         }

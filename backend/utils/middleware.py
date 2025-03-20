@@ -6,12 +6,15 @@ This module contains middleware classes that can be applied to the FastAPI app.
 
 import time
 import uuid
+import os
 from typing import Callable, Dict, Any
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 from utils.error_handler import logger
 
+# Check if we're in production mode
+IS_PRODUCTION = os.getenv("NODE_ENV") == "production"
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
@@ -119,9 +122,16 @@ def setup_middleware(app: FastAPI) -> None:
     Args:
         app: The FastAPI application
     """
-    # Add request logging middleware
+    # Add request logging middleware with environment-appropriate settings
     app.add_middleware(
         RequestLoggingMiddleware,
-        log_headers=False,  # Set to True to log headers in development
-        exclude_paths=["/docs", "/openapi.json", "/redoc", "/favicon.ico"]
+        log_headers=not IS_PRODUCTION,  # Only log headers in development
+        exclude_paths=[
+            "/docs", 
+            "/openapi.json", 
+            "/redoc", 
+            "/favicon.ico",
+            "/health",  # Don't log health checks in production
+            "/metrics"  # Don't log metrics endpoints in production
+        ]
     ) 

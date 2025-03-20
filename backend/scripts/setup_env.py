@@ -1,76 +1,113 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Environment Setup Script
+Environment Variable Setup Script for Insurance Report Generator
 
-This script helps set up environment variables for the application.
-It copies the appropriate .env.example file to .env based on the specified environment.
+This script automates the configuration of environment variables for both 
+backend and frontend components of the application by:
+
+1. Copying the appropriate .env.example file to backend/.env
+2. Creating a filtered version for frontend in frontend/.env.local
+
+Usage:
+    python backend/scripts/setup_env.py --env [local|production]
 """
 
 import os
 import shutil
 import argparse
+import sys
 from pathlib import Path
 
+# Define environment variable prefixes that should be included in frontend .env file
+FRONTEND_PREFIXES = [
+    "NEXT_PUBLIC_",
+    "NODE_ENV",
+    "DEBUG"
+]
+
 def get_project_root():
-    """Get the project root directory"""
-    # Assuming script is in backend/scripts
-    script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    backend_dir = script_dir.parent
-    project_root = backend_dir.parent
+    """Get the absolute path to the project root directory"""
+    # Get the directory this script is in
+    script_dir = Path(__file__).resolve().parent
+    
+    # Go up two levels (from /backend/scripts to project root)
+    project_root = script_dir.parent.parent
+    
     return project_root
 
 def setup_environment(env_type='local'):
     """
-    Copy appropriate .env file based on environment
+    Set up environment variables for both backend and frontend
     
     Args:
-        env_type: Environment type ('local', 'production')
+        env_type: Type of environment ('local' or 'production')
     """
     project_root = get_project_root()
-    backend_dir = project_root / 'backend'
-    frontend_dir = project_root / 'frontend'
     
-    # Source paths
-    main_example = project_root / '.env.example'
-    env_specific_example = project_root / f'.env.{env_type}.example'
-    
-    # Choose the right source file
-    source = env_specific_example if env_specific_example.exists() else main_example
-    
-    if not source.exists():
-        print(f"Error: Could not find {source}")
-        return False
-    
-    # Set up backend .env
-    backend_target = backend_dir / '.env'
-    print(f"Copying {source} to {backend_target}")
-    shutil.copy(source, backend_target)
-    
-    # Set up frontend .env.local
-    frontend_target = frontend_dir / '.env.local'
-    print(f"Copying {source} to {frontend_target}")
-    
-    # Filter only the NEXT_PUBLIC_ variables for frontend
-    with open(source, 'r') as src_file, open(frontend_target, 'w') as dest_file:
-        # First write a header
-        dest_file.write("# Frontend environment variables\n")
-        dest_file.write("# Auto-generated from .env.example\n\n")
+    # Define source and destination paths
+    if env_type == 'production':
+        source_env = project_root / '.env.production.example'
+    else:
+        source_env = project_root / '.env.local.example'
         
-        for line in src_file:
-            # Only copy NEXT_PUBLIC_ variables and non-comment, non-empty lines
-            if line.strip() and not line.strip().startswith('#') and 'NEXT_PUBLIC_' in line:
-                dest_file.write(line)
+    # If the specific example doesn't exist, fall back to the general one
+    if not source_env.exists():
+        source_env = project_root / '.env.example'
+        
+    backend_env = project_root / 'backend' / '.env'
+    frontend_env = project_root / 'frontend' / '.env.local'
     
-    print(f"Environment configured for {env_type}")
-    return True
+    if not source_env.exists():
+        print(f"Error: Source environment file {source_env} not found.")
+        sys.exit(1)
+    
+    # Create directories if they don't exist
+    os.makedirs(project_root / 'backend', exist_ok=True)
+    os.makedirs(project_root / 'frontend', exist_ok=True)
+    
+    # 1. Copy the source file to backend/.env
+    print(f"Copying {source_env} to {backend_env}")
+    shutil.copy2(source_env, backend_env)
+    
+    # 2. Create frontend/.env.local with filtered variables
+    print(f"Creating filtered version for frontend in {frontend_env}")
+    
+    with open(source_env, 'r') as source_file:
+        frontend_lines = []
+        
+        for line in source_file:
+            line = line.strip()
+            
+            # Skip empty lines and comments, but keep section headers
+            if not line or (line.startswith('#') and 'FRONTEND' not in line and 'frontend' not in line.lower()):
+                continue
+                
+            # Include all comment lines with "frontend" in them
+            if line.startswith('#') and ('FRONTEND' in line or 'frontend' in line.lower()):
+                frontend_lines.append(line)
+                continue
+                
+            # Include lines with frontend prefixes
+            for prefix in FRONTEND_PREFIXES:
+                if line.startswith(prefix + '=') or line.startswith(prefix + ' ='):
+                    frontend_lines.append(line)
+                    break
+    
+    # Write frontend environment file
+    with open(frontend_env, 'w') as frontend_file:
+        frontend_file.write("# Frontend Environment Variables\n")
+        frontend_file.write("# Auto-generated from " + source_env.name + "\n\n")
+        frontend_file.write("\n".join(frontend_lines))
+    
+    print("Environment setup complete!")
+    print(f"- Backend: {backend_env}")
+    print(f"- Frontend: {frontend_env}")
+    print("\nNOTE: You should review these files and update values as needed.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Set up environment variables')
-    parser.add_argument('--env', default='local', choices=['local', 'production'],
-                      help='Environment type (local, production)')
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='Set up environment variables for Insurance Report Generator')
+    parser.add_argument('--env', default='local', choices=['local', 'production'], 
+                        help='Environment type (local or production)')
     
-    if setup_environment(args.env):
-        print("✅ Environment setup complete")
-    else:
-        print("❌ Environment setup failed") 
+    args = parser.parse_args()
+    setup_environment(args.env) 

@@ -232,13 +232,17 @@ app.add_exception_handler(BaseAPIException, api_exception_handler)
 setup_middleware(app)
 
 # Use the new settings property for allowed origins
-print(f"CORS allowed origins: {settings.allowed_origins}")
+# Use a conditional log level based on environment
+if os.getenv("NODE_ENV") == "production":
+    logger.info(f"CORS allowed origins in production: {settings.allowed_origins}")
+else:
+    print(f"CORS allowed origins: {settings.allowed_origins}")
 
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,  # Use the new property from settings
-    allow_credentials=False,  # Set to False when using "*" for allowed origins
+    allow_credentials=True,  # Set to True for cookies if using authentication
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Include OPTIONS for preflight
     allow_headers=["*"],  # Allow all headers
     expose_headers=["Content-Disposition"],  # Expose headers needed for file downloads
@@ -260,12 +264,50 @@ async def root():
     return {"message": "Welcome to the Scrittore Automatico di Perizie API"}
 
 
+@app.get("/health", tags=["Monitoring"])
+async def health_check():
+    """
+    Health check endpoint for monitoring systems.
+    Returns 200 OK if the API is running properly.
+    """
+    # Check critical dependencies
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "0.1.0",
+    }
+    
+    # Check if we can access the file system
+    try:
+        # Try to write a test file
+        test_path = safe_path_join(settings.UPLOAD_DIR, ".health_check")
+        with open(test_path, "w") as f:
+            f.write("ok")
+        os.remove(test_path)
+        health_status["file_system"] = "ok"
+    except Exception as e:
+        health_status["file_system"] = "error"
+        health_status["file_system_error"] = str(e)
+        health_status["status"] = "degraded"
+    
+    return health_status
+
+
 @app.get("/cors-test", tags=["Debug"])
 async def cors_test(request: Request):
     """
     Simple endpoint to test if CORS is working correctly
     Returns details about the request to help debug CORS issues
     """
+    # Check if we're in production mode
+    if os.getenv("NODE_ENV") == "production":
+        # In production, return minimal information
+        return {
+            "message": "CORS is configured correctly", 
+            "status": "ok"
+        }
+    
+    # In development, return detailed debug information
     return {
         "message": "CORS is working correctly", 
         "status": "ok",
@@ -281,55 +323,28 @@ async def cors_test(request: Request):
 @app.get("/debug", tags=["Debug"])
 async def debug():
     """Debug endpoint to check environment and imports"""
-    result = {
-        "cwd": os.getcwd(),
-        "python_path": sys.path,
-        "dir_contents": os.listdir("."),
-    }
-    
-    # Test imports
-    import_results = {}
-    
-    # Try relative import
-    try:
-        from models import Report, File, User
-        import_results["from_models"] = "Success"
-    except ImportError as e:
-        import_results["from_models"] = f"Error: {str(e)}"
+    # Only enable in development mode
+    if os.getenv("NODE_ENV") == "production":
+        return {"message": "Debug endpoints are disabled in production"}
         
-    # Try import with backend prefix - commenting this out for consistency
-    try:
-        # Using consistent import pattern instead of 'from models'
-        from models import Report, File, User
-        import_results["from_backend_models"] = "Success"
-    except ImportError as e:
-        import_results["from_backend_models"] = f"Error: {str(e)}"
+    # In development, return detailed system information
+    modules = []
+    for name, module in sys.modules.items():
+        if "." not in name and not name.startswith("_"):
+            modules.append(name)
     
-    # Check file existence
-    file_checks = {
-        "models.py_exists": os.path.exists("models.py"),
-        "backend_models.py_exists": os.path.exists("backend/models.py"),
-        "api_generate.py_exists": os.path.exists("api/generate.py"),
+    return {
+        "message": "Debug information",
+        "environment": {
+            "python_version": sys.version,
+            "sys_path": sys.path,
+            "os_name": os.name,
+            "current_dir": os.getcwd(),
+            "upload_dir": settings.UPLOAD_DIR,
+            "generated_reports_dir": settings.GENERATED_REPORTS_DIR
+        },
+        "loaded_modules": sorted(modules)
     }
-    
-    # Check file contents
-    file_contents = {}
-    try:
-        if os.path.exists("api/generate.py"):
-            with open("api/generate.py", "r") as f:
-                for i, line in enumerate(f, 1):
-                    if "from " in line and "models" in line and "import" in line:
-                        file_contents[f"generate.py_line_{i}"] = line.strip()
-                        if i >= 20:  # Only check first 20 lines
-                            break
-    except Exception as e:
-        file_contents["error"] = str(e)
-    
-    result["import_results"] = import_results
-    result["file_checks"] = file_checks
-    result["file_contents"] = file_contents
-    
-    return result
 
 
 if __name__ == "__main__":

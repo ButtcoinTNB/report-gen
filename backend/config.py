@@ -20,6 +20,29 @@ except ImportError:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
+# Check if we're in production mode
+IS_PRODUCTION = os.getenv("NODE_ENV") == "production"
+
+# Helper function to determine appropriate data directories for the environment
+def get_data_dirs():
+    """
+    Get appropriate data directories based on environment (dev, prod, Render, etc.)
+    Returns tuple of (uploads_dir, reports_dir)
+    """
+    # For Render with persistent disk
+    if IS_PRODUCTION and os.path.exists("/var/data"):
+        uploads_dir = "/var/data/uploads"
+        reports_dir = "/var/data/generated_reports"
+        logger.info("Using Render persistent disk for storage")
+    else:
+        # For local development or if persistent disk isn't available
+        uploads_dir = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(BASE_DIR), "uploads"))
+        reports_dir = os.getenv("GENERATED_REPORTS_DIR", os.path.join(os.path.dirname(BASE_DIR), "generated_reports"))
+        
+    return uploads_dir, reports_dir
+
+# Get appropriate data directories
+UPLOADS_DIR, REPORTS_DIR = get_data_dirs()
 
 class Settings(BaseSettings):
     # API Keys
@@ -59,12 +82,19 @@ class Settings(BaseSettings):
     # in future versions
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
-    # File storage - use absolute paths
-    UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(BASE_DIR), "uploads"))
-    GENERATED_REPORTS_DIR: str = os.getenv("GENERATED_REPORTS_DIR", os.path.join(os.path.dirname(BASE_DIR), "generated_reports"))
-    MAX_UPLOAD_SIZE: int = int(
-        os.getenv("MAX_UPLOAD_SIZE", "1073741824")
-    )  # 1GB default
+    # File storage - use appropriate paths
+    UPLOAD_DIR: str = Field(
+        default=UPLOADS_DIR,
+        description="Directory for uploaded files"
+    )
+    GENERATED_REPORTS_DIR: str = Field(
+        default=REPORTS_DIR,
+        description="Directory for generated report files"
+    )
+    MAX_UPLOAD_SIZE: int = Field(
+        default=int(os.getenv("MAX_UPLOAD_SIZE", "1073741824")),
+        description="Maximum upload size in bytes (1GB default)"
+    )
 
     # Data retention settings - how long to keep files before auto-deletion
     DATA_RETENTION_HOURS: int = int(

@@ -30,7 +30,7 @@ source venv/bin/activate
 
 # Install Python dependencies
 echo -e "${YELLOW}Installing Python dependencies...${NC}"
-pip install pydantic werkzeug python-magic PyMuPDF Pillow docx2txt pytest
+pip install pydantic werkzeug python-magic PyMuPDF Pillow docx2txt pytest fastapi python-multipart httpx pydantic-settings uvicorn
 
 echo -e "${GREEN}Environment setup complete!${NC}"
 echo ""

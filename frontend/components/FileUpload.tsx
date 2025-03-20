@@ -24,9 +24,10 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
+import BackupIcon from '@mui/icons-material/Backup';
 import { uploadApi } from '../src/services'; // Updated import path
 import { useDropzone } from 'react-dropzone';
-import { UploadService } from '../src/services/api/UploadService';
+import { UploadService, CHUNKED_UPLOAD_SIZE_THRESHOLD } from '../src/services/api/UploadService';
 import { adaptApiResponse } from '../src/utils/adapters';
 import { logger } from '../src/utils/logger';
 
@@ -109,6 +110,11 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
     }
   };
   
+  // Determine if a file is large and should use chunked upload
+  const isLargeFile = (file: File) => {
+    return file.size > CHUNKED_UPLOAD_SIZE_THRESHOLD;
+  };
+  
   const onDrop = useCallback((acceptedFiles: File[]) => {
     // Simply update the files state and show filename
     setFiles((prev) => [...prev, ...acceptedFiles]);
@@ -126,32 +132,33 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
       // Initialize the upload service
       const uploadService = new UploadService();
       
-      // Use the upload method with progress tracking
+      // Use the uploadFiles method which now handles both regular and chunked uploads
       const response = await uploadService.uploadFiles(files, (progressValue: number) => {
-        // Update progress based on upload progress
-        setProgress(progressValue * 0.8); // Scale to 80% of total progress
-        setProgressMessage(`Uploading... ${progressValue}%`);
+        setProgress(progressValue);
+        
+        // Update message based on progress
+        if (progressValue < 25) {
+          setProgressMessage(`Starting upload... ${progressValue}%`);
+        } else if (progressValue < 50) {
+          setProgressMessage(`Uploading files... ${progressValue}%`);
+        } else if (progressValue < 75) {
+          setProgressMessage(`Processing... ${progressValue}%`);
+        } else if (progressValue < 100) {
+          setProgressMessage(`Almost done... ${progressValue}%`);
+        } else {
+          setProgressMessage('Upload complete!');
+        }
       });
       
-      // Convert the response to camelCase using the adapter
-      const camelResponse = adaptApiResponse<UploadResponseCamel>(response);
-      
-      // Update progress to indicate processing
-      setProgress(90);
-      setProgressMessage('Processing uploaded files...');
-      
-      // Set a timeout to simulate backend processing
+      // Wait a moment to show 100% progress
       setTimeout(() => {
-        setProgress(100);
-        setProgressMessage('Upload complete!');
-        
         // Call the onUploadSuccess callback with the report ID
-        if (camelResponse && camelResponse.reportId) {
-          onUploadSuccess(camelResponse.reportId);
+        if (response && response.reportId) {
+          onUploadSuccess(response.reportId);
         } else {
           throw new Error('No report ID received from server');
         }
-      }, 1500);
+      }, 1000);
       
     } catch (error) {
       logger.error('Error uploading files:', error);
@@ -253,7 +260,12 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
                 <ListItem
                   key={index}
                   secondaryAction={
-                    <IconButton edge="end" aria-label="delete" onClick={() => handleRemoveFile(index)}>
+                    <IconButton 
+                      edge="end" 
+                      aria-label="delete" 
+                      onClick={() => handleRemoveFile(index)}
+                      disabled={uploading}
+                    >
                       <DeleteIcon />
                     </IconButton>
                   }
@@ -261,11 +273,22 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
                   <ListItemIcon>{getFileIcon(file)}</ListItemIcon>
                   <ListItemText 
                     primary={file.name} 
-                    secondary={`${getFileSize(file.size)} • ${file.type || 'Unknown type'}`}
-                    primaryTypographyProps={{ 
-                      noWrap: true, 
-                      style: { maxWidth: '60vw' } 
-                    }}
+                    secondary={
+                      <React.Fragment>
+                        <Typography variant="body2" component="span">
+                          {getFileSize(file.size)}
+                        </Typography>
+                        {isLargeFile(file) && (
+                          <Chip 
+                            size="small" 
+                            label="Chunked Upload" 
+                            color="primary" 
+                            icon={<BackupIcon />} 
+                            sx={{ ml: 1, height: 20, '& .MuiChip-label': { fontSize: '0.7rem', px: 1 } }}
+                          />
+                        )}
+                      </React.Fragment>
+                    }
                   />
                 </ListItem>
               ))}
