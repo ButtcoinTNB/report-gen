@@ -14,7 +14,48 @@ npm install --save-dev typescript @types/node
 
 This occurs when the TypeScript compiler is required but the necessary packages aren't being installed correctly during the Vercel build process.
 
-## Solutions Implemented
+## Solutions Implemented (Latest First)
+
+### 1. Comprehensive TypeScript Installation Script
+
+We've created a Node.js script (`install-deps.js`) that handles all TypeScript-related setup:
+
+- Updates package.json directly to include the correct TypeScript dependencies
+- Installs the dependencies if needed
+- Creates the required TypeScript declaration files
+- Updates next.config.js to ignore TypeScript errors during build
+
+This script runs before the build process via:
+```json
+"vercel-build": "node install-deps.js && next build"
+```
+
+### 2. Enhanced Vercel Configuration
+
+- Created a `vercel.json` at the project root to override default build settings
+- Modified the install command to explicitly install TypeScript dependencies:
+```json
+"installCommand": "cd frontend && npm install --no-save --legacy-peer-deps typescript@4.9.5 @types/node@18.15.11 @types/react@18.0.33 @types/react-dom@18.0.11"
+```
+
+### 3. Committed TypeScript Type Definitions
+
+- Added the TypeScript declaration for `react-simplemde-editor` directly to the codebase
+- Created an empty type definition file to ensure the types directory exists in the repository
+
+### 4. NPM Configuration
+
+Added `.npmrc` files to both the project root and frontend directory to:
+- Enable legacy peer dependencies compatibility (`legacy-peer-deps=true`)
+- Reduce noise during installation (`fund=false`, `audit=false`)
+- Ensure exact versions are used (`save-exact=true`)
+
+### 5. Package.json Updates
+
+- Updated the build scripts to properly handle TypeScript installation
+- Specified exact versions of TypeScript dependencies compatible with Next.js 12.1.6
+
+## Previous Solutions
 
 ### 1. Deployment Setup Script
 
@@ -23,16 +64,7 @@ Created a dedicated deployment script (`scripts/vercel-deploy-setup.sh`) that:
 - Creates necessary TypeScript declarations for third-party libraries
 - Updates Next.js configuration to handle TypeScript errors gracefully
 
-This script is designed to run as part of the Vercel build process by updating the build command to:
-```
-sh ../scripts/vercel-deploy-setup.sh && npm run build
-```
-
-### 2. TypeScript Declaration Files
-
-Added TypeScript declaration for the `react-simplemde-editor` package at `frontend/types/react-simplemde-editor.d.ts`, which resolves type errors related to this third-party package.
-
-### 3. Next.js Configuration Update
+### 2. Next.js Configuration Update
 
 Modified `next.config.js` to include TypeScript error handling:
 ```javascript
@@ -42,44 +74,31 @@ typescript: {
 },
 ```
 
-This ensures that minor TypeScript errors don't prevent successful builds.
-
-### 4. Updated Deployment Documentation
-
-Updated several documentation files:
-
-1. **VERCEL_DEPLOYMENT.md**: Completely revised with detailed instructions for deploying to Vercel, including:
-   - Setting the correct root directory
-   - Using the deployment setup script
-   - Configuring environment variables
-   - Troubleshooting common issues
-
-2. **FRONTEND_TYPESCRIPT_FIX.md**: Created a dedicated guide for resolving TypeScript issues, with:
-   - Explanation of common TypeScript errors
-   - Multiple solution approaches (script-based and manual)
-   - Specific error cases and their solutions
-   - Next steps after fixing TypeScript issues
-
 ## How to Apply These Fixes
 
-When deploying to Vercel:
+The fixes are now applied in multiple layers to provide redundancy and ensure the build succeeds:
 
-1. Set the root directory to `/frontend`
-2. Set the build command to `sh ../scripts/vercel-deploy-setup.sh && npm run build`
-3. Configure all required environment variables with `NEXT_PUBLIC_` prefix
-4. Deploy and monitor the build logs to ensure TypeScript errors are resolved
+1. Vercel configuration via `vercel.json` will:
+   - Set the root directory to `/frontend`
+   - Install TypeScript dependencies explicitly
+   - Use our custom build script that handles TypeScript setup
+
+2. The `install-deps.js` script will:
+   - Ensure package.json contains the correct dependencies
+   - Install any missing dependencies
+   - Create type declarations and update configs
+
+3. The `next.config.js` file includes:
+   - TypeScript error handling to allow builds to succeed even with TypeScript errors
 
 ## Verification Steps
 
 After applying these fixes, verify:
 
-1. The build completes successfully without TypeScript errors
-2. The application loads correctly in the browser
-3. All frontend features work as expected, including:
-   - Markdown editor functionality
-   - File upload capabilities
-   - API communication with the backend
-   - Authentication flows
+1. The TypeScript dependencies are installed correctly (check the build logs)
+2. The build succeeds without TypeScript errors
+3. The application loads correctly in the browser
+4. All frontend features work as expected
 
 ## Future Considerations
 

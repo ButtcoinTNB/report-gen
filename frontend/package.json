@@ -5,9 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node tsconfig.fix.js",
+    "prebuild": "node install-deps.js",
     "build": "next build",
-    "vercel-build": "node tsconfig.fix.js && next build",
+    "vercel-build": "node install-deps.js && next build",
     "start": "next start",
     "lint": "next lint",
     "analyze": "cross-env ANALYZE=true next build",
