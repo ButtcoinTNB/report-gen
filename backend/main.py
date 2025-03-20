@@ -208,10 +208,11 @@ print(f"CORS allowed origins: {allowed_origins}")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for debugging
-    allow_credentials=True,
+    allow_origins=["*"],  # Use wildcard for simplicity, more reliable in CORS debugging
+    allow_credentials=False,  # Set to False when using "*" for allowed origins
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Include OPTIONS for preflight
-    allow_headers=["*"],
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["Content-Disposition"],  # Expose headers needed for file downloads
     max_age=86400,  # Cache preflight request for 24 hours
 )
 
@@ -226,6 +227,24 @@ app.include_router(download.router, prefix="/api/download", tags=["Download"])
 @app.get("/", tags=["Root"])
 async def root():
     return {"message": "Welcome to the Scrittore Automatico di Perizie API"}
+
+
+@app.get("/cors-test", tags=["Debug"])
+async def cors_test(request: Request):
+    """
+    Simple endpoint to test if CORS is working correctly
+    Returns details about the request to help debug CORS issues
+    """
+    return {
+        "message": "CORS is working correctly", 
+        "status": "ok",
+        "request_details": {
+            "headers": dict(request.headers),
+            "client_host": request.client.host if request.client else None,
+            "method": request.method,
+            "url": str(request.url)
+        }
+    }
 
 
 @app.get("/debug", tags=["Debug"])
@@ -283,4 +302,12 @@ async def debug():
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # This configuration is only used for local development
+    # For production on Render, the command is specified in the Render dashboard
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=8000, 
+        reload=True,
+        timeout_keep_alive=120  # Keep connection alive longer
+    )
