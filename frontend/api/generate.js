@@ -14,12 +14,26 @@ export async function analyzeDocuments(reportId, additionalInfo = "") {
   try {
     console.log("Analyzing documents for report ID:", reportId);
     
+    // Ensure we have a valid report ID
+    if (!reportId) {
+      throw new Error("Report ID is required for document analysis");
+    }
+    
     const payload = { 
-      document_ids: [reportId],
+      report_id: reportId, // Add required report_id
+      document_ids: [reportId], // Keep document_ids as before
       additional_info: additionalInfo
     };
     
-    const response = await axios.post(`${config.endpoints.generate}/analyze`, payload);
+    console.log("Analysis payload:", payload);
+    
+    const response = await axios.post(`${config.endpoints.generate}/analyze`, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      withCredentials: false
+    });
     
     console.log("Analysis API response:", response.data);
     
@@ -57,11 +71,20 @@ export async function generateReportWithInfo(reportId, additionalInfo = "", onPr
     }
     
     const payload = {
+      report_id: reportId,  // Add this to match the backend endpoint
       document_ids: [reportId],
       additional_info: additionalInfo
     };
     
-    const response = await axios.post(`${config.endpoints.generate}/generate`, payload);
+    console.log("Generate payload:", payload);
+    
+    const response = await axios.post(`${config.endpoints.generate}/generate`, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      withCredentials: false
+    });
     
     console.log("Generate API response:", response.data);
     

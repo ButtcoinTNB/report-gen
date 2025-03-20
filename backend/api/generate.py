@@ -42,6 +42,7 @@ class StructureReportRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     document_ids: List[UUID4]
     additional_info: str = ""
+    report_id: Optional[UUID4] = None  # Make report_id optional to maintain backwards compatibility
 
 
 class GenerateRequest(BaseModel):
@@ -204,12 +205,23 @@ async def generate_report(
 
 @router.post("/generate")
 async def generate_report_content(
-    report_id: UUID4 = Form(...),
-    additional_info: Optional[str] = Form(None),
-    template_name: Optional[str] = Form("template.docx")
+    request: GenerateRequest
 ) -> Dict[str, Any]:
     """Generate content for an existing report"""
     try:
+        # Extract values from request
+        report_id = request.document_ids[0] if request.document_ids else None
+        
+        # Use provided report_id if available, otherwise use first document_id
+        if hasattr(request, 'report_id') and request.report_id:
+            report_id = request.report_id
+            
+        if not report_id:
+            raise HTTPException(status_code=400, detail="Report ID is required")
+            
+        additional_info = request.additional_info
+        template_id = request.template_id
+        
         async with supabase_client_context() as supabase:
             # Get report
             report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
@@ -220,8 +232,9 @@ async def generate_report_content(
             
             # Get template if specified
             template = None
-            if report.get("template_id"):
-                template_response = await supabase.table("templates").select("*").eq("template_id", report["template_id"]).execute()
+            if template_id or report.get("template_id"):
+                template_id_to_use = str(template_id) if template_id else report["template_id"]
+                template_response = await supabase.table("templates").select("*").eq("template_id", template_id_to_use).execute()
                 if template_response.data:
                     template = template_response.data[0]
             
@@ -304,8 +317,13 @@ async def simple_test(data: Dict[str, Any]):
 async def analyze_documents(request: AnalyzeRequest):
     """Analyze uploaded documents and extract variables."""
     try:
-        # Get document paths
-        document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
+        # Get document paths - use the report_id if provided, otherwise use document_ids
+        if request.report_id:
+            # Use the provided report_id to get report files
+            document_paths = [get_document_path(request.report_id)]
+        else:
+            # Fall back to document_ids
+            document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
         
         # Extract variables from documents
         result = await extract_template_variables(
