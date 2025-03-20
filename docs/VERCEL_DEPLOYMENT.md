@@ -2,6 +2,109 @@
 
 This guide provides instructions for deploying the Insurance Report Generator frontend on Vercel.
 
+## Deploying the Frontend on Vercel
+
+This guide will walk you through deploying the frontend of the Insurance Report Generator application on Vercel.
+
+### Prerequisites
+
+- A Vercel account
+- Git repository access
+- Access to the backend API endpoint (deployed on Render or elsewhere)
+
+### Setup Steps
+
+1. **Login to Vercel Dashboard**
+   - Go to [Vercel](https://vercel.com) and login to your account
+   - Click on "Add New..." → "Project"
+
+2. **Import Git Repository**
+   - Select your Git provider and repository
+   - Find the Insurance Report Generator repository and click "Import"
+
+3. **Configure Project**
+   - **Project Name**: Enter a name for your deployment (e.g., insurance-report-generator)
+   - **Framework Preset**: Select Next.js
+   - **Root Directory**: Set to `/frontend` (important!)
+   - **Build and Output Settings**:
+     - Build Command: `sh ../scripts/vercel-deploy-setup.sh && npm run build`
+     - Output Directory: `.next`
+     - Install Command: `npm install`
+     - Development Command: `npm run dev`
+
+4. **Environment Variables**
+   Set up the following environment variables:
+   ```
+   NEXT_PUBLIC_API_URL=https://your-backend-url.onrender.com
+   NEXT_PUBLIC_UPLOAD_CHUNK_SIZE=1048576
+   NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+   ```
+   
+   Note: All frontend environment variables MUST be prefixed with `NEXT_PUBLIC_` to be accessible.
+
+5. **Fixing TypeScript Dependencies**
+   The deployment setup script (`vercel-deploy-setup.sh`) will handle:
+   - Installing TypeScript dependencies
+   - Setting up type declarations for external libraries
+   - Configuring Next.js to handle TypeScript errors gracefully
+
+   If you encounter issues with the script, you can manually:
+   - Ensure your `package.json` includes:
+     ```json
+     "devDependencies": {
+       "typescript": "^4.9.5",
+       "@types/node": "^18.15.11",
+       "@types/react": "^18.0.33",
+       "@types/react-dom": "^18.0.11",
+     }
+     ```
+   - Create a proper `tsconfig.json` file 
+   - Add TypeScript declarations for external modules
+
+6. **Handling TypeScript Errors**
+   - If you encounter TypeScript errors during build, the setup script adds `ignoreBuildErrors: true` to the TypeScript configuration in `next.config.js`
+   - This allows the build to succeed even with TypeScript errors
+
+7. **Deploy**
+   - Click "Deploy"
+   - Vercel will build and deploy your application
+
+8. **Verify Deployment**
+   - Once deployment is complete, click the generated URL to visit your site
+   - Verify that the application is working correctly and can communicate with the backend
+
+### Troubleshooting
+
+#### Missing TypeScript Dependencies
+If you encounter errors related to TypeScript or missing types:
+1. Check that the build command includes the setup script: `sh ../scripts/vercel-deploy-setup.sh && npm run build`
+2. Verify the script has execute permissions (`chmod +x ../scripts/vercel-deploy-setup.sh`)
+3. Check Vercel logs to see if the script executed properly
+
+#### API Connection Issues
+If the frontend cannot connect to the backend:
+1. Check the `NEXT_PUBLIC_API_URL` environment variable
+2. Make sure CORS is properly configured on the backend
+3. Verify that the backend is up and running
+
+#### Module Resolution Errors
+If you see errors related to modules not being found:
+1. Make sure all dependencies are correctly listed in `package.json`
+2. Verify that the build command is installing dependencies properly
+3. Check if custom type declarations are needed for third-party modules
+
+### Custom Domain Setup (Optional)
+
+1. Go to your project settings in Vercel
+2. Navigate to "Domains"
+3. Add your custom domain
+4. Follow the instructions to configure DNS settings
+
+### Continuous Deployment
+
+By default, Vercel will deploy your application automatically when changes are pushed to the main branch. You can configure this behavior in the project settings.
+
 ## Setting Up the Frontend Project
 
 1. Create a new project on Vercel
@@ -93,23 +196,6 @@ To optimize the build process:
    legacy-peer-deps=true
    ```
 
-## Deployment Steps
-
-1. Push your code with all necessary dependencies to your GitHub repository
-2. In the Vercel dashboard, click "New Project"
-3. Import your GitHub repository
-4. Configure the project settings as detailed above
-5. Add all the required environment variables
-6. Click "Deploy"
-7. Monitor the build logs for any errors
-8. Your frontend will be available at the Vercel-assigned domain (e.g., `https://your-project.vercel.app`)
-
-## Custom Domain (Optional)
-
-1. In the Vercel dashboard, go to your project
-2. Click on "Settings" > "Domains"
-3. Add your custom domain and follow the DNS configuration instructions
-
 ## Post-Deployment Verification
 
 After deployment, verify:
@@ -119,20 +205,6 @@ After deployment, verify:
 3. File uploads and processing function correctly
 4. The UI is responsive and looks as expected
 5. The markdown editor loads and works correctly
-
-## Troubleshooting
-
-If you encounter issues during deployment, please refer to the [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md) document for detailed solutions to common problems.
-
-### Common Issues
-
-1. **Missing Module Errors**: If you see errors about missing modules like `react-simplemde-editor`, refer to the [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#missing-module-issues) section.
-
-2. **TypeScript Errors**: If you encounter TypeScript-related errors, see our detailed solutions in the [Frontend TypeScript Fix](./FRONTEND_TYPESCRIPT_FIX.md) document.
-
-3. **Build Performance**: For slow builds or timeouts, see our optimization recommendations in the [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#build-performance-issues) section.
-
-4. **API Connection Issues**: If your frontend can't connect to the backend, check the environment variable configuration as detailed in [Frontend Deployment Fixes](./FRONTEND_DEPLOYMENT_FIXES.md#environment-variable-configuration).
 
 ## Redeploy After Changes
 
