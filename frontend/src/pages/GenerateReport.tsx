@@ -208,8 +208,7 @@ const GenerateReport: React.FC = () => {
 
       {!isLoading && currentStep === 'upload' && (
         <DocumentUpload
-          onUploadComplete={handleDocumentsUploaded}
-          isLoading={isLoading}
+          onUploadComplete={(reportId: string) => handleDocumentsUploaded([reportId])}
         />
       )}
 
