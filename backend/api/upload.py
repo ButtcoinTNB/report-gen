@@ -12,7 +12,7 @@ from typing import List, Optional
 from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body
 from fastapi.responses import JSONResponse
 
-from backend.config import get_settings
+from backend.config import settings
 from backend.utils.file_handler import save_uploaded_file, delete_uploaded_file, get_file_info
 from backend.utils.logger import get_logger
 from backend.api.schemas import APIResponse, UploadQueryResult  # Using absolute imports
