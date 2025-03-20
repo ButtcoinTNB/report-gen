@@ -64,8 +64,10 @@ export async function uploadFile(files, templateId = 1) {
     
     const response = await axios.post(`${config.endpoints.upload}/documents`, formData, {
       headers: {
-        'Content-Type': 'multipart/form-data'
+        'Content-Type': 'multipart/form-data',
+        'Accept': 'application/json'
       },
+      withCredentials: false, // Set to false when using "*" for allowed origins in the backend
       timeout: 120000 // 120 second timeout for larger files
     });
     
