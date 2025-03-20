@@ -1,5 +1,7 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { config } from '../../../config';
+import { logger } from '../../utils/logger';
+import { adaptApiRequest, adaptApiResponse } from '../../utils/adapters';
 
 /**
  * Configuration options for API requests
@@ -33,6 +35,16 @@ export interface ApiClientConfig {
   /** Default number of retry attempts */
   defaultRetries?: number;
   /** Default delay between retries in milliseconds */
+  defaultRetryDelay?: number;
+}
+
+/**
+ * Frontend-friendly version of API client config with camelCase
+ */
+export interface ApiClientConfigCamel {
+  baseUrl: string;
+  defaultTimeout?: number;
+  defaultRetries?: number;
   defaultRetryDelay?: number;
 }
 
@@ -188,7 +200,7 @@ export class ApiClient {
         }
         
         // Log retry attempt
-        console.log(`Request failed, retrying (${attempt + 1}/${maxRetries})...`, error);
+        logger.api(this.baseUrl, `Request failed, retrying (${attempt + 1}/${maxRetries})...`, error);
         
         // Call onRetry callback if provided
         if (onRetry) {
@@ -219,6 +231,9 @@ export function createApiClient(
     timeout?: number;
   } = {}
 ): ApiClient {
+  // Convert options to camelCase (though in this case they're already camelCase)
+  const camelOptions = adaptApiRequest(options);
+  
   let baseUrl: string;
   
   // If endpoint is a full URL, use it directly
@@ -239,7 +254,7 @@ export function createApiClient(
     if (endpointUrl) {
       baseUrl = endpointUrl;
     } else {
-      console.error(`No endpoint configured for '${endpoint}'`);
+      logger.error(`No endpoint configured for '${endpoint}'`);
       // Fallback to API_URL as base
       baseUrl = `${config.API_URL}/${endpoint}`;
     }
@@ -247,8 +262,8 @@ export function createApiClient(
   
   return new ApiClient({
     baseUrl,
-    defaultRetries: options.retries,
-    defaultRetryDelay: options.retryDelay,
-    defaultTimeout: options.timeout
+    defaultRetries: camelOptions.retries,
+    defaultRetryDelay: camelOptions.retry_delay,
+    defaultTimeout: camelOptions.timeout
   });
 } 

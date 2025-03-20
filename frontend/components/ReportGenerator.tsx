@@ -19,8 +19,9 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import SchemaIcon from '@mui/icons-material/Schema';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { generateReport } from '../src/services/api'; // Import the API function
+import { generateApi } from '../src/services'; // Import the API adapter
 import { Report } from '../src/types';
+import { logger } from '../src/utils/logger';
 
 // Define a subtle pulsing animation for the progress bar
 const pulse = keyframes`
@@ -173,55 +174,43 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
   }, [currentStep, displayStep]);
 
   const handleGenerateReport = async () => {
-    if (!reportId) {
-        onError(new Error('No document has been uploaded'));
-        return;
-    }
-
-    // Reset states
-    setState(prev => ({ ...prev, isGenerating: true, error: null, documentIds: [], additionalInfo: '', templateId: undefined }));
-    setCurrentStep(0);
-    setDisplayStep(0);
-    setProgress(0);
-
     try {
-        const result: ReportResponse = await generateReport(
-            {
-                reportId,
-                documentIds: state.documentIds,
-                additionalInfo: state.additionalInfo,
-                templateId: state.templateId
-            },
-            {},
-            (update: ProgressUpdate) => {
-                if (update.step !== undefined) {
-                    setCurrentStep(update.step);
-                }
-                if (update.progress !== undefined) {
-                    setProgress(update.progress);
-                }
-            }
-        );
-
-        // Small delay to show the completion step before moving on
-        setTimeout(() => {
-            onGenerate({
-                report_id: reportId,
-                content: result.content,
-                title: 'Generated Report',
-                file_path: '',
-                is_finalized: false,
-                files_cleaned: false,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-            });
-            setState(prev => ({ ...prev, isGenerating: false }));
-        }, 1000);
-    } catch (err) {
-        console.error('Error generating report:', err);
-        const error = err instanceof Error ? err : new Error('Failed to generate report. Please try again.');
-        onError(error);
-        setState(prev => ({ ...prev, isGenerating: false, error }));
+      setState(prev => ({ ...prev, isGenerating: true, error: null }));
+      
+      // Start the progress animation - use setProgress with a number value
+      setProgress(10);
+      // First step
+      setCurrentStep(0);
+      
+      // Call the generateReport method from the generateApi adapter
+      const result = await generateApi.generateReport(
+        reportId || '', 
+        { text: state.additionalInfo }
+      );
+      
+      // Success! Create a report object from the result
+      const newReport: Report = {
+        report_id: result.reportId || reportId || '',
+        content: result.message || '', // Use message instead of content
+        file_path: '',
+        title: 'Report Generated from API',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      
+      // Update progress to complete
+      setProgress(100);
+      setCurrentStep(PROCESSING_STEPS.length - 1);
+      
+      // Call onGenerate callback
+      onGenerate(newReport);
+    } catch (error) {
+      logger.error("Error generating report:", error);
+      
+      // Transform to Error if it's a string
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      setState(prev => ({ ...prev, isGenerating: false, error: errorObj }));
+      onError(errorObj);
     }
   };
 

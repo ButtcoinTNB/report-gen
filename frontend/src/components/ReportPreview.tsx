@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Typography, Button, TextField, Paper } from '@mui/material';
-import { ReportPreview as ReportPreviewType } from '../src/types';
+import { ReportPreview as ReportPreviewType } from '../types';
 
 interface ReportPreviewProps {
   preview: ReportPreviewType;

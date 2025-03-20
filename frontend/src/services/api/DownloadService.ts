@@ -1,10 +1,36 @@
 import { ApiClient } from './ApiClient';
 import { config } from '../../../config';
+import { logger } from '../../utils/logger';
+import { adaptApiRequest, adaptApiResponse } from '../../utils/adapters';
 
 /**
  * Formats supported for report downloads
  */
 export type DownloadFormat = 'docx';
+
+/**
+ * Download metadata response from API
+ */
+export interface DownloadMetadata {
+  report_id: string;
+  file_path: string;
+  format: string;
+  created_at: string;
+  download_url?: string;
+  status: 'success' | 'error';
+}
+
+/**
+ * Frontend-friendly version with camelCase properties
+ */
+export interface DownloadMetadataCamel {
+  reportId: string;
+  filePath: string;
+  format: string;
+  createdAt: string;
+  downloadUrl?: string;
+  status: 'success' | 'error';
+}
 
 /**
  * API client specific to download operations
@@ -18,15 +44,42 @@ class DownloadApiClient extends ApiClient {
    */
   async downloadReport(reportId: string, format: DownloadFormat = 'docx'): Promise<Blob> {
     try {
+      // Convert parameters to snake_case (though not necessary for simple path params)
+      const params = adaptApiRequest({ reportId, format });
+      
       // We need to modify the request config to get a Blob response
-      const response = await this.get(`/${reportId}`, {
+      const response = await this.get(`/${params.report_id}`, {
         // Override the default response type to get a blob
       });
       
       // The response is a Blob representing the file
       return response.data as unknown as Blob;
     } catch (error) {
-      console.error('Error downloading report:', error);
+      logger.error('Error downloading report:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get metadata about a downloadable report
+   * @param reportId The report ID 
+   * @param format The format (only 'docx' is currently supported)
+   * @returns The download metadata 
+   */
+  async getDownloadMetadata(reportId: string, format: DownloadFormat = 'docx'): Promise<DownloadMetadataCamel> {
+    try {
+      // Convert parameters to snake_case
+      const params = adaptApiRequest({ reportId, format });
+      
+      // Construct the URL with the format as a query parameter
+      const url = `/metadata/${params.report_id}?format=${params.format}`;
+      
+      const response = await this.get<DownloadMetadata>(url);
+      
+      // Convert response to camelCase
+      return adaptApiResponse<DownloadMetadataCamel>(response.data);
+    } catch (error) {
+      logger.error('Error getting download metadata:', error);
       throw error;
     }
   }
@@ -42,6 +95,7 @@ class DownloadApiClient extends ApiClient {
       throw new Error('Report ID is required');
     }
     
+    // URL parameters don't need conversion
     // Return the full URL for downloading the report
     return `${this.baseUrl}/${reportId}?format=${format}`;
   }
@@ -73,6 +127,16 @@ export class DownloadService {
    */
   async downloadReport(reportId: string, format: DownloadFormat = 'docx'): Promise<Blob> {
     return this.downloadClient.downloadReport(reportId, format);
+  }
+
+  /**
+   * Get metadata about a downloadable report
+   * @param reportId The report ID
+   * @param format The format (only 'docx' is currently supported)
+   * @returns Promise that resolves with download metadata
+   */
+  async getDownloadMetadata(reportId: string, format: DownloadFormat = 'docx'): Promise<DownloadMetadataCamel> {
+    return this.downloadClient.getDownloadMetadata(reportId, format);
   }
 
   /**

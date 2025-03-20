@@ -25,6 +25,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { downloadApi, generateApi } from '../src/services';
 import { Report as ReportType } from '../src/types';
+import { logger } from '../src/utils/logger';
 
 // Local interface that extends the base Report type with additional properties
 interface DownloadPageReport extends ReportType {
@@ -73,7 +74,7 @@ const DownloadPage = () => {
           download_url: url
         });
       } catch (err) {
-        console.error('Error fetching report:', err);
+        logger.error('Error fetching report:', err);
         setError('Failed to load report. Please try again.');
       } finally {
         setIsLoading(false);
@@ -81,6 +82,13 @@ const DownloadPage = () => {
     };
     
     fetchReport();
+
+    // Cleanup function to revoke object URL when component unmounts
+    return () => {
+      if (report?.download_url) {
+        URL.revokeObjectURL(report.download_url);
+      }
+    };
   }, [id]);
   
   // Download the report PDF
@@ -92,7 +100,7 @@ const DownloadPage = () => {
       // Open the download URL in a new tab
       window.open(report.download_url, '_blank');
     } catch (err) {
-      console.error('Error downloading report:', err);
+      logger.error('Error downloading report:', err);
       setError('Failed to download report. Please try again.');
     } finally {
       setIsDownloading(false);

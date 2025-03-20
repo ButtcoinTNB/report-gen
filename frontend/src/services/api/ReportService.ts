@@ -1,6 +1,8 @@
 import { ApiClient, createApiClient } from './ApiClient';
 import { config } from '../../../config';
 import { Report, ReportPreview, AnalysisResponse } from '../../types';
+import { logger } from '../../utils/logger';
+import { adaptApiRequest, adaptApiResponse } from '../../utils/adapters';
 
 /**
  * Additional information for report generation
@@ -38,6 +40,27 @@ export interface EditReportResponse {
   message: string;
 }
 
+// Define frontend-friendly camelCase versions of these interfaces
+export interface GenerateReportResponseCamel {
+  reportId: string;
+  previewUrl?: string;
+  status: 'success' | 'error';
+  message: string;
+}
+
+export interface FormatReportResponseCamel {
+  reportId: string;
+  message: string;
+  status: 'success' | 'error';
+}
+
+export interface EditReportResponseCamel {
+  reportId: string;
+  previewUrl: string;
+  status: 'success' | 'error';
+  message: string;
+}
+
 /**
  * API client specific to generation operations
  */
@@ -49,13 +72,15 @@ class GenerateApiClient extends ApiClient {
    */
   async analyzeDocuments(reportId: string): Promise<AnalysisResponse> {
     try {
-      const response = await this.post<AnalysisResponse>('/analyze', {
-        report_id: reportId
-      });
+      // Convert request to snake_case for backend
+      const request = adaptApiRequest({ reportId });
       
-      return response.data;
+      const response = await this.post<any>('/analyze', request);
+      
+      // Convert response to camelCase for frontend
+      return adaptApiResponse<AnalysisResponse>(response.data);
     } catch (error) {
-      console.error('Error analyzing documents:', error);
+      logger.error('Error analyzing documents:', error);
       throw error;
     }
   }
@@ -69,16 +94,20 @@ class GenerateApiClient extends ApiClient {
   async generateReport(
     reportId: string, 
     additionalInfo: AdditionalInfo
-  ): Promise<GenerateReportResponse> {
+  ): Promise<GenerateReportResponseCamel> {
     try {
-      const response = await this.post<GenerateReportResponse>('/generate', {
-        report_id: reportId,
-        additional_info: additionalInfo.text
+      // Convert request to snake_case for backend
+      const request = adaptApiRequest({
+        reportId,
+        additionalInfo: additionalInfo.text
       });
       
-      return response.data;
+      const response = await this.post<GenerateReportResponse>('/generate', request);
+      
+      // Convert response to camelCase for frontend
+      return adaptApiResponse<GenerateReportResponseCamel>(response.data);
     } catch (error) {
-      console.error('Error generating report:', error);
+      logger.error('Error generating report:', error);
       throw error;
     }
   }
@@ -90,10 +119,13 @@ class GenerateApiClient extends ApiClient {
    */
   async getReportPreview(reportId: string): Promise<ReportPreview> {
     try {
-      const response = await this.get<ReportPreview>(`/preview/${reportId}`);
-      return response.data;
+      // Use path parameter directly (no need to convert)
+      const response = await this.get<any>(`/preview/${reportId}`);
+      
+      // Convert response to camelCase for frontend
+      return adaptApiResponse<ReportPreview>(response.data);
     } catch (error) {
-      console.error('Error getting report preview:', error);
+      logger.error('Error getting report preview:', error);
       throw error;
     }
   }
@@ -105,10 +137,13 @@ class GenerateApiClient extends ApiClient {
    */
   async getReport(reportId: string): Promise<Report> {
     try {
-      const response = await this.get<Report>(`/report/${reportId}`);
-      return response.data;
+      // Use path parameter directly (no need to convert)
+      const response = await this.get<any>(`/report/${reportId}`);
+      
+      // Convert response to camelCase for frontend
+      return adaptApiResponse<Report>(response.data);
     } catch (error) {
-      console.error('Error getting report details:', error);
+      logger.error('Error getting report details:', error);
       throw error;
     }
   }
@@ -127,16 +162,20 @@ class FormatApiClient extends ApiClient {
   async formatReport(
     reportId: string, 
     style?: { [key: string]: any }
-  ): Promise<FormatReportResponse> {
+  ): Promise<FormatReportResponseCamel> {
     try {
-      const response = await this.post<FormatReportResponse>('/format', {
-        report_id: reportId,
+      // Convert request to snake_case for backend
+      const request = adaptApiRequest({
+        reportId,
         style: style || {}
       });
       
-      return response.data;
+      const response = await this.post<FormatReportResponse>('/format', request);
+      
+      // Convert response to camelCase for frontend
+      return adaptApiResponse<FormatReportResponseCamel>(response.data);
     } catch (error) {
-      console.error('Error formatting report:', error);
+      logger.error('Error formatting report:', error);
       throw error;
     }
   }
@@ -155,16 +194,20 @@ class EditApiClient extends ApiClient {
   async editReport(
     reportId: string, 
     instructions: string
-  ): Promise<EditReportResponse> {
+  ): Promise<EditReportResponseCamel> {
     try {
-      const response = await this.post<EditReportResponse>('/refine', {
-        report_id: reportId,
-        instructions: instructions
+      // Convert request to snake_case for backend
+      const request = adaptApiRequest({
+        reportId,
+        instructions
       });
       
-      return response.data;
+      const response = await this.post<EditReportResponse>('/refine', request);
+      
+      // Convert response to camelCase for frontend
+      return adaptApiResponse<EditReportResponseCamel>(response.data);
     } catch (error) {
-      console.error('Error editing report:', error);
+      logger.error('Error editing report:', error);
       throw error;
     }
   }
@@ -222,7 +265,7 @@ export class ReportService {
   async generateReport(
     reportId: string, 
     additionalInfo: AdditionalInfo
-  ): Promise<GenerateReportResponse> {
+  ): Promise<GenerateReportResponseCamel> {
     return this.generateClient.generateReport(reportId, additionalInfo);
   }
 
@@ -235,7 +278,7 @@ export class ReportService {
   async formatReport(
     reportId: string, 
     style?: { [key: string]: any }
-  ): Promise<FormatReportResponse> {
+  ): Promise<FormatReportResponseCamel> {
     return this.formatClient.formatReport(reportId, style);
   }
 
@@ -248,7 +291,7 @@ export class ReportService {
   async editReport(
     reportId: string, 
     instructions: string
-  ): Promise<EditReportResponse> {
+  ): Promise<EditReportResponseCamel> {
     return this.editClient.editReport(reportId, instructions);
   }
 
@@ -272,4 +315,7 @@ export class ReportService {
 }
 
 // Export a singleton instance
-export const reportService = new ReportService(); 
+export const reportService = new ReportService();
+
+// These interfaces are already exported in their declarations above,
+// so we don't need to re-export them here. 

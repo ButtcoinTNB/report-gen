@@ -21,7 +21,7 @@ const nextConfig = {
   // Performance optimizations
   swcMinify: true, // Use SWC for minification (faster than Terser)
   compiler: {
-    // Remove console.log in production
+    // Remove console.log in production but keep error and warn for debugging
     removeConsole: process.env.NODE_ENV === 'production' ? {
       exclude: ['error', 'warn'],
     } : false,

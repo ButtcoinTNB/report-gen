@@ -22,6 +22,7 @@ import dynamic from 'next/dynamic';
 import 'easymde/dist/easymde.min.css';
 import { generateApi, editApi, formatApi } from '../src/services';
 import { Report } from '../src/types';
+import { logger } from '../src/utils/logger';
 
 // Dynamic import for the Markdown editor to avoid SSR issues
 const SimpleMDE = dynamic(() => import('react-simplemde-editor'), { ssr: false });
@@ -103,7 +104,7 @@ const EditPage = () => {
       
       setSuccess('Report saved successfully!');
     } catch (err) {
-      console.error('Error saving report:', err);
+      logger.error('Error saving report:', err);
       setError(err instanceof Error ? err.message : 'Failed to save report. Please try again.');
     } finally {
       setLoading(false);
@@ -115,9 +116,10 @@ const EditPage = () => {
 
     try {
       setIsRefining(true);
-      const result = await editApi.editReport(report.report_id, aiInstructions);
+      setError('');
       
-      const updatedReport = await generateApi.getReport(report.report_id);
+      // Use the optimized edit API that returns updated data directly
+      const updatedReport = await editApi.editReport(report.report_id, aiInstructions);
       
       setReport({
         report_id: updatedReport.report_id,
@@ -132,7 +134,7 @@ const EditPage = () => {
       
       setAiInstructions('');
     } catch (err) {
-      console.error('Error refining report:', err);
+      logger.error('Error refining report:', err);
       setError(err instanceof Error ? err.message : 'Failed to refine report');
     } finally {
       setIsRefining(false);
@@ -154,7 +156,7 @@ const EditPage = () => {
         router.push(`/download?id=${report.report_id}`);
       }, 1500);
     } catch (err) {
-      console.error('Error finalizing report:', err);
+      logger.error('Error finalizing report:', err);
       setError(err instanceof Error ? err.message : 'Impossibile finalizzare il report. Riprova.');
     } finally {
       setLoading(false);

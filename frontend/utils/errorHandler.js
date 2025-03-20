@@ -2,6 +2,8 @@
  * Shared error handling utilities for API requests
  */
 
+import { logger } from '../src/utils/logger';
+
 /**
  * Format an error from an API request into a user-friendly message
  * 
@@ -93,22 +95,22 @@ export function formatApiError(error, fallbackMessage = "An unexpected error occ
  */
 export function handleApiError(error, context, { log = true, throwError = true } = {}) {
   if (log) {
-    console.error(`Error in ${context}:`, error);
+    logger.error(`Error in ${context}:`, error);
     
     // Log additional details for Axios errors
     if (error?.isAxiosError && error.response) {
-      console.error("Response status:", error.response.status);
-      console.error("Response data:", error.response.data);
+      logger.error("Response status:", error.response.status);
+      logger.error("Response data:", error.response.data);
       
       // Additional logging for standardized error format
       const data = error.response.data;
       if (data && data.status === "error") {
-        console.error("Error type:", data.error_type);
-        console.error("Operation:", data.operation);
+        logger.error("Error type:", data.error_type);
+        logger.error("Operation:", data.operation);
         
         // Log traceback in development mode if available
         if (data.traceback && process.env.NODE_ENV !== 'production') {
-          console.error("Traceback:", data.traceback);
+          logger.error("Traceback:", data.traceback);
         }
       }
     }

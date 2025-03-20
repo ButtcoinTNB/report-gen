@@ -24,7 +24,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
-import { uploadFile } from '../api/upload';
+import { uploadApi } from '../src/services'; // Updated import path
 import { useDropzone } from 'react-dropzone';
 
 interface Props {
@@ -112,11 +112,11 @@ const FileUpload: React.FC<Props> = ({ onUploadSuccess, onError }) => {
     setError(null);
 
     try {
-      const response = await uploadFile(acceptedFiles);
-      const data = response as UploadResponse;
-
-      if (data.report_id) {
-        onUploadSuccess(data.report_id);
+      // Use the uploadApi adapter which provides the same interface but uses our new service layer
+      const response = await uploadApi.uploadFile(acceptedFiles);
+      
+      if (response && response.report_id) {
+        onUploadSuccess(response.report_id);
       } else {
         throw new Error('No report ID received from server');
       }

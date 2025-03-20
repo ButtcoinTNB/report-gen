@@ -3,6 +3,7 @@
  */
 import axios from 'axios';
 import { config } from '../config';
+import { logger } from '../src/utils/logger';
 
 /**
  * Standard headers for JSON API requests
@@ -88,7 +89,7 @@ export async function withRetry(
       }
       
       // Log retry attempt
-      console.log(`Request failed, retrying (${attempt + 1}/${maxRetries})...`, error);
+      logger.info(`Request failed, retrying (${attempt + 1}/${maxRetries})...`, error);
       
       // Call onRetry callback if provided
       if (onRetry) {
@@ -130,7 +131,7 @@ export function createApiClient(baseEndpoint, defaultOptions = {}) {
     baseUrl = config.endpoints[baseEndpoint];
     
     if (!baseUrl) {
-      console.error(`No endpoint configured for '${baseEndpoint}'`);
+      logger.error(`No endpoint configured for '${baseEndpoint}'`);
       // Fallback to API_URL as base
       baseUrl = `${config.API_URL}/${baseEndpoint}`;
     }

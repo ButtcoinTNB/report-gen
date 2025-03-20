@@ -21,6 +21,7 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { downloadApi } from '../src/services';
 import PDFPreview from './PDFPreview';
+import { logger } from '../src/utils/logger';
 
 interface DownloadReportProps {
   reportId: string | null;
@@ -61,7 +62,7 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
       // Clean up the URL object
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      console.error('Error downloading PDF report:', err);
+      logger.error('Error downloading PDF report:', err);
       setError(err instanceof Error ? err.message : 'Failed to download the PDF report. Please try again.');
     } finally {
       setLoading(false);
@@ -81,7 +82,7 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
       // Use the new TypeScript API service
       downloadApi.downloadToDevice(reportId, `report_${reportId}.docx`, 'docx');
     } catch (err) {
-      console.error('Error downloading DOCX report:', err);
+      logger.error('Error downloading DOCX report:', err);
       setError(err instanceof Error ? err.message : 'Failed to download the DOCX report. Please try again.');
     } finally {
       setDocxLoading(false);

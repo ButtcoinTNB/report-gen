@@ -1,296 +1,239 @@
-import React, { useState } from 'react';
-import {
-  Box,
-  Container,
-  Typography,
-  Alert,
-  CircularProgress,
-  Stepper,
-  Step,
-  StepLabel,
-  Button,
-  TextField,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-} from '@mui/material';
+import { useState, useCallback, useEffect, ChangeEvent } from 'react';
+import { Container, Box, Typography, Paper, Button, TextField, Divider, Alert } from '@mui/material';
 import DocumentUpload from '../components/DocumentUpload';
 import AdditionalInfo from '../components/AdditionalInfo';
-import { analyzeDocuments, generateReport, refineReport } from '../services/api';
-import { AnalysisResponse, ReportPreview } from '../types';
+import ReportPreview from '../components/ReportPreview';
+import LoadingIndicator from '../components/LoadingIndicator';
+import { downloadApi, generateApi, editApi } from '../services';
+import { AnalysisResponse, ReportPreview as ReportPreviewType } from '../types';
+import { ReportPreviewCamel } from '../types/api';
+import { logger } from '../utils/logger';
+import { adaptReportPreview } from '../types/api';
+
 // Define the interface matching the one in AdditionalInfo component
 interface ComponentAnalysisDetails {
   valore: string;
   confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
   richiede_verifica: boolean;
 }
-import { AnalysisDetails as GlobalAnalysisDetails } from '../types';
 
-type StepType = 'upload' | 'additional-info' | 'preview';
-
-// Local interfaces that map types between global and component-specific types
-interface LocalAnalysisDetails {
-  valore: string;
-  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
-  richiede_verifica: boolean;
-  // Keep original properties for mapping back
-  value: string;
-  confidence: number;
-  source: string;
-}
-
-interface LocalAnalysisResponse {
-  extractedVariables: Record<string, string>;
-  analysisDetails: Record<string, LocalAnalysisDetails>;
-  fieldsNeedingAttention: string[];
-}
-
-// Helper function to map global types to component-specific types
-const mapToComponentTypes = (details: Record<string, GlobalAnalysisDetails>): Record<string, ComponentAnalysisDetails> => {
-  const result: Record<string, ComponentAnalysisDetails> = {};
-  
-  Object.entries(details).forEach(([key, detail]) => {
-    result[key] = {
-      valore: detail.value || 'Non fornito',
-      confidenza: detail.confidence > 0.8 ? 'ALTA' : 
-                 detail.confidence > 0.5 ? 'MEDIA' : 'BASSA',
-      richiede_verifica: detail.confidence < 0.7
-    };
-  });
-  
-  return result;
-};
+type ReportStep = 'upload' | 'additional-info' | 'preview' | 'download';
 
 const GenerateReport: React.FC = () => {
-  const [currentStep, setCurrentStep] = useState<StepType>('upload');
-  const [documentIds, setDocumentIds] = useState<string[]>([]);
-  const [analysisResponse, setAnalysisResponse] = useState<LocalAnalysisResponse | null>(null);
-  const [reportPreview, setReportPreview] = useState<ReportPreview | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [step, setStep] = useState<ReportStep>('upload');
   const [isLoading, setIsLoading] = useState(false);
-  const [showInstructionsDialog, setShowInstructionsDialog] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [uploadedDocumentIds, setUploadedDocumentIds] = useState<string[]>([]);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(null);
+  const [reportPreview, setReportPreview] = useState<ReportPreviewType | null>(null);
   const [instructions, setInstructions] = useState('');
-
-  const handleDocumentsUploaded = async (ids: string[]) => {
+  
+  // When document IDs change, analyze them
+  useEffect(() => {
+    if (uploadedDocumentIds.length > 0) {
+      analyzeDocuments(uploadedDocumentIds[0]);
+    }
+  }, [uploadedDocumentIds]);
+  
+  const analyzeDocuments = async (reportId: string) => {
     setIsLoading(true);
     setError(null);
+    
     try {
-      const response = await analyzeDocuments(ids);
-      // Convert the response to our local format
-      const localResponse: LocalAnalysisResponse = {
-        extractedVariables: response.extractedVariables,
-        analysisDetails: {},
-        fieldsNeedingAttention: response.fieldsNeedingAttention
-      };
+      const response = await generateApi.analyzeDocuments(reportId);
       
-      // Map standard fields to local Italian field names
-      Object.entries(response.analysisDetails).forEach(([key, details]) => {
-        localResponse.analysisDetails[key] = {
-          ...details,
-          valore: details.value || 'Non fornito',
-          confidenza: details.confidence > 0.8 ? 'ALTA' : 
-                     details.confidence > 0.5 ? 'MEDIA' : 'BASSA',
-          richiede_verifica: details.confidence < 0.7
-        };
-      });
+      logger.info('Document analysis result:', response);
       
-      setAnalysisResponse(localResponse);
-      setDocumentIds(ids);
-      setCurrentStep('additional-info');
+      // Set the analysis result for the AdditionalInfo component
+      setAnalysisResult(response);
+      
+      // Move to the next step
+      setStep('additional-info');
     } catch (err) {
-      setError('Si è verificato un errore durante l\'analisi dei documenti. Riprova.');
-      console.error('Error analyzing documents:', err);
+      logger.error('Error analyzing documents:', err);
+      setError('Failed to analyze documents. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
-
+  
+  const handleUploadComplete = (reportId: string) => {
+    setUploadedDocumentIds([reportId]);
+  };
+  
   const handleAdditionalInfo = async (additionalInfo: string) => {
     setIsLoading(true);
     setError(null);
+    
     try {
-      const preview = await generateReport({
-        document_ids: documentIds,
-        additional_info: additionalInfo,
-        report_id: '', // Empty string as this will be generated by the API
+      // Use the new generateReport adapter
+      const response = await generateApi.generateReport(uploadedDocumentIds[0], {
+        text: additionalInfo
       });
-      setReportPreview(preview as unknown as ReportPreview); // Type cast since the API response structure differs
-      setCurrentStep('preview');
-    } catch (err) {
-      setError('Si è verificato un errore durante la generazione del report. Riprova.');
-      console.error('Error generating report:', err);
+      
+      // Create a ReportPreview from the camelCase response
+      const preview: ReportPreviewType = {
+        report_id: response.reportId,
+        preview_url: response.previewUrl || '',
+        status: response.status,
+        message: response.message,
+        // For backward compatibility
+        reportId: response.reportId,
+        previewUrl: response.previewUrl || ''
+      };
+      
+      setReportPreview(preview);
+      setStep('preview');
+    } catch (e) {
+      logger.error('Error generating report:', e);
+      setError('Failed to generate report. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
-
+  
   const handleRefineReport = async () => {
     if (!instructions.trim() || !reportPreview?.reportId) return;
     
     setIsLoading(true);
-    setError(null);
+    
     try {
-      const preview = await refineReport(reportPreview.reportId, instructions);
+      // Use the editApi adapter, which returns the response in camelCase
+      const response = await editApi.editReport(reportPreview.reportId, instructions);
+      
+      // Create a ReportPreview from the camelCase response
+      const preview: ReportPreviewType = {
+        report_id: response.reportId,
+        preview_url: response.previewUrl,
+        status: response.status,
+        message: response.message,
+        // For backward compatibility
+        reportId: response.reportId,
+        previewUrl: response.previewUrl
+      };
+      
       setReportPreview(preview);
-      setShowInstructionsDialog(false);
       setInstructions('');
-    } catch (err) {
-      setError('Si è verificato un errore durante la modifica del report. Riprova.');
-      console.error('Error refining report:', err);
+    } catch (e) {
+      logger.error('Error refining report:', e);
+      setError('Failed to refine report. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleBack = () => {
-    if (currentStep === 'additional-info') {
-      setCurrentStep('upload');
-    } else if (currentStep === 'preview') {
-      setCurrentStep('additional-info');
+    if (step === 'additional-info') {
+      setStep('upload');
+    } else if (step === 'preview') {
+      setStep('additional-info');
     }
   };
-
-  const steps = [
-    { label: 'Carica Documenti', completed: currentStep !== 'upload' },
-    { label: 'Revisiona e Aggiungi Informazioni', completed: currentStep === 'preview' },
-    { label: 'Anteprima Report', completed: false },
-  ];
-
+  
   const handleDownload = () => {
-    if (reportPreview?.downloadUrl) {
-      // Ensure we're using the DOCX endpoint
-      let downloadUrl = reportPreview.downloadUrl;
+    if (!reportPreview?.reportId) return;
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      logger.info('Downloading report with ID:', reportPreview.reportId);
       
-      // Check if the URL already contains '/docx/'
-      if (!downloadUrl.includes('/docx/')) {
-        // Insert 'docx/' before the report ID in the URL
-        const parts = downloadUrl.split('/');
-        const lastPart = parts[parts.length - 1];
-        downloadUrl = downloadUrl.replace(lastPart, `docx/${lastPart}`);
-      }
+      // Use the download URL from the preview or construct one
+      const downloadUrl = reportPreview.downloadUrl || 
+        downloadApi.getDownloadUrl(reportPreview.reportId);
       
-      window.location.href = downloadUrl;
+      // Use the download API to trigger the download
+      downloadApi.downloadToDevice(
+        reportPreview.reportId, 
+        `report-${reportPreview.reportId}.docx`
+      );
       
-      // Show a notice that the report will be removed after download
-      setTimeout(() => {
-        alert('Nota: Tutti i file caricati sono stati eliminati dal server dopo il download.');
-      }, 2000); // Show the alert 2 seconds after initiating download
+      // Show a success message
+      // Note: You could redirect to a success page instead
+    } catch (err) {
+      logger.error('Error downloading report:', err);
+      setError('Failed to download report. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
-
+  
+  const renderStep = () => {
+    switch (step) {
+      case 'upload':
+        return (
+          <DocumentUpload 
+            onUploadComplete={handleUploadComplete}
+          />
+        );
+      
+      case 'additional-info':
+        if (!analysisResult) return null;
+        
+        // Convert field names and data structure if needed
+        return (
+          <AdditionalInfo
+            documentIds={uploadedDocumentIds}
+            extractedVariables={analysisResult.extractedVariables}
+            analysisDetails={analysisResult.analysisDetails as unknown as Record<string, ComponentAnalysisDetails>}
+            fieldsNeedingAttention={analysisResult.fieldsNeedingAttention}
+            onSubmit={handleAdditionalInfo}
+            onBack={handleBack}
+          />
+        );
+      
+      case 'preview':
+        if (!reportPreview) return null;
+        
+        return (
+          <Box sx={{ mt: 4 }}>
+            <ReportPreview
+              preview={reportPreview}
+              onRefine={handleRefineReport}
+              onDownload={handleDownload}
+              onBack={handleBack}
+              instructions={instructions}
+              onInstructionsChange={(e: ChangeEvent<HTMLTextAreaElement>) => setInstructions(e.target.value)}
+            />
+          </Box>
+        );
+      
+      default:
+        return null;
+    }
+  };
+  
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom>
-          Generazione Report
+    <Container maxWidth="lg" sx={{ pb: 4 }}>
+      <Box sx={{ mb: 4, mt: 2 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Generatore di Perizie
         </Typography>
-        <Stepper activeStep={steps.findIndex(s => !s.completed)} sx={{ mb: 4 }}>
-          {steps.map((step, index) => (
-            <Step key={index} completed={step.completed}>
-              <StepLabel>{step.label}</StepLabel>
-            </Step>
-          ))}
-        </Stepper>
+        <Typography variant="body1" color="text.secondary">
+          Carica i documenti, aggiungi informazioni e ottieni una perizia professionale in pochi minuti.
+        </Typography>
       </Box>
-
+      
+      {/* Error display */}
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
         </Alert>
       )}
-
-      {isLoading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-          <CircularProgress />
-        </Box>
-      )}
-
-      {!isLoading && currentStep === 'upload' && (
-        <DocumentUpload
-          onUploadComplete={(reportId: string) => handleDocumentsUploaded([reportId])}
-        />
-      )}
-
-      {!isLoading && currentStep === 'additional-info' && analysisResponse && (
-        <AdditionalInfo
-          documentIds={documentIds}
-          extractedVariables={analysisResponse.extractedVariables}
-          analysisDetails={mapToComponentTypes(analysisResponse.analysisDetails)}
-          fieldsNeedingAttention={analysisResponse.fieldsNeedingAttention}
-          onSubmit={handleAdditionalInfo}
-          onBack={handleBack}
-        />
-      )}
-
-      {!isLoading && currentStep === 'preview' && reportPreview && (
-        <Box>
-          <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h5">
-              Anteprima Report
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button
-                variant="outlined"
-                onClick={() => setShowInstructionsDialog(true)}
-              >
-                Modifica Report
-              </Button>
-              <Button
-                variant="contained"
-                onClick={handleDownload}
-              >
-                Scarica DOCX
-              </Button>
-            </Box>
-          </Box>
-
-          <Box sx={{ width: '100%', height: '600px', border: '1px solid rgba(0, 0, 0, 0.12)', borderRadius: 1 }}>
-            <iframe
-              src={reportPreview.previewUrl}
-              style={{ width: '100%', height: '100%', border: 'none' }}
-              title="Report Preview"
-            />
-          </Box>
-        </Box>
-      )}
-
-      <Dialog
-        open={showInstructionsDialog}
-        onClose={() => setShowInstructionsDialog(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          Modifica Report
-        </DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Inserisci le tue istruzioni per modificare il report. Sii specifico riguardo alle modifiche desiderate.
-          </Typography>
-          <TextField
-            fullWidth
-            multiline
-            rows={6}
-            label="Istruzioni per la Modifica"
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            placeholder="Es: Aggiungi più dettagli sulla dinamica dell'evento, riorganizza la sezione dei danni..."
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowInstructionsDialog(false)}>
-            Annulla
-          </Button>
-          <Button
-            onClick={handleRefineReport}
-            variant="contained"
-            disabled={!instructions.trim()}
-          >
-            Applica Modifiche
-          </Button>
-        </DialogActions>
-      </Dialog>
+      
+      {/* Loading indicator */}
+      <LoadingIndicator 
+        loadingState={{ 
+          isLoading,
+          stage: step === 'upload' ? 'uploading' : 
+                 step === 'additional-info' ? 'analyzing' : 
+                 step === 'preview' ? 'generating' : 'loading'
+        }} 
+      />
+      
+      {/* Current step */}
+      {renderStep()}
     </Container>
   );
 };

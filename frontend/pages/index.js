@@ -27,11 +27,11 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DownloadIcon from '@mui/icons-material/Download';
 import Navbar from '../components/Navbar';
 import FileUpload from '../components/FileUpload';
-import { generateReport, refineReport, analyzeDocuments } from '../api/generate.js';
-import { finalizeReport, downloadReport } from '../api/report';
+import { generateApi, editApi, downloadApi } from '../src/services';
 import axios from 'axios';
 import { config } from '../config';
 import LoadingIndicator from '../components/LoadingIndicator';
+import { logger } from '../src/utils/logger';
 
 export default function Home() {
   const [activeStep, setActiveStep] = useState(0);
@@ -88,15 +88,21 @@ export default function Home() {
   const analyzeDocumentsInBackground = async (id) => {
     try {
       // Use the analyzeDocuments function from the imported API
-      const response = await analyzeDocuments(id, (progress) => {
+      // Note: The TS service doesn't support progress callbacks directly
+      const onProgressCallback = (progress) => {
         setLoadingState(prevState => ({
           ...prevState,
           progress,
           message: `Analisi: ${progress}%`
         }));
-      });
+      };
       
-      console.log('Document analysis result:', response);
+      // Call progress manually at different stages
+      onProgressCallback(10);
+      const response = await generateApi.analyzeDocuments(id);
+      onProgressCallback(100);
+      
+      logger.info('Document analysis result:', response);
       
       if (response && response.extracted_variables) {
         setExtractedVariables(response.extracted_variables);
@@ -111,7 +117,7 @@ export default function Home() {
         message: 'Analisi completata con successo!'
       });
     } catch (err) {
-      console.error('Error analyzing documents:', err);
+      logger.error('Error analyzing documents:', err);
       setError('Analisi completata con alcuni problemi. Puoi comunque procedere.');
       setShowError(true);
       setLoadingState({
@@ -162,17 +168,21 @@ export default function Home() {
     
     try {
       // Generate report with additional info
-      const result = await generateReport(reportId, {
-        additional_info: additionalInfo
-      }, (progress) => {
+      // Note: The TS service doesn't support progress callbacks directly
+      const onProgressCallback = (progress) => {
         setLoadingState(prevState => ({
           ...prevState,
           progress,
           message: `Generazione: ${progress}%`
         }));
-      });
+      };
       
-      console.log('Report generation result:', result);
+      // Call progress manually at different stages
+      onProgressCallback(10);
+      const result = await generateApi.generateReport(reportId, { text: additionalInfo });
+      onProgressCallback(100);
+      
+      logger.info('Report generation result:', result);
       
       if (result && result.report_id) {
         // Store the new report ID
@@ -206,7 +216,7 @@ export default function Home() {
         throw new Error('Impossibile generare l\'anteprima del report');
       }
     } catch (err) {
-      console.error('Error generating report:', err);
+      logger.error('Error generating report:', err);
       
       // Extract error message from various formats
       const errorMessage = extractErrorMessage(err);
@@ -251,36 +261,34 @@ export default function Home() {
         message: 'Affinamento del report in corso...'
       });
       
-      // Call the refine endpoint
-      const result = await refineReport(reportId, chatInput, (progress) => {
+      // Note: The TS service doesn't support progress callbacks directly
+      const onProgressCallback = (progress) => {
         setLoadingState(prevState => ({
           ...prevState,
           progress,
           message: `Affinamento: ${progress}%`
         }));
-      });
+      };
       
-      if (result && !result.error) {
-        // Add AI response to chat
-        const aiMessage = { 
-          role: 'assistant', 
-          content: 'Ho aggiornato il report in base alle tue istruzioni.' 
+      // Call progress manually at different stages
+      onProgressCallback(10);
+      // Call the refine endpoint
+      const result = await editApi.editReport(reportId, chatInput);
+      onProgressCallback(100);
+      
+      if (result && result.status === 'success') {
+        // Add system message with response
+        const systemMessage = { 
+          role: 'system', 
+          content: 'Modifiche applicate con successo.' 
         };
-        setChatMessages(prevMessages => [...prevMessages, aiMessage]);
+        setChatMessages(prevMessages => [...prevMessages, systemMessage]);
         
-        // Update report ID if a new one was returned
-        if (result.report_id) {
-          setReportId(result.report_id);
-        }
-        
-        // Fetch updated preview
+        // Update preview if available
         if (result.preview_url) {
           const previewResponse = await axios.get(result.preview_url);
           setPreviewHtml(previewResponse.data);
         }
-        
-        // Show feedback request
-        setShowFeedback(true);
         
         setLoadingState({
           isLoading: false,
@@ -288,23 +296,13 @@ export default function Home() {
           stage: 'completed',
           message: 'Report affinato con successo!'
         });
-      } else {
-        // Add error message to chat
-        const errorMessage = { 
-          role: 'system', 
-          content: result.error || 'Si è verificato un errore durante l\'elaborazione della richiesta.'
-        };
-        setChatMessages(prevMessages => [...prevMessages, errorMessage]);
         
-        setLoadingState({
-          isLoading: false,
-          stage: 'error',
-          error: result.error || 'Errore durante l\'affinamento',
-          message: 'Si è verificato un problema durante l\'affinamento'
-        });
+        setShowFeedback(true);
+      } else {
+        throw new Error(result.message || 'Errore durante l\'affinamento del report');
       }
     } catch (err) {
-      console.error('Error refining report:', err);
+      logger.error('Error refining report:', err);
       
       // Add error message to chat
       const errMsg = extractErrorMessage(err);
@@ -344,11 +342,25 @@ export default function Home() {
     });
     
     try {
-      const downloadResult = await downloadReport(reportId);
+      const downloadResult = await downloadApi.downloadReport(reportId);
       
-      if (downloadResult && downloadResult.download_url) {
-        // Redirect to download URL
-        window.location.href = downloadResult.download_url;
+      // The downloadReport method returns a Blob
+      if (downloadResult) {
+        // Create a URL for the blob
+        const url = window.URL.createObjectURL(downloadResult);
+        
+        // Create a temporary link element to trigger the download
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `report-${reportId}.docx`);
+        document.body.appendChild(link);
+        link.click();
+        
+        // Clean up
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(link);
+        }, 100);
         
         // Show a success message
         setTimeout(() => {
@@ -362,10 +374,10 @@ export default function Home() {
           message: 'Download avviato con successo!'
         });
       } else {
-        throw new Error('URL di download non disponibile');
+        throw new Error('Download non disponibile');
       }
     } catch (err) {
-      console.error('Error downloading report:', err);
+      logger.error('Error downloading report:', err);
       setError(extractErrorMessage(err) || 'Si è verificato un errore durante il download.');
       setShowError(true);
       
@@ -414,22 +426,29 @@ export default function Home() {
     });
     
     try {
-      // Download the report directly from the download URL
-      console.log('Downloading report with ID:', reportId);
-      const result = await downloadReport(reportId);
+      // Download the report directly
+      logger.info('Downloading report with ID:', reportId);
+      const blob = await downloadApi.downloadReport(reportId);
       
-      console.log('Download result:', result);
-      
-      if (result && result.data && result.data.download_url) {
-        // Open the download URL in a new tab or trigger download
-        const downloadUrl = result.data.download_url;
-        console.log('Opening download URL:', downloadUrl);
+      if (blob) {
+        // Create a URL for the blob
+        const url = window.URL.createObjectURL(blob);
         
         // Store download URL
-        setDownloadUrl(downloadUrl);
+        setDownloadUrl(url);
         
-        // Open in new tab
-        window.open(downloadUrl, '_blank');
+        // Create a temporary link element to trigger the download
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `report-${reportId}.docx`);
+        document.body.appendChild(link);
+        link.click();
+        
+        // Clean up
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(link);
+        }, 100);
         
         // Move to final step
         setActiveStep(3);
@@ -441,10 +460,10 @@ export default function Home() {
           message: 'Report finalizzato con successo!'
         });
       } else {
-        throw new Error('Failed to get download URL');
+        throw new Error('Failed to download report');
       }
     } catch (err) {
-      console.error('Error downloading report:', err);
+      logger.error('Error downloading report:', err);
       
       const errorMessage = err instanceof Error 
         ? `There was an error downloading your report: ${err.message}`

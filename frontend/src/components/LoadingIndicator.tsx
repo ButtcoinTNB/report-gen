@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import { Refresh as RefreshIcon } from '@mui/icons-material';
 
-export type LoadingStage = 'initial' | 'loading' | 'retrying' | 'error' | 'completed' | 'generating' | 'analyzing' | 'refining';
+export type LoadingStage = 'initial' | 'loading' | 'uploading' | 'retrying' | 'error' | 'completed' | 'generating' | 'analyzing' | 'refining';
 
 export interface LoadingState {
   isLoading: boolean;
@@ -50,15 +50,17 @@ export interface LoadingIndicatorProps {
   alwaysShow?: boolean;
 }
 
+// Define messages for each stage
 const stageMessages: Record<LoadingStage, string> = {
-  initial: 'Preparazione...',
+  initial: 'Inizializzazione...',
   loading: 'Caricamento in corso...',
-  retrying: 'Riprovo la connessione...',
+  uploading: 'Caricamento dei file...',
+  retrying: 'Nuovo tentativo...',
   error: 'Si è verificato un errore',
-  completed: 'Completato',
-  generating: 'Generazione del report in corso...',
-  analyzing: 'Analisi dei documenti in corso...',
-  refining: 'Raffinamento del report in corso...'
+  completed: 'Completato!',
+  generating: 'Generazione report in corso...',
+  analyzing: 'Analisi documenti in corso...',
+  refining: 'Affinamento report in corso...'
 };
 
 /**

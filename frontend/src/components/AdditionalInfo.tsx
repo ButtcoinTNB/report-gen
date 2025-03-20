@@ -17,17 +17,37 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import { adaptApiResponse } from '../utils/adapters';
 
-interface AnalysisDetails {
+/**
+ * Backend API interface for analysis details
+ */
+interface AnalysisDetailsApi {
   valore: string;
   confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
   richiede_verifica: boolean;
 }
 
+/**
+ * Frontend-friendly version with camelCase properties
+ */
+interface AnalysisDetails {
+  valore: string;
+  confidenza: 'ALTA' | 'MEDIA' | 'BASSA';
+  richiedeVerifica: boolean;
+}
+
+/**
+ * Helper function to convert API response to frontend format
+ */
+function adaptAnalysisDetails(details: AnalysisDetailsApi): AnalysisDetails {
+  return adaptApiResponse<AnalysisDetails>(details);
+}
+
 interface AdditionalInfoProps {
   documentIds: string[];
   extractedVariables: Record<string, string>;
-  analysisDetails: Record<string, AnalysisDetails>;
+  analysisDetails: Record<string, AnalysisDetailsApi>;
   fieldsNeedingAttention: string[];
   onSubmit: (additionalInfo: string) => void;
   onBack: () => void;
@@ -98,6 +118,12 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
     }
   };
 
+  // Convert analysis details to frontend format
+  const frontendAnalysisDetails = Object.entries(analysisDetails).reduce((acc, [key, details]) => {
+    acc[key] = adaptAnalysisDetails(details);
+    return acc;
+  }, {} as Record<string, AnalysisDetails>);
+
   return (
     <Box sx={{ maxWidth: 1000, mx: 'auto', mt: 4, p: 2 }}>
       <Card>
@@ -154,7 +180,7 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
             </AccordionSummary>
             <AccordionDetails>
               <Box sx={{ display: 'grid', gap: 2 }}>
-                {Object.entries(analysisDetails).map(([key, details]) => (
+                {Object.entries(frontendAnalysisDetails).map(([key, details]) => (
                   <Box
                     key={key}
                     sx={{
@@ -162,7 +188,7 @@ const AdditionalInfo: React.FC<AdditionalInfoProps> = ({
                       border: 1,
                       borderColor: 'divider',
                       borderRadius: 1,
-                      bgcolor: details.richiede_verifica ? 'warning.50' : 'background.paper'
+                      bgcolor: details.richiedeVerifica ? 'warning.50' : 'background.paper'
                     }}
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>

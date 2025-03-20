@@ -23,11 +23,6 @@ interface Props {
   onClose: () => void;
 }
 
-interface PDFPreviewResult {
-  url: string;
-  error?: string;
-}
-
 const PDFPreview: React.FC<Props> = ({ previewId, reportId, onError, onClose }) => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,18 +33,23 @@ const PDFPreview: React.FC<Props> = ({ previewId, reportId, onError, onClose }) 
     if (reportId) {
       loadPreview();
     }
+
+    // Cleanup function to revoke object URL if it exists
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
   }, [reportId, previewId]);
   
   const loadPreview = async () => {
     try {
       setLoading(true);
+      setError(null);
       
-      // Get the download URL for the report
-      const downloadUrl = downloadApi.getDownloadUrl(reportId as string, 'docx');
-      
-      // Since we don't have a direct preview URL method in the new API,
-      // we'll use the download URL as the preview URL
-      setPreviewUrl(downloadUrl);
+      // Use the new preview URL method
+      const url = downloadApi.getPreviewUrl(reportId as string, 'docx');
+      setPreviewUrl(url);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load preview';
       setError(errorMessage);

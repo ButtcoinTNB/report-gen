@@ -1,5 +1,7 @@
 import { ApiClient, ApiRequestOptions, createApiClient } from './ApiClient';
 import { config } from '../../../config';
+import { logger } from '../../utils/logger';
+import { adaptApiRequest, adaptApiResponse } from '../../utils/adapters';
 
 /**
  * Response for a report creation or update
@@ -9,6 +11,16 @@ export interface ReportResponse {
   message: string;
   status: 'success' | 'error';
   file_count?: number;
+}
+
+/**
+ * Frontend-friendly version with camelCase properties
+ */
+export interface ReportResponseCamel {
+  reportId: string;
+  message: string;
+  status: 'success' | 'error';
+  fileCount?: number;
 }
 
 /**
@@ -65,6 +77,38 @@ export const CHUNKED_UPLOAD_SIZE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
 export const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
 
 /**
+ * Frontend-friendly version with camelCase properties
+ */
+export interface ChunkedUploadInitResponseCamel {
+  uploadId: string;
+  message: string;
+  status: 'success' | 'error';
+  chunkSize: number;
+}
+
+/**
+ * Frontend-friendly version with camelCase properties
+ */
+export interface ChunkUploadResponseCamel {
+  status: 'success' | 'error';
+  message: string;
+  uploadId: string;
+  chunkIndex: number;
+}
+
+/**
+ * Frontend-friendly version with camelCase properties
+ */
+export interface CompletedUploadResponseCamel {
+  status: 'success' | 'error';
+  message: string;
+  uploadId: string;
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+}
+
+/**
  * Service for handling file uploads with support for large files via chunking
  */
 export class UploadService extends ApiClient {
@@ -104,10 +148,18 @@ export class UploadService extends ApiClient {
    */
   async createReport(): Promise<string> {
     try {
-      const response = await this.post<ReportResponse>('/reports', {});
-      return response.data.report_id;
+      // No request body needed, but we'll use the adapter for consistency
+      const request = adaptApiRequest({});
+      
+      const response = await this.post<ReportResponse>('/reports', request);
+      
+      // Convert response to camelCase
+      const camelResponse = adaptApiResponse<ReportResponseCamel>(response.data);
+      
+      // Return just the report ID
+      return camelResponse.reportId;
     } catch (error) {
-      console.error('Error creating report:', error);
+      logger.error('Error creating report:', error);
       throw error;
     }
   }
@@ -123,13 +175,15 @@ export class UploadService extends ApiClient {
     file: File, 
     reportId?: string, 
     onProgress?: (progress: number) => void
-  ): Promise<ReportResponse> {
+  ): Promise<ReportResponseCamel> {
     try {
       const formData = new FormData();
       formData.append('files', file);
       
+      // Use adaptApiRequest for reportId
       if (reportId) {
-        formData.append('report_id', reportId);
+        const snakeCaseRequest = adaptApiRequest({ reportId });
+        formData.append('report_id', snakeCaseRequest.report_id);
       }
 
       const response = await this.post<ReportResponse>('/documents', formData, {
@@ -144,14 +198,15 @@ export class UploadService extends ApiClient {
           maxRetries: 3,
           retryDelay: 2000,
           onRetry: (attempt, maxRetries) => {
-            console.log(`Retrying file upload (${attempt}/${maxRetries})...`);
+            logger.info(`Retrying file upload (${attempt}/${maxRetries})...`);
           }
         }
       });
       
-      return response.data;
+      // Convert response to camelCase
+      return adaptApiResponse<ReportResponseCamel>(response.data);
     } catch (error) {
-      console.error('Error uploading file:', error);
+      logger.error('Error uploading file:', error);
       throw error;
     }
   }
@@ -165,7 +220,7 @@ export class UploadService extends ApiClient {
   async uploadFiles(
     files: File[], 
     onProgress?: (progress: number) => void
-  ): Promise<ReportResponse> {
+  ): Promise<ReportResponseCamel> {
     try {
       // First, check if we have any large files that need chunked upload
       const largeFiles = files.filter(file => this.shouldUseChunkedUpload(file));
@@ -193,7 +248,8 @@ export class UploadService extends ApiClient {
           }
         });
         
-        return response.data;
+        // Convert response to camelCase
+        return adaptApiResponse<ReportResponseCamel>(response.data);
       }
       
       // If we have large files, we need to handle them differently
@@ -242,7 +298,7 @@ export class UploadService extends ApiClient {
           fileProgress[fileIndex] = 100;
           updateProgress();
         } catch (error) {
-          console.error(`Error uploading large file ${file.name}:`, error);
+          logger.error(`Error uploading large file ${file.name}:`, error);
           throw error;
         }
       }
@@ -285,20 +341,20 @@ export class UploadService extends ApiClient {
           
           completedFiles += smallFiles.length;
         } catch (error) {
-          console.error('Error uploading small files:', error);
+          logger.error('Error uploading small files:', error);
           throw error;
         }
       }
       
-      // All files uploaded successfully
-      return {
+      // Return a formatted response
+      return adaptApiResponse<ReportResponseCamel>({
         report_id: reportId,
         message: `Uploaded ${completedFiles} files successfully`,
         status: 'success',
         file_count: completedFiles
-      };
+      });
     } catch (error) {
-      console.error('Error in uploadFiles:', error);
+      logger.error('Error in uploadFiles:', error);
       throw error;
     }
   }
@@ -312,7 +368,7 @@ export class UploadService extends ApiClient {
   async uploadTemplate(
     templateFile: File, 
     onProgress?: (progress: number) => void
-  ): Promise<ReportResponse> {
+  ): Promise<ReportResponseCamel> {
     try {
       const formData = new FormData();
       formData.append('template', templateFile);
@@ -327,9 +383,10 @@ export class UploadService extends ApiClient {
         }
       });
       
-      return response.data;
+      // Convert response to camelCase
+      return adaptApiResponse<ReportResponseCamel>(response.data);
     } catch (error) {
-      console.error('Error uploading template:', error);
+      logger.error('Error uploading template:', error);
       throw error;
     }
   }
@@ -339,20 +396,25 @@ export class UploadService extends ApiClient {
    * @param config Configuration for the chunked upload
    * @returns Promise resolved when the upload is complete
    */
-  async uploadLargeFile(config: ChunkedUploadConfig): Promise<CompletedUploadResponse> {
+  async uploadLargeFile(config: ChunkedUploadConfig): Promise<CompletedUploadResponseCamel> {
     const { file, chunkSize = DEFAULT_CHUNK_SIZE, onProgress, onRetry, reportId } = config;
     
     try {
-      // 1. Initialize chunked upload
-      const initResponse = await this.post<ChunkedUploadInitResponse>('/init-chunked-upload', {
+      // 1. Initialize chunked upload - convert request to snake_case
+      const initRequest = adaptApiRequest({
         filename: file.name,
         filesize: file.size,
         mimetype: file.type,
-        report_id: reportId || null
+        reportId: reportId || null
       });
+
+      const initResponse = await this.post<ChunkedUploadInitResponse>('/init-chunked-upload', initRequest);
       
-      const { upload_id, chunk_size } = initResponse.data;
-      const actualChunkSize = chunk_size || chunkSize;
+      // Convert response to camelCase
+      const camelInitResponse = adaptApiResponse<ChunkedUploadInitResponseCamel>(initResponse.data);
+      
+      const { uploadId, chunkSize: responseChunkSize } = camelInitResponse;
+      const actualChunkSize = responseChunkSize || chunkSize;
       
       // 2. Calculate number of chunks
       const totalChunks = Math.ceil(file.size / actualChunkSize);
@@ -366,7 +428,7 @@ export class UploadService extends ApiClient {
         
         const formData = new FormData();
         formData.append('chunk', chunk);
-        formData.append('upload_id', upload_id);
+        formData.append('upload_id', uploadId);
         formData.append('chunk_index', chunkIndex.toString());
         
         try {
@@ -385,7 +447,7 @@ export class UploadService extends ApiClient {
               maxRetries: 3,
               retryDelay: 2000,
               onRetry: (attempt, maxRetries) => {
-                console.log(`Retrying chunk ${chunkIndex} upload (${attempt}/${maxRetries})...`);
+                logger.info(`Retrying chunk ${chunkIndex} upload (${attempt}/${maxRetries})...`);
                 if (onRetry) {
                   onRetry(attempt, maxRetries);
                 }
@@ -400,21 +462,24 @@ export class UploadService extends ApiClient {
             onProgress(Math.floor((uploadedChunks / totalChunks) * 100));
           }
         } catch (error) {
-          console.error(`Error uploading chunk ${chunkIndex}:`, error);
+          logger.error(`Error uploading chunk ${chunkIndex}:`, error);
           throw error;
         }
       }
       
-      // 4. Complete the chunked upload
-      const completeResponse = await this.post<CompletedUploadResponse>('/complete-chunked-upload', {
-        upload_id,
+      // 4. Complete the chunked upload - convert request to snake_case
+      const completeRequest = adaptApiRequest({
+        uploadId,
         filename: file.name,
-        total_chunks: totalChunks
+        totalChunks
       });
+
+      const completeResponse = await this.post<CompletedUploadResponse>('/complete-chunked-upload', completeRequest);
       
-      return completeResponse.data;
+      // Convert response to camelCase
+      return adaptApiResponse<CompletedUploadResponseCamel>(completeResponse.data);
     } catch (error) {
-      console.error(`Error in chunked upload for ${file.name}:`, error);
+      logger.error(`Error in chunked upload for ${file.name}:`, error);
       throw error;
     }
   }

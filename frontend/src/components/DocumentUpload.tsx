@@ -9,6 +9,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { useDropzone } from 'react-dropzone';
 import { uploadApi } from '../services';
 import LoadingIndicator, { LoadingState, LoadingStage } from './LoadingIndicator';
+import { logger } from '../utils/logger';
 
 // Maximum total size (1GB)
 const MAX_TOTAL_SIZE = 1024 * 1024 * 1024;
@@ -99,55 +100,46 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     setLoadingState({
       isLoading: true,
       progress: 0,
-      stage: 'loading',
-      message: 'Caricamento dei documenti in corso...',
-      error: null,
-      attempt: 1,
-      maxAttempts: 3
+      stage: 'uploading',
+      message: 'Preparazione dei documenti per il caricamento...'
     });
-
+    
     try {
-      // Use the adapter which provides the same interface but uses our new service layer
-      const response = await uploadApi.uploadFile(files, {
-        onProgress: (progress) => {
-          // Update progress
-          const stage: LoadingStage = progress < 100 ? 'loading' : 'analyzing';
-          
-          setLoadingState(prev => ({
-            ...prev,
-            progress: progress || 0,
-            message: progress < 100 
-              ? 'Caricamento dei documenti in corso...' 
-              : 'Analisi dei documenti in corso...',
-            stage
-          }));
-        }
+      // Use the uploadFile adapter which handles progress
+      const response = await uploadApi.uploadFile(files, (progress) => {
+        setLoadingState(prevState => ({
+          ...prevState,
+          progress,
+          message: `Caricamento: ${progress}%`
+        }));
       });
-
-      if (response && response.report_id) {
+      
+      logger.info('Upload response:', response);
+      
+      if (response && response.reportId) {
         setLoadingState({
           isLoading: false,
           progress: 100,
           stage: 'completed',
-          message: 'Caricamento completato con successo!',
-          error: null,
-          attempt: 1,
-          maxAttempts: 3
+          message: 'Caricamento completato!'
         });
-        onUploadComplete(response.report_id);
+        
+        onUploadComplete(response.reportId);
       } else {
-        throw new Error('Risposta non valida dal server');
+        throw new Error('Risposta del server non valida. Impossibile ottenere l\'ID del report.');
       }
-    } catch (err: any) {
-      console.error('Error uploading files:', err);
+    } catch (error) {
+      logger.error('Error uploading files:', error);
+      
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Si è verificato un errore durante il caricamento. Riprova.';
+      
       setLoadingState({
         isLoading: false,
-        progress: 0,
         stage: 'error',
-        message: '',
-        error: err.message || 'Si è verificato un errore durante il caricamento dei file.',
-        attempt: 1,
-        maxAttempts: 3
+        error: errorMessage,
+        message: 'Errore di caricamento'
       });
     }
   };
