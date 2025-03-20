@@ -1,25 +1,25 @@
 # ---------------- Core libraries ----------------
 fastapi>=0.103.1
 uvicorn>=0.23.2
-pydantic>=2.4.2
-pydantic-settings>=2.0.3
-sqlalchemy>=2.0.28
+pydantic>=2.4.2,<3.0.0
+pydantic-settings>=2.0.3,<3.0.0
+sqlalchemy>=2.0.28,<3.0.0
 python-dotenv==1.0.0
 python-multipart>=0.0.6
-httpx>=0.25.0
-werkzeug>=2.3.7
+httpx>=0.24.0,<0.25.0  # Pinned for compatibility with supabase 2.0.0
+werkzeug>=2.3.7,<3.0.0
 
 # ---------------- Document / PDF Processing ----------------
 python-docx==0.8.11
 docxtpl==0.16.7
 pdfplumber>=0.10.3
 pytesseract==0.3.10
-Pillow>=10.0.1
+Pillow>=10.0.1,<11.0.0
 mammoth>=1.6.0
 docx2pdf>=0.1.8
 docx2txt>=0.8
-reportlab>=4.1.0
-PyMuPDF>=1.22.5
+reportlab>=4.1.0,<5.0.0
+PyMuPDF>=1.22.5,<2.0.0
 pdfrw>=0.4
 weasyprint>=60.2
 python-magic>=0.4.27
@@ -29,13 +29,13 @@ requests==2.30.0
 aiohttp==3.8.5
 
 # ---------------- Database / Storage ----------------
-supabase==2.0.0
+supabase==2.0.0  # This requires httpx<0.25.0
 psycopg2-binary>=2.9.9
 
 # ---------------- Security / Authentication ----------------
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]>=1.7.4
-pyjwt>=2.8.0
+pyjwt>=2.8.0,<3.0.0
 
 # ---------------- Data Processing ----------------
 pandas==2.0.3
@@ -47,3 +47,9 @@ pyyaml==6.0.1
 black>=24.2.0
 flake8>=7.0.0
 pytest>=7.4.2
+
+# Make sure we have compatible versions for common dependencies
+certifi>=2023.7.22
+charset-normalizer>=3.0.0
+idna>=3.4
+urllib3>=1.26.0,<2.0.0  # Many packages expect urllib3 < 2.0.0

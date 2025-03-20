@@ -103,6 +103,41 @@ To avoid import errors in production:
 
 3. Ensure `__init__.py` files exist in all directories to make them proper packages
 
+## Managing Python Dependencies
+
+### Avoiding Dependency Conflicts
+
+The backend uses several Python packages that may have conflicting dependency requirements. Here are some tips to avoid common issues:
+
+1. **Pin critical dependencies**:
+   - `httpx>=0.24.0,<0.25.0` - Required for compatibility with supabase 2.0.0
+   - `urllib3<2.0.0` - Many packages expect urllib3 versions below 2.0
+
+2. **Use upper bounds**:
+   Use upper version bounds for major dependencies to prevent unexpected breaking changes:
+   ```
+   pydantic>=2.4.2,<3.0.0
+   sqlalchemy>=2.0.28,<3.0.0
+   ```
+
+3. **Check for conflicts before deployment**:
+   Run this command locally to check for dependency conflicts before deploying:
+   ```bash
+   pip check
+   ```
+
+4. **Specify Python version**:
+   We've included a `runtime.txt` file that specifies Python 3.11.8, which ensures compatibility with all our dependencies.
+
+### Troubleshooting Dependency Issues
+
+If you encounter dependency conflicts during deployment:
+
+1. Check the build logs to identify the specific conflict
+2. Pin the problematic dependency to a compatible version
+3. If necessary, upgrade/downgrade other packages to maintain compatibility
+4. For complex dependency issues, consider using a pip constraints file
+
 ## Deployment Steps
 
 1. Push your code to your GitHub repository
