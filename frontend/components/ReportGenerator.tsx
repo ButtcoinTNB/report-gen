@@ -20,7 +20,7 @@ import SchemaIcon from '@mui/icons-material/Schema';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { generateApi } from '../src/services'; // Import the API adapter
-import { Report } from '../src/types';
+import { Report, ReportCamel, adaptReport } from '../src/types';
 import { logger } from '../src/utils/logger';
 
 // Define a subtle pulsing animation for the progress bar
@@ -48,7 +48,7 @@ const shimmer = keyframes`
 
 interface Props {
     reportId: string | null;  // UUID
-    onGenerate: (report: Report) => void;
+    onGenerate: (report: ReportCamel) => void;
     onError: (error: Error) => void;
 }
 
@@ -198,12 +198,15 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
         updated_at: new Date().toISOString()
       };
       
+      // Convert to camelCase for frontend use
+      const camelReport = adaptReport(newReport);
+      
       // Update progress to complete
       setProgress(100);
       setCurrentStep(PROCESSING_STEPS.length - 1);
       
-      // Call onGenerate callback
-      onGenerate(newReport);
+      // Call onGenerate callback with camelCase report
+      onGenerate(camelReport);
     } catch (error) {
       logger.error("Error generating report:", error);
       

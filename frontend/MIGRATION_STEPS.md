@@ -7,34 +7,34 @@
 #### FileUpload.tsx
 - [x] Add camelCase interface for UploadResponse (UploadResponseCamel)
 - [x] Update onDrop and handleSubmit methods to use camelCase properties
-- [ ] Fix remaining linter errors related to the UploadService
+- [x] Fix remaining linter errors related to the UploadService
 
 #### ReportGenerator.tsx
-- [ ] Import and use ReportCamel instead of Report where appropriate
-- [ ] Update references of snake_case properties to camelCase
-- [ ] Use adaptReport function when handling API responses
+- [x] Import and use ReportCamel instead of Report where appropriate
+- [x] Update references of snake_case properties to camelCase
+- [x] Use adaptReport function when handling API responses
 
 #### Edit Page
-- [ ] Create a ReportDataCamel interface extending ReportCamel
-- [ ] Update state to use camelCase properties
-- [ ] Change API call code to use camelCase consistently
+- [x] Create a ReportDataCamel interface extending ReportCamel
+- [x] Update state to use camelCase properties
+- [x] Change API call code to use camelCase consistently
 
 ### 2. Service Layer Refinements
 
 #### UploadService.ts
-- [ ] Review uploadFiles method to ensure it handles FormData properly
-- [ ] Ensure all methods consistently use adaptApiResponse where needed
-- [ ] Add proper JSDoc documentation for all methods
+- [x] Review uploadFiles method to ensure it handles FormData properly
+- [x] Ensure all methods consistently use adaptApiResponse where needed
+- [x] Add proper JSDoc documentation for all methods
 
 #### ReportService.ts
-- [ ] Ensure all methods return camelCase interfaces
-- [ ] Update method signatures to use camelCase parameters
+- [x] Ensure all methods return camelCase interfaces
+- [x] Update method signatures to use camelCase parameters
 
 ### 3. Type Definition Updates
 
-- [ ] Review all types in index.ts to ensure full coverage
-- [ ] Add explicit CamelCase versions for any missing types
-- [ ] Add deprecation notices to hybrid interfaces
+- [x] Review all types in index.ts to ensure full coverage
+- [x] Add explicit CamelCase versions for any missing types
+- [x] Add deprecation notices to hybrid interfaces
 
 ## Medium-Term Goals
 
@@ -74,9 +74,9 @@
 
 | Task | Owner | Status | Due Date |
 |------|-------|--------|----------|
-| FileUpload.tsx update | TBD | In Progress | TBD |
-| ReportGenerator.tsx update | TBD | Not Started | TBD |
-| Edit Page update | TBD | Not Started | TBD |
+| FileUpload.tsx update | TBD | Completed | TBD |
+| ReportGenerator.tsx update | TBD | Completed | TBD |
+| Edit Page update | TBD | Completed | TBD |
 | ESLint rule enhancement | TBD | Not Started | TBD |
 | Documentation updates | TBD | Not Started | TBD |
 | Final cleanup | TBD | Not Started | TBD | 

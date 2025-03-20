@@ -10,6 +10,12 @@ from PIL import Image
 from config import settings
 import fitz  # PyMuPDF for PDF handling
 from utils.file_utils import safe_path_join
+from utils.error_handler import logger
+from utils.file_processor import FileProcessor
+import httpx
+import asyncio
+from html.parser import HTMLParser
+from pathlib import Path
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -17,13 +23,27 @@ logger = logging.getLogger(__name__)
 # Maximum number of pages to process to avoid excessive API usage
 MAX_PAGES = 10
 
+def safe_path_join(base_path: str, relative_path: str) -> str:
+    """
+    Join paths safely to prevent path traversal attacks
+    
+    Args:
+        base_path: Base directory path
+        relative_path: Relative path to join
+        
+    Returns:
+        Safely joined path
+    """
+    # Use FileProcessor's safe path join method
+    return FileProcessor.safe_path_join(base_path, relative_path)
+
 def convert_document_to_images(file_path: str, output_dir: Optional[str] = None) -> List[str]:
     """
-    Convert document (PDF, DOCX) to a series of images (one per page)
+    Convert a document file to a series of images
     
     Args:
         file_path: Path to the document file
-        output_dir: Optional directory to save images (uses temp dir if None)
+        output_dir: Directory to save images (optional, will create temp dir if None)
         
     Returns:
         List of paths to the generated images
@@ -31,9 +51,11 @@ def convert_document_to_images(file_path: str, output_dir: Optional[str] = None)
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
         return []
-        
-    file_name = os.path.basename(file_path)
-    file_ext = os.path.splitext(file_name)[1].lower()
+    
+    # Use FileProcessor to get file information    
+    file_info = FileProcessor.get_file_info(file_path)
+    file_name = file_info['name']
+    file_ext = file_info['extension']
     
     # Create temporary directory if not provided
     if not output_dir:
@@ -46,13 +68,12 @@ def convert_document_to_images(file_path: str, output_dir: Optional[str] = None)
             return convert_pdf_to_images(file_path, output_dir)
         elif file_ext in ['.docx', '.doc', '.rtf', '.odt']:
             return convert_docx_to_images(file_path, output_dir)
-        elif file_ext in ['.jpg', '.jpeg', '.png', '.tiff', '.tif', '.bmp', '.gif', '.webp']:
+        elif FileProcessor.is_image_file(file_path):
             # For images, just copy to output dir with a standardized name
             output_path = safe_path_join(output_dir, f"image_page_001{file_ext}")
             try:
-                # Use Pillow to open and resave to ensure it's valid and convert if needed
-                img = Image.open(file_path)
-                img.save(output_path)
+                # Use FileProcessor to convert image if needed
+                FileProcessor.convert_image(file_path, output_path)
                 image_paths.append(output_path)
                 logger.info(f"Copied and converted image to {output_path}")
             except Exception as img_err:
@@ -245,8 +266,6 @@ def convert_docx_to_images(docx_path: str, output_dir: str) -> List[str]:
                         font = ImageFont.load_default()
                     
                     # Remove HTML tags for simplified text extraction
-                    from html.parser import HTMLParser
-                    
                     class MLStripper(HTMLParser):
                         def __init__(self):
                             super().__init__()
@@ -316,35 +335,25 @@ def convert_docx_to_images(docx_path: str, output_dir: str) -> List[str]:
 
 def image_to_base64(image_path: str) -> str:
     """
-    Convert an image file to a base64 string
+    Convert an image file to base64 encoded string
     
     Args:
         image_path: Path to the image file
         
     Returns:
-        Base64 encoded string with content type prefix
+        Base64 encoded string of the image
     """
     try:
-        # Determine the MIME type based on file extension
-        file_ext = os.path.splitext(image_path)[1].lower()
+        # Use FileProcessor to get file information
+        file_info = FileProcessor.get_file_info(image_path)
         
-        mime_types = {
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
-            '.bmp': 'image/bmp',
-            '.tiff': 'image/tiff',
-            '.tif': 'image/tiff'
-        }
-        
-        mime_type = mime_types.get(file_ext, 'image/png')
-        
+        # Open the image file in binary mode and convert to base64
         with open(image_path, "rb") as img_file:
-            base64_data = base64.b64encode(img_file.read()).decode('utf-8')
-            return f"data:{mime_type};base64,{base64_data}"
+            img_data = img_file.read()
+            base64_encoded = base64.b64encode(img_data).decode('utf-8')
             
+        # Return the base64 encoded string with appropriate mime type
+        return f"data:{file_info['mime_type']};base64,{base64_encoded}"
     except Exception as e:
         logger.error(f"Error converting image to base64: {str(e)}")
         return ""
@@ -435,10 +444,12 @@ async def process_document_with_multimodal_api(
             vision_model = "anthropic/claude-3-5-sonnet"
             
             response = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                settings.OPENROUTER_API_ENDPOINT,
                 headers={
                     "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": settings.APP_DOMAIN,
+                    "X-Title": settings.APP_NAME
                 },
                 json={
                     "model": vision_model,

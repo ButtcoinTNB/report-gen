@@ -4,7 +4,7 @@ import os
 import glob
 import json
 from uuid import UUID
-from pydantic import UUID4
+from pydantic import UUID4, BaseModel
 from supabase import create_client, Client
 from config import settings
 import traceback
@@ -14,10 +14,13 @@ from utils.auth import get_current_user
 from utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
 from services.docx_service import docx_service
 from utils.supabase_helper import create_supabase_client, supabase_client_context
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import status
 from utils.error_handler import handle_exception, api_error_handler, logger
 from utils.file_utils import safe_path_join
+from api.schemas import APIResponse
+from services.supabase_client import supabase_client_context
+from utils.file_processor import FileProcessor
 
 # Import format functions to avoid circular imports later
 try:
@@ -150,7 +153,13 @@ def find_docx_file_locally(report_id: UUID4) -> Optional[str]:
     return None
 
 
-@router.get("/{report_id}")
+class DownloadReportResponse(BaseModel):
+    """Response model for generic report download endpoint"""
+    report_id: UUID4
+    format: str
+    file_path: Optional[str] = None
+
+@router.get("/{report_id}", response_model=APIResponse[DownloadReportResponse])
 @api_error_handler
 async def download_report(
     report_id: UUID4, 
@@ -159,13 +168,20 @@ async def download_report(
 ):
     """
     Download a generated report in DOCX or PDF format
+    
+    Args:
+        report_id: UUID of the report to download
+        format: Format of the report (docx or pdf)
+        user: Optional authenticated user
+        
+    Returns:
+        Standardized API response with appropriate file response
     """
     # Validate format
     if format.lower() not in ["docx", "pdf"]:
-        handle_exception(
-            ValueError(f"Unsupported format: {format}. Only 'docx' and 'pdf' are supported."),
-            "validating report format",
-            default_status_code=400
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format: {format}. Only 'docx' and 'pdf' are supported."
         )
     
     # Initialize Supabase client
@@ -175,10 +191,9 @@ async def download_report(
     response = supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
     
     if not response.data:
-        handle_exception(
-            FileNotFoundError(f"Report not found with ID: {report_id}"),
-            "locating report",
-            default_status_code=404
+        raise HTTPException(
+            status_code=404,
+            detail=f"Report not found with ID: {report_id}"
         )
     
     report = response.data[0]
@@ -187,38 +202,46 @@ async def download_report(
     if format.lower() == "docx":
         return await download_docx_report(report_id)
     else:  # PDF
-        handle_exception(
-            NotImplementedError("PDF download not implemented yet"),
-            "generating PDF report",
-            default_status_code=501
+        raise HTTPException(
+            status_code=501,
+            detail="PDF download not implemented yet"
         )
 
 
-@router.get("/file/{report_id}")
+class ServeReportFileResponse(BaseModel):
+    """Response model for serving generic report file endpoint"""
+    report_id: UUID4
+    file_path: str
+
+@router.get("/file/{report_id}", response_model=APIResponse[ServeReportFileResponse])
 @api_error_handler
 async def serve_report_file(report_id: UUID4):
     """
     Serve a report file directly (without downloading)
+    
+    Args:
+        report_id: UUID of the report to serve
+        
+    Returns:
+        Standardized API response with file response
     """
     # Get file path from Supabase
     supabase = create_supabase_client()
     response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
     
     if not response.data or not response.data[0].get("file_path"):
-        handle_exception(
-            FileNotFoundError("Report file not found"),
-            "retrieving report file path",
-            default_status_code=404
+        raise HTTPException(
+            status_code=404,
+            detail="Report file not found"
         )
     
     file_path = response.data[0]["file_path"]
     
     # Check if file exists locally
     if not os.path.exists(file_path):
-        handle_exception(
-            FileNotFoundError("Report file not found on server"),
-            "checking file existence",
-            default_status_code=404
+        raise HTTPException(
+            status_code=404,
+            detail="Report file not found on server"
         )
     
     # Return the file
@@ -228,7 +251,12 @@ async def serve_report_file(report_id: UUID4):
     )
 
 
-@router.post("/cleanup/{report_id}")
+class CleanupResponse(BaseModel):
+    """Response model for cleanup endpoint"""
+    deleted_files: List[str]
+    directory: Optional[str] = None
+
+@router.post("/cleanup/{report_id}", response_model=APIResponse[CleanupResponse])
 async def cleanup_report_files(report_id: UUID4):
     """
     Clean up all temporary files associated with a report after it has been successfully
@@ -238,7 +266,7 @@ async def cleanup_report_files(report_id: UUID4):
         report_id: The UUID of the report to clean up files for
         
     Returns:
-        A status message indicating success or failure
+        Standardized API response with cleanup details
     """
     # Define paths for report files
     report_dir = safe_path_join(settings.UPLOAD_DIR, str(report_id))
@@ -302,19 +330,31 @@ async def cleanup_report_files(report_id: UUID4):
         except Exception as e:
             print(f"Error updating database status: {str(e)}")
         
-        return {
-            "status": "success",
-            "message": f"Successfully cleaned up {len(deleted_files)} files for report {report_id}"
-        }
+        return APIResponse(
+            status="success",
+            data=CleanupResponse(
+                deleted_files=deleted_files,
+                directory=str(report_dir) if os.path.exists(report_dir) else None
+            ),
+            message=f"Successfully cleaned up {len(deleted_files)} files for report {report_id}"
+        )
     except Exception as e:
-        print(f"Error cleaning up report files: {str(e)}")
-        return {
-            "status": "error",
-            "message": f"Failed to clean up report files: {str(e)}"
-        }
+        logger.error(f"Error cleaning up report files: {str(e)}")
+        return APIResponse(
+            status="error",
+            message=f"Failed to clean up report files: {str(e)}",
+            code="CLEANUP_ERROR"
+        )
 
 
-@router.get("/docx/{report_id}")
+class DocxReportResponse(BaseModel):
+    """Response model for DOCX report download endpoint"""
+    report_id: UUID4
+    file_path: str
+    filename: str
+
+@router.get("/docx/{report_id}", response_model=APIResponse[DocxReportResponse])
+@api_error_handler
 async def download_docx_report(report_id: UUID4):
     """
     Download a finalized report as DOCX by ID.
@@ -323,75 +363,172 @@ async def download_docx_report(report_id: UUID4):
         report_id: UUID of the report to download
         
     Returns:
-        The DOCX file as a download
+        Standardized API response with FileResponse for the DOCX file
     """
-    try:
-        # Get file path from Supabase
-        supabase = create_supabase_client()
-        response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+    # Get file path from Supabase
+    supabase = create_supabase_client()
+    response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+    
+    if not response.data or not response.data[0].get("file_path"):
+        raise HTTPException(status_code=404, detail="Report file not found")
+    
+    file_path = response.data[0]["file_path"]
+    
+    # Check if file exists locally
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Report file not found on server")
+    
+    # Check if the file is a DOCX file
+    if not file_path.lower().endswith('.docx'):
+        # Try to find a matching DOCX file with the same base name
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        docx_path = safe_path_join(settings.GENERATED_REPORTS_DIR, f"{base_name}.docx")
         
-        if not response.data or not response.data[0].get("file_path"):
-            raise HTTPException(status_code=404, detail="Report file not found")
-        
-        file_path = response.data[0]["file_path"]
-        
-        # Check if file exists locally
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Report file not found on server")
-        
-        # Check if the file is a DOCX file
-        if not file_path.lower().endswith('.docx'):
-            # Try to find a matching DOCX file with the same base name
-            base_name = os.path.splitext(os.path.basename(file_path))[0]
-            docx_path = safe_path_join(settings.GENERATED_REPORTS_DIR, f"{base_name}.docx")
-            
-            if not os.path.exists(docx_path):
-                raise HTTPException(
-                    status_code=404, 
-                    detail="DOCX version of this report not found. Please generate it first."
-                )
-            file_path = docx_path
-        
-        # Prepare the FileResponse
-        response = FileResponse(
-            path=file_path,
-            filename=f"report_{report_id}.docx",
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
-        
-        # Schedule cleanup to run after the response is sent (in background)
-        import asyncio
-        asyncio.create_task(cleanup_report_files(report_id))
-        print(f"Scheduled cleanup for report {report_id} after download")
-        
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading report: {str(e)}")
+        if not os.path.exists(docx_path):
+            raise HTTPException(
+                status_code=404, 
+                detail="DOCX version of this report not found. Please generate it first."
+            )
+        file_path = docx_path
+    
+    # Prepare the FileResponse
+    response = FileResponse(
+        path=file_path,
+        filename=f"report_{report_id}.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    
+    # Schedule cleanup to run after the response is sent (in background)
+    import asyncio
+    asyncio.create_task(cleanup_report_files(report_id))
+    print(f"Scheduled cleanup for report {report_id} after download")
+    
+    return response
 
 
-@router.get("/file/docx/{report_id}")
+class DocxFileResponse(BaseModel):
+    """Response model for serving DOCX file endpoint"""
+    file_path: str
+    report_id: UUID4
+
+@router.get("/file/docx/{report_id}", response_model=APIResponse[DocxFileResponse])
+@api_error_handler
 async def serve_docx_report_file(report_id: UUID4):
     """
     Serve a DOCX report file directly (without downloading)
+    
+    Args:
+        report_id: UUID of the report
+        
+    Returns:
+        Standardized API response with FileResponse for the DOCX
     """
-    try:
-        # Get file path from Supabase
-        supabase = create_supabase_client()
-        response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+    # Get file path from Supabase
+    supabase = create_supabase_client()
+    response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+    
+    if not response.data or not response.data[0].get("file_path"):
+        raise HTTPException(status_code=404, detail="Report file not found")
+    
+    file_path = response.data[0]["file_path"]
+    
+    # Check if file exists locally
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Report file not found on server")
+    
+    # Return the file
+    return FileResponse(
+        path=file_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+
+class ReportFileResponse(BaseModel):
+    """Response model for report file info endpoint"""
+    file_path: str
+    file_exists: bool
+    content_type: str
+
+@router.get("/file/{report_id}/info", response_model=APIResponse[ReportFileResponse])
+@api_error_handler
+async def get_report_file_info(report_id: UUID4):
+    """
+    Get information about a report file without downloading it
+    
+    Args:
+        report_id: The ID of the report
         
-        if not response.data or not response.data[0].get("file_path"):
-            raise HTTPException(status_code=404, detail="Report file not found")
+    Returns:
+        Information about the report file including path and content type
+    """
+    async with supabase_client_context() as supabase:
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
         
-        file_path = response.data[0]["file_path"]
+        if not report_response.data:
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+            
+        report = report_response.data[0]
+        
+        # Define the expected file path
+        content_file_path = os.path.join(settings.REPORTS_DIR, f"{report_id}.txt")
         
         # Check if file exists locally
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Report file not found on server")
+        file_exists = os.path.exists(content_file_path)
         
-        # Return the file
-        return FileResponse(
-            path=file_path,
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        # Determine content type using FileProcessor
+        content_type = FileProcessor.get_mime_type(content_file_path) if file_exists else "text/plain"
+        
+        return APIResponse(
+            status="success",
+            data=ReportFileResponse(
+                file_path=content_file_path,
+                file_exists=file_exists,
+                content_type=content_type
+            )
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error serving DOCX file: {str(e)}")
+
+@router.get("/{report_id}")
+@api_error_handler
+async def download_report_content(report_id: UUID4):
+    """
+    Download the report content as text
+    
+    Args:
+        report_id: The ID of the report
+        
+    Returns:
+        The report content as a text file
+    """
+    async with supabase_client_context() as supabase:
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        
+        if not report_response.data:
+            raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
+            
+        report = report_response.data[0]
+        
+        # Check if we have a file on disk
+        content_file_path = os.path.join(settings.REPORTS_DIR, f"{report_id}.txt")
+        
+        if os.path.exists(content_file_path):
+            logger.info(f"Serving report file from disk: {content_file_path}")
+            with open(content_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        else:
+            # If not on disk, get from database
+            logger.info(f"Report file not found on disk, using content from database")
+            content = report.get("content", "")
+            
+            # Create the reports directory if it doesn't exist
+            os.makedirs(settings.REPORTS_DIR, exist_ok=True)
+            
+            # Save to disk for future requests
+            with open(content_file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        
+        # Return file
+        return FileResponse(
+            content_file_path,
+            media_type="text/plain",
+            filename=f"report_{report_id}.txt"
+        )

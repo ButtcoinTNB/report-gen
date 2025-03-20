@@ -1,0 +1,39 @@
+## [Unreleased]
+
+### Added
+- Standardized API response format across more endpoints using `api_error_handler` decorator:
+  - `/api/upload/template` endpoint 
+  - `/api/upload/query` endpoint
+  - `/api/format/preview-file/{preview_id}` GET endpoint
+  - `/api/format/preview-file` POST endpoint
+  - `/api/format/preview-file/{preview_id}/info` GET endpoint
+  - `/api/download/{report_id}` endpoint
+  - `/api/download/docx/{report_id}` endpoint
+  - `/api/download/file/{report_id}` endpoint
+  - `/api/download/file/docx/{report_id}` endpoint
+  - `/api/generate/reports/{report_id}/refine` endpoint
+  - `/api/generate/simple-test` endpoint
+  - `/api/generate/reports/generate-docx` endpoint
+  - `/api/generate/from-id` endpoint
+  - `/api/generate/analyze` endpoint
+  - `/api/generate/` base endpoint
+  - `/api/generate/generate` endpoint
+  - `/api/edit/{report_id}` PUT endpoint
+  - `/api/edit/ai-refine` POST endpoint
+- Added new response models in `schemas.py`:
+  - `UploadQueryResult` model
+  - `ReportFileResponse` model
+  - `PreviewFileResponse` model
+  - `PreviewFileGenerationResponse` model
+  - `DocxReportResponse` model
+  - `DocxFileResponse` model
+  - `ServeReportFileResponse` model
+  - `DownloadReportResponse` model
+  - `RefineReportResponse` model
+  - `SimpleTestResponse` model
+  - `GenerateDocxResponse` model
+  - `GenerateFromIdResponse` model
+  - `GenerateReportResponse` model
+  - `GenerateContentResponse` model
+  - `UpdateReportResponse` model
+  - `AIRefineResponse` model 

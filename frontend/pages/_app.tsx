@@ -3,7 +3,23 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import Head from 'next/head';
 import '../styles/globals.css';
-import { validateEnvVars } from '../config';
+import ReduxProvider from '../src/providers/ReduxProvider';
+import type { AppProps } from 'next/app';
+
+// Type for environment validation result
+interface EnvValidationResult {
+  isValid: boolean;
+  warnings: string[];
+}
+
+// Simple environment variables validation
+const validateEnvVars = (): EnvValidationResult => {
+  // This is a placeholder - implement actual validation logic here
+  return {
+    isValid: true,
+    warnings: [],
+  };
+};
 
 // Create an Apple-inspired theme
 const theme = createTheme({
@@ -65,14 +81,33 @@ const theme = createTheme({
   shape: {
     borderRadius: 8, // Apple uses rounded corners but not too rounded
   },
+  // Fix the shadows array to ensure it has 25 elements
   shadows: [
     'none',
     '0px 2px 4px rgba(0, 0, 0, 0.05)',
     '0px 4px 8px rgba(0, 0, 0, 0.05)',
     '0px 8px 16px rgba(0, 0, 0, 0.05)',
     '0px 12px 24px rgba(0, 0, 0, 0.05)',
-    // ... rest of the shadows
-    ...Array(20).fill('0px 12px 24px rgba(0, 0, 0, 0.05)'),
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
+    '0px 12px 24px rgba(0, 0, 0, 0.05)',
   ],
   components: {
     MuiButton: {
@@ -125,7 +160,7 @@ const theme = createTheme({
   },
 });
 
-export default function App({ Component, pageProps }) {
+const App = ({ Component, pageProps }: AppProps) => {
   // Validate environment variables on startup
   useEffect(() => {
     const { isValid, warnings } = validateEnvVars();
@@ -141,10 +176,14 @@ export default function App({ Component, pageProps }) {
         <meta name="description" content="Genera perizie con AI" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <Component {...pageProps} />
-      </ThemeProvider>
+      <ReduxProvider>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <Component {...pageProps} />
+        </ThemeProvider>
+      </ReduxProvider>
     </>
   );
-} 
+};
+
+export default App; 

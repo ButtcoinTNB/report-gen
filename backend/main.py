@@ -18,6 +18,7 @@ project_root, backend_dir = ensure_root_in_path()
 from api import upload, generate, format, edit, download
 from config import settings
 from utils.file_utils import safe_path_join
+from api.schemas import APIResponse
 
 # Debug imports
 import traceback
@@ -203,20 +204,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     if "entity too large" in error_detail.lower():
         return JSONResponse(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            content={
-                "status": "error",
-                "detail": f"File too large. The maximum allowed size is 1GB.",
-                "code": "FILE_TOO_LARGE"
-            }
+            content=APIResponse(
+                status="error",
+                message="File too large. The maximum allowed size is 1GB.",
+                code="FILE_TOO_LARGE"
+            ).dict()
         )
     
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "status": "error", 
-            "detail": str(exc), 
-            "code": "VALIDATION_ERROR"
-        }
+        content=APIResponse(
+            status="error", 
+            message=str(exc), 
+            code="VALIDATION_ERROR"
+        ).dict()
     )
 
 # Get allowed origins - split by comma if it's a list

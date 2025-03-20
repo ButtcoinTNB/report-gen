@@ -21,27 +21,24 @@ import {
 import dynamic from 'next/dynamic';
 import 'easymde/dist/easymde.min.css';
 import { generateApi, editApi, formatApi } from '../src/services';
-import { Report } from '../src/types';
+import { 
+  Report, 
+  ReportDataCamel, 
+  adaptReportData,
+  EditReportResponseCamel,
+  adaptEditReportResponse 
+} from '../src/types';
 import { logger } from '../src/utils/logger';
+import { adaptApiResponse } from '../src/utils/adapters';
 
 // Dynamic import for the Markdown editor to avoid SSR issues
 const SimpleMDE = dynamic(() => import('react-simplemde-editor'), { ssr: false });
 
-interface ReportData {
-    report_id: string;  // UUID
-    template_id?: string;  // UUID
-    title?: string;
-    content?: string;
-    is_finalized?: boolean;
-    files_cleaned?: boolean;
-    created_at?: string;
-    updated_at?: string;
-}
-
+// Using the new camelCase interface
 const EditPage = () => {
   const router = useRouter();
   const { id } = router.query;
-  const [report, setReport] = useState<ReportData | null>(null);
+  const [report, setReport] = useState<ReportDataCamel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [aiInstructions, setAiInstructions] = useState('');
@@ -60,18 +57,13 @@ const EditPage = () => {
     try {
       setLoading(true);
       const reportData = await generateApi.getReport(reportId);
-      setReport({
-        report_id: reportData.report_id,
-        template_id: reportData.template_id,
-        title: reportData.title,
-        content: reportData.content,
-        is_finalized: reportData.is_finalized,
-        files_cleaned: reportData.files_cleaned,
-        created_at: reportData.created_at,
-        updated_at: reportData.updated_at
-      });
-      setTitle(reportData.title || '');
-      setContent(reportData.content || '');
+      
+      // Convert to camelCase
+      const camelReport = adaptReportData(reportData);
+      
+      setReport(camelReport);
+      setTitle(camelReport.title || '');
+      setContent(camelReport.content || '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load report');
     } finally {
@@ -87,21 +79,14 @@ const EditPage = () => {
     setSuccess('');
     
     try {
-      await editApi.editReport(report.report_id, `Update the report with title: "${title}" and content: "${content}"`);
+      await editApi.editReport(report.reportId, `Update the report with title: "${title}" and content: "${content}"`);
       
-      const updatedReport = await generateApi.getReport(report.report_id);
+      const updatedReport = await generateApi.getReport(report.reportId);
       
-      setReport({
-        report_id: updatedReport.report_id,
-        template_id: updatedReport.template_id,
-        title: updatedReport.title,
-        content: updatedReport.content,
-        is_finalized: updatedReport.is_finalized,
-        files_cleaned: updatedReport.files_cleaned,
-        created_at: updatedReport.created_at,
-        updated_at: updatedReport.updated_at
-      });
+      // Convert to camelCase
+      const camelReport = adaptReportData(updatedReport);
       
+      setReport(camelReport);
       setSuccess('Report saved successfully!');
     } catch (err) {
       logger.error('Error saving report:', err);
@@ -118,20 +103,14 @@ const EditPage = () => {
       setIsRefining(true);
       setError('');
       
-      // Use the optimized edit API that returns updated data directly
-      const updatedReport = await editApi.editReport(report.report_id, aiInstructions);
+      // Use the edit API that returns EditReportResponseCamel
+      const result = await editApi.editReport(report.reportId, aiInstructions);
       
-      setReport({
-        report_id: updatedReport.report_id,
-        template_id: updatedReport.template_id,
-        title: updatedReport.title,
-        content: updatedReport.content,
-        is_finalized: updatedReport.is_finalized,
-        files_cleaned: updatedReport.files_cleaned,
-        created_at: updatedReport.created_at,
-        updated_at: updatedReport.updated_at
-      });
+      // Get the updated report data after editing
+      const updatedReport = await generateApi.getReport(report.reportId);
+      const camelReport = adaptReportData(updatedReport);
       
+      setReport(camelReport);
       setAiInstructions('');
     } catch (err) {
       logger.error('Error refining report:', err);
@@ -148,12 +127,12 @@ const EditPage = () => {
     setError('');
     
     try {
-      await formatApi.formatReport(report.report_id, { previewMode: false });
+      await formatApi.formatReport(report.reportId, { previewMode: false });
       
       setSuccess('Report finalized successfully!');
       
       setTimeout(() => {
-        router.push(`/download?id=${report.report_id}`);
+        router.push(`/download?id=${report.reportId}`);
       }, 1500);
     } catch (err) {
       logger.error('Error finalizing report:', err);
@@ -187,7 +166,7 @@ const EditPage = () => {
           fullWidth
           variant="outlined"
           sx={{ mb: 3 }}
-          disabled={report?.is_finalized}
+          disabled={report?.isFinalized}
         />
         
         <TextField
@@ -199,7 +178,7 @@ const EditPage = () => {
           rows={20}
           variant="outlined"
           sx={{ mb: 3, fontFamily: 'monospace' }}
-          disabled={report?.is_finalized}
+          disabled={report?.isFinalized}
         />
         
         <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -207,7 +186,7 @@ const EditPage = () => {
             variant="contained" 
             color="primary" 
             onClick={handleSave}
-            disabled={loading || report?.is_finalized}
+            disabled={loading || report?.isFinalized}
           >
             {loading ? <CircularProgress size={24} /> : 'Salva Modifiche'}
           </Button>
@@ -216,7 +195,7 @@ const EditPage = () => {
             variant="contained" 
             color="success" 
             onClick={handleFinalize}
-            disabled={loading || report?.is_finalized}
+            disabled={loading || report?.isFinalized}
           >
             {loading ? <CircularProgress size={24} /> : 'Finalizza Report'}
           </Button>
@@ -241,39 +220,40 @@ const EditPage = () => {
           rows={4}
           variant="outlined"
           sx={{ mb: 3 }}
-          disabled={isRefining || report?.is_finalized}
+          disabled={isRefining || report?.isFinalized}
         />
         
         <Button 
           variant="contained" 
           color="secondary" 
           onClick={handleRefine}
-          disabled={isRefining || !aiInstructions.trim() || report?.is_finalized}
-          fullWidth
+          disabled={isRefining || !aiInstructions || report?.isFinalized}
+          sx={{ width: '100%' }}
         >
-          {isRefining ? <CircularProgress size={24} /> : 'Raffina con AI'}
+          {isRefining ? (
+            <>
+              <CircularProgress size={24} sx={{ mr: 1 }} color="inherit" />
+              Refining Report...
+            </>
+          ) : 'Refine with AI'}
         </Button>
       </Paper>
       
-      <Snackbar 
-        open={!!error} 
-        autoHideDuration={6000} 
-        onClose={() => setError('')}
-      >
-        <Alert onClose={() => setError('')} severity="error" sx={{ width: '100%' }}>
-          {error}
-        </Alert>
-      </Snackbar>
+      {error && (
+        <Snackbar open={!!error} autoHideDuration={6000} onClose={() => setError(null)}>
+          <Alert onClose={() => setError(null)} severity="error" sx={{ width: '100%' }}>
+            {error}
+          </Alert>
+        </Snackbar>
+      )}
       
-      <Snackbar 
-        open={!!success} 
-        autoHideDuration={3000} 
-        onClose={() => setSuccess('')}
-      >
-        <Alert onClose={() => setSuccess('')} severity="success" sx={{ width: '100%' }}>
-          {success}
-        </Alert>
-      </Snackbar>
+      {success && (
+        <Snackbar open={!!success} autoHideDuration={3000} onClose={() => setSuccess('')}>
+          <Alert onClose={() => setSuccess('')} severity="success" sx={{ width: '100%' }}>
+            {success}
+          </Alert>
+        </Snackbar>
+      )}
     </Container>
   );
 };

@@ -26,7 +26,7 @@ from utils.auth import get_current_user
 from utils.db import get_db
 from pydantic import BaseModel, UUID4
 import uuid
-from api.schemas import GenerateReportRequest, AdditionalInfoRequest
+from api.schemas import GenerateReportRequest, AdditionalInfoRequest, APIResponse
 from services.storage import get_document_path
 import logging
 from services.docx_service import docx_service
@@ -36,6 +36,7 @@ import asyncio
 from utils.supabase_helper import create_supabase_client, supabase_client_context
 from uuid import UUID
 from utils.file_utils import safe_path_join
+import shutil
 
 router = APIRouter(tags=["Report Generation"])
 logger = logging.getLogger(__name__)
@@ -63,6 +64,51 @@ class GenerateRequest(BaseModel):
 
 class RefineRequest(BaseModel):
     instructions: str
+
+
+class AnalysisResponseSchema(BaseModel):
+    """Schema for analysis response data"""
+    findings: Dict[str, Any]
+    suggestions: List[str]
+    extracted_variables: Dict[str, Any]
+
+
+class RefineReportResponse(BaseModel):
+    """Response model for report refinement endpoint"""
+    report_id: str
+    content: str
+    status: str
+
+
+class SimpleTestResponse(BaseModel):
+    """Response model for simple test endpoint"""
+    message: str
+    received: Dict[str, Any]
+
+
+class GenerateDocxResponse(BaseModel):
+    """Response model for DOCX report generation endpoint"""
+    status: str
+    report_id: str
+
+
+class GenerateFromIdResponse(BaseModel):
+    """Response model for generating report from ID endpoint"""
+    report_id: str
+    content: str
+    status: str
+
+
+class GenerateContentResponse(BaseModel):
+    """Response model for report content generation endpoint"""
+    report_id: str
+    content: str
+    status: str
+
+
+class GenerateReportResponse(BaseModel):
+    """Response model for report creation endpoint"""
+    report_id: str
 
 
 def fetch_reference_reports():
@@ -176,13 +222,22 @@ async def get_report_files(report_id: UUID4) -> List[Dict[str, Any]]:
         return []
 
 
-@router.post("/")
+@router.post("/", response_model=APIResponse[GenerateReportResponse])
 @api_error_handler
 async def generate_report(
     request: GenerateRequest,
     background_tasks: BackgroundTasks
-) -> Dict[str, Any]:
-    """Generate a new report"""
+):
+    """
+    Generate a new report
+    
+    Args:
+        request: GenerateRequest with document IDs and additional info
+        background_tasks: FastAPI background tasks
+        
+    Returns:
+        Standardized API response with the generated report ID
+    """
     async with supabase_client_context() as supabase:
         # Create new report
         report_data = {
@@ -209,14 +264,21 @@ async def generate_report(
         return {"report_id": str(report_id)}
 
 
-@router.post("/generate")
+@router.post("/generate", response_model=APIResponse[GenerateContentResponse])
 @api_error_handler
 async def generate_report_content(
     request: GenerateRequest,
     current_user: Optional[User] = Depends(get_current_user)
-) -> Dict[str, Any]:
+):
     """
     Generate content for an existing report
+    
+    Args:
+        request: GenerateRequest with document IDs and additional info
+        current_user: Optional authenticated user
+        
+    Returns:
+        Standardized API response with generated report content
     
     Authentication:
         This endpoint uses optional authentication. When authenticated, the generated report
@@ -230,10 +292,9 @@ async def generate_report_content(
         report_id = request.report_id
         
     if not report_id:
-        handle_exception(
-            ValueError("Report ID is required"),
-            "generating report content", 
-            default_status_code=400
+        raise HTTPException(
+            status_code=400,
+            detail="Report ID is required"
         )
         
     additional_info = request.additional_info
@@ -243,10 +304,9 @@ async def generate_report_content(
         # Get report
         report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
         if not report_response.data:
-            handle_exception(
-                FileNotFoundError(f"Report not found with ID: {report_id}"),
-                "retrieving report data",
-                default_status_code=404
+            raise HTTPException(
+                status_code=404,
+                detail=f"Report not found with ID: {report_id}"
             )
         
         report = report_response.data[0]
@@ -283,147 +343,133 @@ async def generate_report_content(
         }
 
 
-@router.post("/reports/{report_id}/refine")
+@router.post("/reports/{report_id}/refine", response_model=APIResponse[RefineReportResponse])
+@api_error_handler
 async def refine_report(
     report_id: UUID4,
     request: RefineRequest,
     background_tasks: BackgroundTasks
-) -> Dict[str, Any]:
-    """Refine an existing report based on instructions"""
-    try:
-        async with supabase_client_context() as supabase:
-            # Get report
-            report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
-            if not report_response.data:
-                raise HTTPException(status_code=404, detail="Report not found")
-            
-            report = report_response.data[0]
-            
-            # Refine content
-            refined_content = await refine_report_text(
-                original_content=report["content"],
-                instructions=request.instructions
-            )
-            
-            # Update report
-            await supabase.table("reports").update({
-                "content": refined_content,
-                "status": "refined",
-                "updated_at": "now()"
-            }).eq("report_id", str(report_id)).execute()
-                    
-        return {
-                "report_id": str(report_id),
-                "content": refined_content,
-                "status": "refined"
-            }
+):
+    """
+    Refine an existing report based on instructions
+    
+    Args:
+        report_id: UUID of the report to refine
+        request: RefineRequest with instructions
+        background_tasks: FastAPI background tasks
         
-    except Exception as e:
-        logger.error(f"Error refining report: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    Returns:
+        Standardized API response with refined report data
+    """
+    async with supabase_client_context() as supabase:
+        # Get report
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        if not report_response.data:
+            raise HTTPException(status_code=404, detail="Report not found")
+        
+        report = report_response.data[0]
+        
+        # Refine content
+        refined_content = await refine_report_text(
+            original_content=report["content"],
+            instructions=request.instructions
+        )
+        
+        # Update report
+        await supabase.table("reports").update({
+            "content": refined_content,
+            "status": "refined",
+            "updated_at": "now()"
+        }).eq("report_id", str(report_id)).execute()
+                
+    return {
+        "report_id": str(report_id),
+        "content": refined_content,
+        "status": "refined"
+    }
 
 
-# Very simple test endpoint to check routing
-@router.post("/simple-test")
+@router.post("/simple-test", response_model=APIResponse[SimpleTestResponse])
+@api_error_handler
 async def simple_test(data: Dict[str, Any]):
-    """A very simple test endpoint to check routing"""
-    return {"message": "Simple test endpoint works!", "received": data}
+    """
+    A very simple test endpoint to check routing
+    
+    Args:
+        data: Any JSON data
+        
+    Returns:
+        Standardized API response with test message
+    """
+    return {
+        "message": "Simple test endpoint works!",
+        "received": data
+    }
 
 
-@router.post("/analyze")
+@router.post("/analyze", response_model=APIResponse[AnalysisResponseSchema])
+@api_error_handler
 async def analyze_documents(request: AnalyzeRequest):
     """
-    Analyze uploaded documents and extract variables.
+    Analyze uploaded documents and extract key information.
     
-    This endpoint processes documents and uses AI to extract structured variables.
-    
+    Args:
+        request: AnalyzeRequest with document IDs and additional info
+        
     Returns:
-        Dictionary with extracted variables and fields needing attention
-        
-    Raises:
-        404: If documents are not found
-        503: If AI service is unavailable
-        500: For other errors
+        Standardized API response with analysis results
     """
-    try:
-        # Get document paths - use the report_id if provided, otherwise use document_ids
-        if request.report_id:
-            # Use the provided report_id to get report files
-            document_paths = [get_document_path(request.report_id)]
-        else:
-            # Fall back to document_ids
-            document_paths = [get_document_path(doc_id) for doc_id in request.document_ids]
-        
-        # Verify documents exist
-        for path in document_paths:
-            if not os.path.exists(path):
-                logger.error(f"Document not found: {path}")
-                return {
-                    "status": "error",
-                    "message": "One or more documents not found",
-                    "code": "DOCUMENT_NOT_FOUND"
-                }
-        
-        # Extract variables from documents
+    document_ids = request.document_ids
+    additional_info = request.additional_info
+    
+    # Create a temporary directory for processing
+    tmp_dir = os.path.join(settings.UPLOAD_DIR, f"tmp_{str(uuid.uuid4())}")
+    os.makedirs(tmp_dir, exist_ok=True)
+    
+    # Get text from all documents
+    document_text = ""
+    for doc_id in document_ids:
         try:
-            result = await extract_template_variables(
-                "\n".join([str(path) for path in document_paths]),
-                request.additional_info
-            )
+            doc_path = await get_document_path(doc_id)
+            if not doc_path or not os.path.exists(doc_path):
+                continue
             
-            return {
-                "status": "success",
-                "extracted_variables": result["variables"],
-                "fields_needing_attention": result.get("fields_needing_attention", [])
-            }
-        except AIConnectionError as e:
-            logger.error(f"AI connection error: {e.message}")
-            return {
-                "status": "error",
-                "message": "AI service is currently unavailable. Please try again later.",
-                "code": "AI_SERVICE_UNAVAILABLE",
-                "retry": True
-            }
-        except AITimeoutError as e:
-            logger.error(f"AI timeout error: {e.message}")
-            return {
-                "status": "error",
-                "message": "AI service request timed out. Please try again with smaller documents or later.",
-                "code": "AI_SERVICE_TIMEOUT",
-                "retry": True
-            }
-        except AIResponseError as e:
-            logger.error(f"AI response error: {e.message}")
-            return {
-                "status": "error",
-                "message": "AI service returned an error. Please try again later.",
-                "code": "AI_SERVICE_ERROR",
-                "retry": e.status_code < 500  # Only suggest retry for 5xx errors
-            }
-        except AIParsingError as e:
-            logger.error(f"AI parsing error: {e.message}")
-            return {
-                "status": "error",
-                "message": "Failed to parse AI response. Please try again.",
-                "code": "AI_PARSING_ERROR",
-                "retry": True
-            }
-        except AIServiceError as e:
-            logger.error(f"AI service error: {e.message}")
-            return {
-                "status": "error",
-                "message": "An error occurred while processing your request with AI service.",
-                "code": "AI_SERVICE_ERROR",
-                "retry": True
-            }
-            
-    except Exception as e:
-        logger.error(f"Unexpected error in analyze_documents: {str(e)}")
+            # Extract text from the document
+            doc_text = await extract_text_from_file(doc_path)
+            if doc_text:
+                document_text += f"\n--- Document: {os.path.basename(doc_path)} ---\n{doc_text}\n\n"
+        except Exception as e:
+            logger.error(f"Error extracting text from document {doc_id}: {str(e)}")
+    
+    if not document_text:
+        logger.warning("No document text could be extracted")
         return {
-            "status": "error",
-            "message": "An unexpected error occurred while analyzing documents.",
-            "code": "UNEXPECTED_ERROR"
+            "findings": {},
+            "suggestions": ["No text could be extracted from the provided documents"],
+            "extracted_variables": {}
         }
+    
+    # Add additional information if provided
+    if additional_info:
+        document_text += f"\n--- Additional Information ---\n{additional_info}\n"
+    
+    # Use the template processor to analyze documents
+    analysis_result = await template_processor.analyze_document_text(document_text)
+            
+    # Convert analysis result to a standard format
+    analysis_data = {
+        "findings": analysis_result.get("findings", {}),
+        "suggestions": analysis_result.get("suggestions", []),
+        "extracted_variables": analysis_result.get("extracted_variables", {})
+    }
+    
+    # Clean up temporary directory
+    try:
+        shutil.rmtree(tmp_dir)
+    except Exception as e:
+        logger.warning(f"Error cleaning up temp directory: {str(e)}")
+    
+    return analysis_data
 
 
 @router.post("/from-structure")
@@ -716,57 +762,65 @@ async def cleanup_old_files():
     preview_service.cleanup_old_previews()
 
 
-@router.post("/reports/generate-docx", response_model=Dict[str, Any])
+@router.post("/reports/generate-docx", response_model=APIResponse[GenerateDocxResponse])
+@api_error_handler
 async def generate_report_docx(
     background_tasks: BackgroundTasks,
     report_id: UUID4,
     db: Session = Depends(get_db),
-) -> Dict[str, Any]:
+):
     """
     Generate a DOCX report from a report ID
     
     Args:
         report_id: UUID of the report
+        background_tasks: FastAPI background tasks
+        db: Database session
         
     Returns:
-        Status message and report ID
+        Standardized API response with status and report ID
     """
     logger.info(f"Starting report generation for report ID: {report_id}")
     
-    try:
-        # Find the report in the database
-        report = db.query(Report).filter(Report.id == report_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Report not found")
-            
-        # Generate the report
-        # ...additional implementation code here...
+    # Find the report in the database
+    report = db.query(Report).filter(Report.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
         
-        return {"status": "success", "report_id": str(report_id)}
-    except Exception as e:
-        logger.error(f"Error generating DOCX: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Generate the report
+    # ...additional implementation code here...
+    
+    return {
+        "status": "success", 
+        "report_id": str(report_id)
+    }
 
 
-@router.post("/from-id")
+@router.post("/from-id", response_model=APIResponse[GenerateFromIdResponse])
 @api_error_handler
 async def generate_report_from_id(
     data: Dict[str, Any] = Body(...),
     current_user: Optional[User] = Depends(get_current_user)
-) -> Dict[str, Any]:
+):
     """
     Generate report content based on report_id
     
+    Args:
+        data: Dictionary containing report_id and optional parameters
+        current_user: Optional authenticated user
+    
+    Returns:
+        Standardized API response with the generated report data
+        
     Authentication:
         This endpoint uses optional authentication. When authenticated, user ownership
         of the report will be verified.
     """
     # Extract report_id from request
     if "report_id" not in data:
-        handle_exception(
-            ValueError("report_id is required"),
-            "generating report from ID",
-            default_status_code=400
+        raise HTTPException(
+            status_code=400, 
+            detail="report_id is required"
         )
         
     report_id = data["report_id"]
@@ -778,38 +832,51 @@ async def generate_report_from_id(
         # Get report from database
         report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
         if not report_response.data:
-            handle_exception(
-                FileNotFoundError(f"Report not found with ID: {report_id}"),
-                "retrieving report data for generation",
-                default_status_code=404
-            )
-        
-        report = report_response.data[0]
-        
-        # Get associated files
-        files = await get_report_files(report_id)
-        
-        # Generate or retrieve content
-        if report.get("content"):
-            # Use existing content if available
-            content = report["content"]
-        else:
-            # Generate new content
-            content = await generate_report_text(
-                files=files,
-                additional_info=options.get("additional_info", ""),
-                template=options.get("template", None)
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Report not found with ID: {report_id}"
             )
             
-            # Update report with generated content
-            await supabase.table("reports").update({
-                "content": content,
-                "status": "generated",
-                "updated_at": "now()"
-            }).eq("report_id", str(report_id)).execute()
+        report = report_response.data[0]
+        
+        # Get files associated with report
+        files = await get_report_files(report_id)
+        
+        # Process and extract text from files
+        document_text = ""
+        for file in files:
+            file_path = file.get("file_path")
+            if file_path and os.path.exists(file_path):
+                try:
+                    text = extract_text_from_file(file_path)
+                    if text:
+                        filename = os.path.basename(file_path)
+                        document_text += f"\n--- Document: {filename} ---\n{text}\n\n"
+                except Exception as e:
+                    logger.error(f"Error extracting text from {file_path}: {str(e)}")
+        
+        if not document_text:
+            raise HTTPException(
+                status_code=400,
+                detail="No text could be extracted from report files"
+            )
+            
+        # Add any additional info if available
+        if "additional_info" in report and report["additional_info"]:
+            document_text += f"\n--- Additional Information ---\n{report['additional_info']}\n"
+            
+        # Generate the report content
+        generated_content = await generate_report_text(document_text)
+        
+        # Update the report with the generated content
+        await supabase.table("reports").update({
+            "content": generated_content,
+            "status": "generated",
+            "generated_at": "now()"
+        }).eq("report_id", str(report_id)).execute()
         
         return {
             "report_id": str(report_id),
-            "content": content,
-            "status": report.get("status", "generated")
+            "content": generated_content,
+            "status": "generated"
         }

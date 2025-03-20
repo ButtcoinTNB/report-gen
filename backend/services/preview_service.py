@@ -7,6 +7,20 @@ from pydantic import UUID4
 from utils.error_handler import handle_exception, logger
 from services.docx_service import docx_service
 from utils.file_utils import safe_path_join
+import tempfile
+import subprocess
+import base64
+from typing import Dict, Any, Optional, List
+
+# Third-party imports
+import fitz  # PyMuPDF
+from docx import Document
+import docx2pdf
+from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+import pythoncom
+
+from utils.file_processor import FileProcessor
 
 class PreviewService:
     def __init__(self):
@@ -258,6 +272,94 @@ class PreviewService:
                     
         except Exception as e:
             logger.error(f"Error cleaning up previews: {str(e)}")
+
+def generate_docx_preview(content: str, include_header: bool = True, include_footer: bool = True) -> Dict[str, Any]:
+    """
+    Generate a DOCX preview file for the given content.
+    
+    Args:
+        content: Report content
+        include_header: Whether to include header
+        include_footer: Whether to include footer
+        
+    Returns:
+        Dictionary with file paths and other preview info
+    """
+    try:
+        # Create a temporary directory for our files
+        temp_dir = tempfile.mkdtemp(prefix="report_preview_")
+        docx_path = os.path.join(temp_dir, "preview.docx")
+        pdf_path = os.path.join(temp_dir, "preview.pdf")
+        
+        # Create a new Document
+        doc = Document()
+        
+        # Set up document style
+        style = doc.styles['Normal']
+        style.font.name = 'Arial'
+        style.font.size = Pt(11)
+        
+        # Add header if requested
+        if include_header:
+            section = doc.sections[0]
+            header = section.header
+            header_para = header.paragraphs[0]
+            header_para.text = "Insurance Report Preview"
+            header_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+        # Add footer if requested
+        if include_footer:
+            section = doc.sections[0]
+            footer = section.footer
+            footer_para = footer.paragraphs[0]
+            footer_para.text = "PREVIEW - NOT FINAL DOCUMENT"
+            footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+        # Add content to document
+        for line in content.split('\n'):
+            p = doc.add_paragraph(line)
+            
+        # Save the document
+        doc.save(docx_path)
+        logger.info(f"Generated DOCX preview at {docx_path}")
+        
+        # Generate PDF from DOCX
+        try:
+            pythoncom.CoInitialize()  # Initialize COM for thread safety
+            logger.info(f"Converting DOCX to PDF: {docx_path} -> {pdf_path}")
+            docx2pdf.convert(docx_path, pdf_path)
+            logger.info(f"Generated PDF preview at {pdf_path}")
+            pdf_data = None
+            
+            # Get base64 encoded PDF data
+            pdf_data = FileProcessor.get_file_as_base64(pdf_path)
+            
+        except Exception as pdf_error:
+            logger.error(f"Error generating PDF preview: {str(pdf_error)}")
+            pdf_path = None
+            pdf_data = None
+            
+        # Get base64 encoded DOCX data
+        docx_data = FileProcessor.get_file_as_base64(docx_path)
+            
+        return {
+            "docx_path": docx_path,
+            "pdf_path": pdf_path,
+            "docx_data": docx_data,
+            "pdf_data": pdf_data,
+            "temp_dir": temp_dir
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating document preview: {str(e)}")
+        return {
+            "docx_path": None,
+            "pdf_path": None,
+            "docx_data": None, 
+            "pdf_data": None,
+            "temp_dir": None,
+            "error": str(e)
+        }
 
 # Create singleton instance
 preview_service = PreviewService() 

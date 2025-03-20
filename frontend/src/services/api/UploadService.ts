@@ -169,7 +169,7 @@ export class UploadService extends ApiClient {
    * @param file The file to upload
    * @param reportId The report ID to associate with the file
    * @param onProgress Optional progress callback
-   * @returns Promise with the upload response
+   * @returns Promise with the upload response in camelCase format
    */
   async uploadSingleFile(
     file: File, 
@@ -215,7 +215,7 @@ export class UploadService extends ApiClient {
    * Upload multiple files
    * @param files Array of files to upload
    * @param onProgress Optional progress callback
-   * @returns Promise with the upload response
+   * @returns Promise with the upload response in camelCase format
    */
   async uploadFiles(
     files: File[], 
@@ -354,7 +354,7 @@ export class UploadService extends ApiClient {
         file_count: completedFiles
       });
     } catch (error) {
-      logger.error('Error in uploadFiles:', error);
+      logger.error('Error uploading files:', error);
       throw error;
     }
   }
@@ -363,7 +363,7 @@ export class UploadService extends ApiClient {
    * Upload a template file
    * @param templateFile The template file to upload
    * @param onProgress Optional progress callback
-   * @returns Promise with the upload response
+   * @returns Promise with the upload response in camelCase format
    */
   async uploadTemplate(
     templateFile: File, 
@@ -371,9 +371,9 @@ export class UploadService extends ApiClient {
   ): Promise<ReportResponseCamel> {
     try {
       const formData = new FormData();
-      formData.append('template', templateFile);
+      formData.append('file', templateFile);
       
-      const response = await this.post<ReportResponse>('/template', formData, {
+      const response = await this.post<ReportResponse>('/templates', formData, {
         isMultipart: true,
         onUploadProgress: event => {
           if (onProgress && event.total) {
@@ -394,7 +394,7 @@ export class UploadService extends ApiClient {
   /**
    * Upload a large file using chunked uploads
    * @param config Configuration for the chunked upload
-   * @returns Promise resolved when the upload is complete
+   * @returns Promise with the completed upload response in camelCase format
    */
   async uploadLargeFile(config: ChunkedUploadConfig): Promise<CompletedUploadResponseCamel> {
     const { file, chunkSize = DEFAULT_CHUNK_SIZE, onProgress, onRetry, reportId } = config;

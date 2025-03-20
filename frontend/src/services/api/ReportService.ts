@@ -12,6 +12,7 @@ import {
   AnalysisResponse as ApiAnalysisResponse 
 } from '../../types/api';
 import { ApiClient, createApiClient } from './ApiClient';
+import { adaptApiResponse } from '../../utils/adapters';
 
 /**
  * Additional information for report generation
@@ -108,17 +109,20 @@ export class ReportService extends ApiClient {
   /**
    * Analyze documents for a report
    * @param reportId The ID of the report
-   * @returns Promise with the analysis response
+   * @returns Promise with the analysis response in a format suitable for frontend components
    */
   async analyzeDocuments(reportId: string): Promise<AnalysisResponse> {
     try {
       logger.info(`Analyzing documents for report ${reportId}`);
       
-      const response = await this.get<AnalysisResponse>(`/documents/analyze/${reportId}`);
+      const response = await this.get<ApiAnalysisResponse>(`/documents/analyze/${reportId}`);
       
       logger.info('Analysis response:', response.data);
       
-      return response.data;
+      // Convert API response to frontend format
+      const adaptedResponse = adaptApiResponse<AnalysisResponse>(response.data);
+      
+      return adaptedResponse;
     } catch (error) {
       logger.error('Error analyzing documents:', error);
       throw error;

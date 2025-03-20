@@ -22,7 +22,7 @@ This project is hosted on GitHub: [https://github.com/ButtcoinTNB/report-gen](ht
 - **Backend**: FastAPI, Python, SQLAlchemy
 - **Database**: Supabase (PostgreSQL)
 - **AI**: OpenRouter API (Claude 3)
-- **File Processing**: PyMuPDF, WeasyPrint, PDFrw
+- **File Processing**: PyMuPDF, WeasyPrint, PDFrw, FileProcessor utility class
 - **Deployment**: Vercel (Frontend), Render (Backend)
 
 ## Prerequisites
@@ -269,3 +269,40 @@ The template system is integrated into the main API through these endpoints:
    ```bash
    uvicorn backend.main:app --reload
    ``` 
+
+## Utilities
+
+### FileProcessor Utility Class
+
+The `FileProcessor` class in `backend/utils/file_processor.py` provides a centralized way to handle file operations throughout the application. This utility eliminates code duplication and standardizes file handling.
+
+#### Key Features
+
+- **MIME Type Handling**: Detect file types, get MIME types, and determine appropriate file extensions
+- **Text Extraction**: Extract text from PDFs, Word documents, images (via OCR), and plain text files
+- **File Information**: Retrieve comprehensive file metadata including size, modification times, and type detection
+- **Image Processing**: Convert images between formats and prepare for processing
+- **Base64 Encoding**: Convert files to base64 for embedding in responses or web display
+- **Security**: Safely join paths to prevent directory traversal attacks
+- **Upload Handling**: Process uploaded files with proper permissions and path validation
+
+#### Usage Examples
+
+```python
+# Get MIME type of a file
+mime_type = FileProcessor.get_mime_type("document.pdf")  # Returns "application/pdf"
+
+# Extract text from any supported file
+text = FileProcessor.extract_text("document.pdf")
+
+# Get file information
+file_info = FileProcessor.get_file_info("image.jpg")
+# Returns a dict with name, size, mime_type, etc.
+
+# Convert image to base64 for web display
+base64_data = FileProcessor.get_file_as_base64("image.jpg")
+# Returns "data:image/jpeg;base64,..."
+
+# Safely handle file paths
+safe_path = FileProcessor.safe_path_join(upload_dir, user_provided_filename)
+``` 

@@ -27,6 +27,21 @@ class Settings(BaseSettings):
         default=os.getenv("OPENROUTER_API_KEY", ""), 
         description="OpenRouter API key for AI model access"
     )
+    
+    # OpenRouter API settings
+    OPENROUTER_API_ENDPOINT: str = Field(
+        default=os.getenv("OPENROUTER_API_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"),
+        description="OpenRouter API endpoint URL"
+    )
+    APP_NAME: str = Field(
+        default=os.getenv("APP_NAME", "Insurance Report Generator"),
+        description="Application name for API headers"
+    )
+    APP_DOMAIN: str = Field(
+        # Use FRONTEND_URL if APP_DOMAIN is not set explicitly
+        default=os.getenv("APP_DOMAIN", os.getenv("FRONTEND_URL", "https://insurance-report-generator.vercel.app").rstrip('/')),
+        description="Application domain for API referrer headers"
+    )
 
     # Supabase - Primary database and storage solution
     SUPABASE_URL: str = Field(

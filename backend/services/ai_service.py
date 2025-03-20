@@ -12,6 +12,10 @@ from pathlib import Path
 import time
 import requests
 from datetime import datetime
+import base64
+
+from services.supabase_client import supabase_client_context
+from utils.file_processor import FileProcessor
 
 
 # Custom exception classes for AI service
@@ -79,12 +83,12 @@ async def call_openrouter_api(
     async def api_call_operation():
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                settings.OPENROUTER_API_ENDPOINT,
                 headers={
                     "Authorization": "Bearer " + settings.OPENROUTER_API_KEY,
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://insurance-report-generator.vercel.app",  # Your app domain
-                    "X-Title": "Insurance Report Generator"  # Your app name
+                    "HTTP-Referer": settings.APP_DOMAIN,
+                    "X-Title": settings.APP_NAME
                 },
                 json={
                     "model": model,
@@ -125,32 +129,58 @@ async def call_openrouter_api(
                 logger.info(f"Retrying in {backoff_time} seconds...")
                 await asyncio.sleep(backoff_time)
             else:
-                # This was the last attempt
-                if isinstance(e, (httpx.ReadTimeout, httpx.WriteTimeout, httpx.ConnectTimeout, asyncio.TimeoutError)):
-                    raise AITimeoutError(
-                        f"OpenRouter API request timed out after {max_retries} attempts",
-                        original_exception=e
-                    )
-                else:
-                    raise AIConnectionError(
-                        f"Failed to connect to OpenRouter API after {max_retries} attempts: {str(e)}",
-                        original_exception=e
-                    )
+                # All retries exhausted
+                raise AIConnectionError(
+                    f"Failed to connect to AI service after {max_retries} attempts: {str(e)}",
+                    original_exception=e
+                )
         except httpx.HTTPStatusError as e:
-            # Handle HTTP error responses (4xx, 5xx)
-            error_detail = f"API returned {e.response.status_code}: {e.response.text}"
-            logger.error(error_detail)
-            
-            raise AIResponseError(
-                error_detail,
-                status_code=e.response.status_code,
+            # Handle specific HTTP errors
+            if e.response.status_code == 429:
+                logger.warning("AI provider rate limit exceeded")
+                if attempt < max_retries - 1:
+                    backoff_time = min(2 ** attempt * 2, 30)  # Longer backoff for rate limits
+                    logger.info(f"Retrying in {backoff_time} seconds...")
+                    await asyncio.sleep(backoff_time)
+                else:
+                    raise AIResponseError(
+                        "AI service rate limit exceeded",
+                        status_code=429,
+                        original_exception=e
+                    )
+            elif e.response.status_code >= 500:
+                # Server errors
+                logger.error(f"AI provider server error: {e.response.status_code}")
+                if attempt < max_retries - 1:
+                    backoff_time = min(2 ** attempt, 10)
+                    logger.info(f"Retrying in {backoff_time} seconds...")
+                    await asyncio.sleep(backoff_time)
+                else:
+                    raise AIResponseError(
+                        f"AI service error: {e.response.status_code}",
+                        status_code=e.response.status_code,
+                        original_exception=e
+                    )
+            else:
+                # Other HTTP errors (400, 401, 403, etc.)
+                logger.error(f"API call failed with status {e.response.status_code}: {str(e)}")
+                raise AIResponseError(
+                    f"AI request failed: {e.response.status_code} - {str(e)}",
+                    status_code=e.response.status_code,
+                    original_exception=e
+                )
+        except json.JSONDecodeError as e:
+            # Handle JSON parsing errors
+            logger.error(f"Failed to parse AI response: {str(e)}")
+            raise AIParsingError(
+                f"Failed to parse AI response: {str(e)}",
                 original_exception=e
             )
         except Exception as e:
-            # Handle unexpected errors
-            logger.error(f"Unexpected error in OpenRouter API call: {str(e)}")
+            # Handle other unexpected errors
+            logger.error(f"Unexpected error in AI request: {str(e)}")
             raise AIServiceError(
-                f"Unexpected error in OpenRouter API call: {str(e)}",
+                f"Unexpected error in AI request: {str(e)}",
                 original_exception=e
             )
     
@@ -215,8 +245,9 @@ class StyleAnalysisCache:
         """Load cached style analysis from disk."""
         try:
             if self._cache_file.exists():
-                with open(self._cache_file, 'r', encoding='utf-8') as f:
-                    self._cache = json.load(f)
+                # Use FileProcessor for reading the cache file
+                cache_content = FileProcessor.extract_text(self._cache_file)
+                self._cache = json.loads(cache_content)
         except Exception as e:
             logger.error("Error loading style analysis cache: " + str(e))
             self._cache = {}
@@ -224,8 +255,14 @@ class StyleAnalysisCache:
     def _save_cache(self):
         """Save cache to disk."""
         try:
+            # Create parent directory if it doesn't exist
+            os.makedirs(os.path.dirname(self._cache_file), exist_ok=True)
+            
+            # Convert cache to JSON string and write to file
+            cache_json = json.dumps(self._cache, ensure_ascii=False, indent=2)
+            
             with open(self._cache_file, 'w', encoding='utf-8') as f:
-                json.dump(self._cache, f, ensure_ascii=False, indent=2)
+                f.write(cache_json)
         except Exception as e:
             logger.error("Error saving style analysis cache: " + str(e))
     
@@ -234,8 +271,9 @@ class StyleAnalysisCache:
         key_parts = []
         for path in sorted(reference_paths):
             try:
-                mtime = Path(path).stat().st_mtime
-                key_parts.append(path + ":" + str(mtime))
+                # Use FileProcessor to get file info
+                file_info = FileProcessor.get_file_info(path)
+                key_parts.append(path + ":" + str(file_info.get('mtime', '')))
             except Exception:
                 key_parts.append(path)
         return "|".join(key_parts)
@@ -254,35 +292,34 @@ style_cache = StyleAnalysisCache()
 
 async def analyze_reference_reports(reference_paths: List[str]) -> Dict[str, Any]:
     """
-    Analyze reference reports to extract format, style, and tone of voice patterns.
-    Uses caching to improve performance when analyzing the same set of reports multiple times.
+    Analyze reference reports to extract style patterns and linguistic features.
     
     Args:
         reference_paths: List of paths to reference report files
         
     Returns:
-        Dictionary containing style guide and format patterns
+        Dictionary with analysis results, including tone, style, terminology, and structure
     """
     try:
+        logger.info(f"Analyzing {len(reference_paths)} reference reports for style")
+        
         # Check cache first
-        cache_key = style_cache.get_cache_key(reference_paths)
-        cached_analysis = style_cache.get(cache_key)
+        cache = StyleAnalysisCache()
+        cache_key = cache.get_cache_key(reference_paths)
+        cached_analysis = cache.get(cache_key)
         
         if cached_analysis:
             logger.info("Using cached style analysis")
             return cached_analysis
+            
+        logger.info("No cached analysis found, generating new analysis")
         
-        # Extract text from reference reports
-        from services.pdf_extractor import extract_text_from_file
-        reference_texts = []
-        
+        # Combine all reference reports
+        combined_text = ""
         for path in reference_paths:
-            text = extract_text_from_file(path)
-            if text and len(text.strip()) > 0:
-                reference_texts.append(text)
-        
-        if not reference_texts:
-            raise ValueError("No valid reference reports found for analysis")
+            # Use FileProcessor to extract text from files
+            text = FileProcessor.extract_text(path)
+            combined_text += text + "\n\n"
             
         # Create prompt for analyzing style and format
         # Avoid f-strings entirely for this section - concatenate parts safely

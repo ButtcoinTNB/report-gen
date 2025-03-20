@@ -10,6 +10,9 @@ from typing import Dict, Any, Optional, Type, Union
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+# Import the standard APIResponse model
+from api.schemas import APIResponse
+
 # Configure logger
 logging.basicConfig(
     level=logging.INFO,
@@ -81,15 +84,15 @@ def handle_exception(
     if hasattr(exception, 'status_code') and exception_class_name.startswith('AI'):
         error_info["status_code"] = getattr(exception, 'status_code')
     
-    # Create the standard error response
-    error_response = {
-        "status": "error",
-        "message": str(exception),
-        "code": error_info["error_type"].upper(),
-        "operation": operation
-    }
+    # Create the standard error response using APIResponse model
+    error_response = APIResponse(
+        status="error",
+        message=str(exception),
+        code=error_info["error_type"].upper()
+    ).dict()
     
-    # For debugging, include the exception type
+    # Add additional fields for debugging
+    error_response["operation"] = operation
     error_response["exception_type"] = exception_class_name
     
     # If there's an original exception, include its details
@@ -106,28 +109,49 @@ def handle_exception(
 
 def api_error_handler(func):
     """
-    Decorator for API endpoint functions to standardize error handling.
-    
-    Example usage:
-    @router.get("/endpoint")
-    @api_error_handler
-    async def my_endpoint():
-        # This function's exceptions will be handled properly
-        pass
+    Decorator for API route handlers that standardizes error handling.
+    Wraps the function in a try-except block and handles exceptions using handle_exception.
     """
+    from functools import wraps
+    
+    @wraps(func)
     async def wrapper(*args, **kwargs):
         try:
-            return await func(*args, **kwargs)
-        except HTTPException:
-            # Re-raise HTTP exceptions as they're already properly formatted
-            raise
+            # Call the original function
+            result = await func(*args, **kwargs)
+            
+            # If the result is already an APIResponse, return it as is
+            if isinstance(result, APIResponse):
+                return result
+                
+            # If the result is a dict, wrap it in an APIResponse
+            if isinstance(result, dict):
+                return APIResponse(
+                    status="success",
+                    data=result
+                )
+            
+            # Otherwise, just return the result (for other response types)
+            return result
+            
         except Exception as e:
-            # Get function name for better error reporting
-            operation = f"{func.__name__}"
-            handle_exception(e, operation)
+            # Handle any exceptions that occur
+            error_details = handle_exception(e, f"{func.__name__}")
+            
+            # Determine the appropriate status code
+            exception_class = e.__class__
+            exception_class_name = exception_class.__name__
+            
+            if exception_class in ERROR_TYPE_MAPPING:
+                status_code = ERROR_TYPE_MAPPING[exception_class]["status_code"]
+            elif exception_class_name in ERROR_TYPE_MAPPING:
+                status_code = ERROR_TYPE_MAPPING[exception_class_name]["status_code"]
+            else:
+                status_code = 500
+                
+            # Raise HTTPException with the error details
+            raise HTTPException(status_code=status_code, detail=error_details)
     
-    # Return wrapper with the same name as the original function
-    wrapper.__name__ = func.__name__
     return wrapper
 
 def retry_operation(

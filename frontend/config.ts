@@ -7,8 +7,36 @@
 // In development, fall back to localhost
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+// Define endpoint structure
+interface Endpoints {
+  upload: string;
+  generate: string;
+  format: string;
+  edit: string;
+  download: string;
+}
+
+// Define config structure
+interface Config {
+  API_URL: string;
+  endpoints: Endpoints;
+}
+
+// Warning structure for environment variable validation
+interface EnvWarning {
+  variable: string;
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+}
+
+// Result of environment variable validation
+export interface EnvValidationResult {
+  isValid: boolean;
+  warnings: EnvWarning[];
+}
+
 // Define config object
-export const config = {
+export const config: Config = {
   API_URL,
   endpoints: {
     upload: `${API_URL}/api/upload`,
@@ -21,10 +49,10 @@ export const config = {
 
 /**
  * Validates required environment variables and logs warnings if any are missing
- * @returns {Object} Object containing validation results
+ * @returns {EnvValidationResult} Object containing validation results
  */
-export function validateEnvVars() {
-  const warnings = [];
+export function validateEnvVars(): EnvValidationResult {
+  const warnings: EnvWarning[] = [];
   
   // Check API URL
   if (!process.env.NEXT_PUBLIC_API_URL) {
