@@ -107,15 +107,41 @@ export async function withRetry(
 /**
  * Create a complete axios client with predefined backend URL and retry functionality
  * 
- * @param {string} baseEndpoint - The API endpoint name (e.g., 'upload', 'generate')
+ * @param {string} baseEndpoint - The API endpoint name (e.g., 'upload', 'generate') or full base URL
+ * @param {Object} defaultOptions - Default options for all requests
+ * @param {number} defaultOptions.retries - Default number of retries
+ * @param {number} defaultOptions.retryDelay - Default delay between retries
+ * @param {number} defaultOptions.timeout - Default timeout in milliseconds
  * @returns {Object} An object with helper methods for API requests
  */
-export function createApiClient(baseEndpoint) {
-  const baseUrl = config.endpoints[baseEndpoint];
+export function createApiClient(baseEndpoint, defaultOptions = {}) {
+  let baseUrl;
   
-  if (!baseUrl) {
-    console.error(`No endpoint configured for '${baseEndpoint}'`);
+  // If baseEndpoint is a full URL, use it directly
+  if (baseEndpoint.startsWith('http')) {
+    baseUrl = baseEndpoint;
+  } 
+  // If it's a relative URL, prepend the API_URL
+  else if (baseEndpoint.startsWith('/')) {
+    baseUrl = `${config.API_URL}${baseEndpoint}`;
   }
+  // Otherwise treat it as an endpoint key from the config
+  else {
+    baseUrl = config.endpoints[baseEndpoint];
+    
+    if (!baseUrl) {
+      console.error(`No endpoint configured for '${baseEndpoint}'`);
+      // Fallback to API_URL as base
+      baseUrl = `${config.API_URL}/${baseEndpoint}`;
+    }
+  }
+  
+  // Default configuration options
+  const defaults = {
+    retries: defaultOptions.retries || 3,
+    retryDelay: defaultOptions.retryDelay || 1000,
+    timeout: defaultOptions.timeout || 60000
+  };
   
   return {
     /**
@@ -129,9 +155,22 @@ export function createApiClient(baseEndpoint) {
       const { retryOptions, ...requestOptions } = options;
       const url = path ? `${baseUrl}${path}` : baseUrl;
       
+      // Merge default timeout with request options
+      const mergedOptions = {
+        ...requestOptions,
+        timeout: requestOptions.timeout || defaults.timeout
+      };
+      
+      // Merge default retry options with provided ones
+      const mergedRetryOptions = {
+        maxRetries: defaults.retries,
+        retryDelay: defaults.retryDelay,
+        ...retryOptions
+      };
+      
       return withRetry(
-        () => axios.get(url, createRequestConfig(requestOptions)),
-        retryOptions
+        () => axios.get(url, createRequestConfig(mergedOptions)),
+        mergedRetryOptions
       );
     },
     
@@ -147,9 +186,83 @@ export function createApiClient(baseEndpoint) {
       const { retryOptions, ...requestOptions } = options;
       const url = path ? `${baseUrl}${path}` : baseUrl;
       
+      // Merge default timeout with request options
+      const mergedOptions = {
+        ...requestOptions,
+        timeout: requestOptions.timeout || defaults.timeout
+      };
+      
+      // Merge default retry options with provided ones
+      const mergedRetryOptions = {
+        maxRetries: defaults.retries,
+        retryDelay: defaults.retryDelay,
+        ...retryOptions
+      };
+      
       return withRetry(
-        () => axios.post(url, data, createRequestConfig(requestOptions)),
-        retryOptions
+        () => axios.post(url, data, createRequestConfig(mergedOptions)),
+        mergedRetryOptions
+      );
+    },
+    
+    /**
+     * Make a PUT request with automatic retries
+     * 
+     * @param {string} path - Path to append to the base URL
+     * @param {Object} data - Request payload
+     * @param {Object} options - Request options and retry config
+     * @returns {Promise} The API response
+     */
+    put: async (path, data, options = {}) => {
+      const { retryOptions, ...requestOptions } = options;
+      const url = path ? `${baseUrl}${path}` : baseUrl;
+      
+      // Merge default timeout with request options
+      const mergedOptions = {
+        ...requestOptions,
+        timeout: requestOptions.timeout || defaults.timeout
+      };
+      
+      // Merge default retry options with provided ones
+      const mergedRetryOptions = {
+        maxRetries: defaults.retries,
+        retryDelay: defaults.retryDelay,
+        ...retryOptions
+      };
+      
+      return withRetry(
+        () => axios.put(url, data, createRequestConfig(mergedOptions)),
+        mergedRetryOptions
+      );
+    },
+    
+    /**
+     * Make a DELETE request with automatic retries
+     * 
+     * @param {string} path - Path to append to the base URL
+     * @param {Object} options - Request options and retry config
+     * @returns {Promise} The API response
+     */
+    delete: async (path, options = {}) => {
+      const { retryOptions, ...requestOptions } = options;
+      const url = path ? `${baseUrl}${path}` : baseUrl;
+      
+      // Merge default timeout with request options
+      const mergedOptions = {
+        ...requestOptions,
+        timeout: requestOptions.timeout || defaults.timeout
+      };
+      
+      // Merge default retry options with provided ones
+      const mergedRetryOptions = {
+        maxRetries: defaults.retries,
+        retryDelay: defaults.retryDelay,
+        ...retryOptions
+      };
+      
+      return withRetry(
+        () => axios.delete(url, createRequestConfig(mergedOptions)),
+        mergedRetryOptions
       );
     }
   };

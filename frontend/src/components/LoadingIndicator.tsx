@@ -18,7 +18,7 @@ export interface LoadingState {
   progress?: number;
   stage?: LoadingStage;
   message?: string;
-  error?: string;
+  error?: string | null;
   attempt?: number;
   maxAttempts?: number;
 }
@@ -27,7 +27,7 @@ export interface LoadingIndicatorProps {
   /**
    * The current loading state
    */
-  state: LoadingState;
+  loadingState: LoadingState;
   
   /**
    * Whether to show a linear progress bar (default) or circular progress
@@ -66,13 +66,13 @@ const stageMessages: Record<LoadingStage, string> = {
  * including progress bars, retry options, and contextual messages
  */
 const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
-  state,
+  loadingState,
   variant = 'linear',
   onRetry,
   sx = {},
   alwaysShow = false
 }) => {
-  const { isLoading, progress = 0, stage = 'loading', message, error, attempt, maxAttempts } = state;
+  const { isLoading, progress = 0, stage = 'loading', message, error, attempt, maxAttempts } = loadingState;
   
   // If not loading and not set to always show, don't render anything
   if (!isLoading && !alwaysShow && !error) {

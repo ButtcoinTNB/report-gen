@@ -7,20 +7,216 @@ import {
   createApiClient
 } from "../utils/corsHelper";
 
-// Create an API client for upload endpoints
-const uploadApi = createApiClient('upload');
+// Create an API client for upload endpoints with extended timeouts for large files
+const uploadApi = createApiClient('upload', {
+  retries: 3,
+  retryDelay: 2000,
+  timeout: 300000 // 5 minute timeout for large files
+});
+
+// Default chunk size: 5MB
+const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024;
+// Threshold to use chunked upload: 50MB
+const CHUNKED_UPLOAD_THRESHOLD = 50 * 1024 * 1024;
+// Maximum size for all files (1GB)
+const MAX_UPLOAD_SIZE = 1024 * 1024 * 1024;
 
 /**
- * Upload multiple files to the backend
+ * @typedef {Object} ProgressEvent
+ * @property {number} progress - Upload progress as a percentage (0-100)
+ * @property {string} stage - Current upload stage (e.g., 'analyzing', 'uploading')
+ * @property {string} message - Message describing the current operation
+ */
+
+/**
+ * @typedef {Object} UploadResponse
+ * @property {string} report_id - The ID of the report created or updated
+ * @property {string} message - Success message
+ * @property {number} file_count - Number of files uploaded
+ * @property {string} status - Status of upload
+ */
+
+/**
+ * Checks if a file is large enough to require chunked uploading
+ * 
+ * @param {File} file - The file to check
+ * @param {number} threshold - Size threshold in bytes (default: 50MB)
+ * @returns {boolean} True if the file should be uploaded in chunks
+ */
+function shouldUseChunkedUpload(file, threshold = CHUNKED_UPLOAD_THRESHOLD) {
+  return file.size > threshold;
+}
+
+/**
+ * Upload a large file in chunks to avoid browser limitations and timeouts
+ * 
+ * @param {File} file - The file to upload in chunks
+ * @param {Object} options - Upload options
+ * @param {string} options.reportId - The report ID to associate with the chunks
+ * @param {number} options.chunkSize - Size of each chunk in bytes (default: 5MB)
+ * @param {Function} options.onProgress - Callback for progress updates
+ * @param {number} options.maxRetries - Maximum number of retry attempts per chunk
+ * @returns {Promise<Object>} The complete upload response
+ */
+export async function uploadLargeFile(file, {
+  reportId,
+  chunkSize = DEFAULT_CHUNK_SIZE,
+  onProgress = null,
+  maxRetries = 3
+} = {}) {
+  if (!file) {
+    throw new Error("No file provided for chunked upload");
+  }
+  
+  // Calculate total number of chunks
+  const totalChunks = Math.ceil(file.size / chunkSize);
+  console.log(`Uploading large file ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) in ${totalChunks} chunks`);
+  
+  // Initialize upload
+  try {
+    if (onProgress) {
+      onProgress({
+        progress: 0,
+        stage: 'uploading',
+        message: `Inizializzazione upload di ${file.name}...`
+      });
+    }
+    
+    // 1. Start chunked upload - tell the server we're about to send chunks
+    const initResponse = await uploadApi.post('/init-chunked-upload', {
+      filename: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      totalChunks: totalChunks,
+      reportId: reportId
+    });
+    
+    if (!initResponse.data || !initResponse.data.uploadId) {
+      throw new Error("Failed to initialize chunked upload");
+    }
+    
+    const uploadId = initResponse.data.uploadId;
+    // If the server created a new report ID, use that
+    if (initResponse.data.reportId) {
+      reportId = initResponse.data.reportId;
+    }
+    
+    console.log(`Chunked upload initialized with ID: ${uploadId}, report ID: ${reportId}`);
+    
+    if (onProgress) {
+      onProgress({
+        progress: 5,
+        stage: 'uploading',
+        message: `Avvio caricamento a blocchi per ${file.name}...`
+      });
+    }
+    
+    // 2. Upload each chunk with retry logic
+    let uploadedChunks = 0;
+    let uploadedBytes = 0;
+    
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const start = chunkIndex * chunkSize;
+      const end = Math.min(start + chunkSize, file.size);
+      const chunk = file.slice(start, end);
+      
+      const formData = new FormData();
+      formData.append('chunk', chunk);
+      formData.append('chunkIndex', chunkIndex.toString());
+      formData.append('uploadId', uploadId);
+      
+      // Upload chunk with retry
+      let chunkUploaded = false;
+      let attempts = 0;
+      
+      while (!chunkUploaded && attempts < maxRetries) {
+        try {
+          attempts++;
+          const chunkResponse = await uploadApi.post('/upload-chunk', formData, {
+            isMultipart: true,
+            timeout: 60000,
+            retryOptions: { maxRetries: 0 } // We're handling retries manually per chunk
+          });
+          
+          if (chunkResponse.data && chunkResponse.data.success) {
+            chunkUploaded = true;
+            uploadedChunks++;
+            uploadedBytes += chunk.size;
+            
+            // Report overall progress
+            if (onProgress) {
+              // Progress from 5% to 90% during chunks
+              const chunkProgress = Math.round((uploadedChunks / totalChunks) * 85);
+              onProgress({
+                progress: 5 + chunkProgress,
+                stage: 'uploading',
+                message: `Caricamento blocco ${chunkIndex + 1}/${totalChunks} di ${file.name}...`
+              });
+            }
+          } else {
+            throw new Error(`Chunk upload failed: ${chunkResponse.data?.error || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error(`Error uploading chunk ${chunkIndex + 1}/${totalChunks}, attempt ${attempts}/${maxRetries}:`, error);
+          
+          if (attempts >= maxRetries) {
+            throw new Error(`Failed to upload chunk ${chunkIndex + 1} after ${maxRetries} attempts`);
+          }
+          
+          // Wait before retrying (with exponential backoff)
+          const retryDelay = 1000 * Math.pow(2, attempts - 1);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          
+          if (onProgress) {
+            onProgress({
+              progress: 5 + Math.round((uploadedChunks / totalChunks) * 85),
+              stage: 'retrying',
+              message: `Riprovo il caricamento del blocco ${chunkIndex + 1}/${totalChunks}...`,
+              attempt: attempts,
+              maxAttempts: maxRetries
+            });
+          }
+        }
+      }
+    }
+    
+    if (onProgress) {
+      onProgress({
+        progress: 90,
+        stage: 'uploading',
+        message: `Finalizzazione caricamento di ${file.name}...`
+      });
+    }
+    
+    // 3. Complete the chunked upload
+    const completeResponse = await uploadApi.post('/complete-chunked-upload', {
+      uploadId: uploadId
+    });
+    
+    if (onProgress) {
+      onProgress({
+        progress: 100,
+        stage: 'completed',
+        message: `Caricamento di ${file.name} completato!`
+      });
+    }
+    
+    return completeResponse.data;
+  } catch (error) {
+    console.error("Chunked upload failed:", error);
+    return handleApiError(error, "chunked file upload", { throwError: true });
+  }
+}
+
+/**
+ * Upload multiple files to the backend, using chunked uploads for large files
  * 
  * @param {File|File[]} files - A single file or array of files to upload
- * @param {number} templateId - Template ID to use for the upload
+ * @param {string} reportId - Optional report ID to associate with the files
  * @param {Function} onProgress - Optional callback for upload progress
  * @returns {Promise<Object>} The upload response
  */
-export async function uploadFile(files, templateId = 1, onProgress = null) {
-  const formData = new FormData();
-  
+export async function uploadFile(files, reportId = null, onProgress = null) {
   // Validate files parameter
   if (!files) {
     console.error("No files provided to uploadFile function");
@@ -43,55 +239,140 @@ export async function uploadFile(files, templateId = 1, onProgress = null) {
   const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
   console.log(`Total size of all files: ${totalSizeMB} MB`);
   
-  // Check if total size exceeds 100MB (client-side validation)
-  const MAX_SIZE_MB = 100;
-  if (totalSize > (MAX_SIZE_MB * 1024 * 1024)) {
-    const errorMsg = `Total file size (${totalSizeMB} MB) exceeds the ${MAX_SIZE_MB} MB limit`;
-    console.error(errorMsg);
-    throw new Error(errorMsg);
-  }
+  // Check if we have any large files that need chunked upload
+  const largeFiles = filesArray.filter(file => shouldUseChunkedUpload(file));
+  const regularFiles = filesArray.filter(file => !shouldUseChunkedUpload(file));
   
-  // Append each file with the same key 'files'
-  filesArray.forEach((file) => {
-    formData.append("files", file);
-  });
-  
-  // Make sure template_id is sent as form data
-  formData.append("template_id", templateId.toString());
+  console.log(`Found ${largeFiles.length} large files and ${regularFiles.length} regular files`);
   
   try {
-    console.log(`Uploading ${filesArray.length} files to ${config.endpoints.upload}/documents with template ID ${templateId}`);
-    
-    // Safely log file details if available
-    try {
-      console.log("Files to upload:", filesArray.map(f => 
-        `${f.name || 'unnamed'} (${(f.size / (1024 * 1024)).toFixed(2)} MB, ${f.type || 'unknown type'})`
-      ));
-    } catch (logError) {
-      console.warn("Could not log file details:", logError);
+    // Client-side total size check before uploading anything
+    if (totalSize > MAX_UPLOAD_SIZE) {
+      const errorMsg = `Total file size (${totalSizeMB} MB) exceeds the 1GB limit`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
     }
-
-    // Use our uploadApi client with retry functionality
-    const response = await uploadApi.post('/documents', formData, {
-      isMultipart: true,
-      timeout: 120000, // 120 second timeout for larger files
-      onUploadProgress: onProgress,
-      retryOptions: {
-        maxRetries: 2,
-        retryDelay: 2000,
-        onRetry: (attempt, max) => {
-          console.log(`Upload attempt ${attempt}/${max}...`);
-          if (onProgress) {
-            // Reset progress bar on retry
-            onProgress({ loaded: 0, total: 100 });
-          }
-        }
-      }
-    });
     
-    console.log("Upload response:", response.data);
-    return response.data;
+    // Step 1: If we don't have a report ID yet, create one
+    if (!reportId && filesArray.length > 0) {
+      try {
+        if (onProgress) {
+          onProgress({
+            progress: 0,
+            stage: 'uploading',
+            message: 'Creazione nuovo report...'
+          });
+        }
+        
+        const createResponse = await uploadApi.post('/reports');
+        reportId = createResponse.data.report_id;
+        console.log(`Created new report with ID: ${reportId}`);
+      } catch (error) {
+        console.error("Error creating report:", error);
+        throw new Error(`Failed to create report: ${error.message}`);
+      }
+    }
+    
+    // Step 2: Upload large files first using chunked uploads (one by one)
+    if (largeFiles.length > 0) {
+      // Calculate how much progress to allocate to large files vs regular files
+      const largeFilesProgressWeight = largeFiles.length / filesArray.length;
+      let currentLargeFileIndex = 0;
+      
+      for (const largeFile of largeFiles) {
+        const thisFileProgressOffset = (currentLargeFileIndex / largeFiles.length) * largeFilesProgressWeight * 100;
+        const thisFileProgressWeight = (1 / largeFiles.length) * largeFilesProgressWeight;
+        
+        await uploadLargeFile(largeFile, {
+          reportId,
+          onProgress: (progressEvent) => {
+            if (onProgress) {
+              // Scale this file's progress to its portion of the overall progress
+              const scaledProgress = thisFileProgressOffset + 
+                (progressEvent.progress * thisFileProgressWeight);
+              
+              onProgress({
+                progress: Math.round(scaledProgress),
+                stage: progressEvent.stage || 'uploading',
+                message: progressEvent.message || `Caricamento ${currentLargeFileIndex + 1}/${largeFiles.length}: ${largeFile.name}`
+              });
+            }
+          }
+        });
+        
+        currentLargeFileIndex++;
+      }
+    }
+    
+    // Step 3: Upload regular files (all at once)
+    if (regularFiles.length > 0) {
+      // Calculate progress starting point after large files
+      const regularFilesProgressOffset = largeFiles.length > 0 ? 
+        (largeFiles.length / filesArray.length) * 100 : 0;
+      
+      if (onProgress) {
+        onProgress({
+          progress: Math.round(regularFilesProgressOffset),
+          stage: 'uploading',
+          message: `Caricamento di ${regularFiles.length} file standard...`
+        });
+      }
+      
+      const formData = new FormData();
+      regularFiles.forEach(file => {
+        formData.append("files", file);
+      });
+      
+      // Add the report ID 
+      if (reportId) {
+        formData.append("report_id", reportId);
+      }
+      
+      const regularResponse = await uploadApi.post('/documents', formData, {
+        isMultipart: true,
+        timeout: 120000, // 2 minute timeout
+        onUploadProgress: (progressEvent) => {
+          if (onProgress && progressEvent.total) {
+            // Scale regular files progress to remaining portion
+            const regularProgress = (progressEvent.loaded / progressEvent.total) * 
+              ((regularFiles.length / filesArray.length) * 100);
+            
+            onProgress({
+              progress: Math.round(regularFilesProgressOffset + regularProgress),
+              stage: 'uploading',
+              message: `Caricamento file standard: ${Math.round((progressEvent.loaded * 100) / progressEvent.total)}%`
+            });
+          }
+        },
+        retryOptions: {
+          maxRetries: 2,
+          retryDelay: 2000
+        }
+      });
+      
+      // If this is the first upload, get the report ID
+      if (!reportId && regularResponse.data && regularResponse.data.report_id) {
+        reportId = regularResponse.data.report_id;
+      }
+    }
+    
+    if (onProgress) {
+      onProgress({
+        progress: 100,
+        stage: 'completed',
+        message: 'Tutti i file caricati con successo!'
+      });
+    }
+    
+    // Return a standard response with the report ID
+    return {
+      report_id: reportId,
+      message: 'Caricamento completato con successo',
+      file_count: filesArray.length,
+      status: 'success'
+    };
   } catch (error) {
+    console.error("File upload failed:", error);
     return handleApiError(error, "file upload", { throwError: true });
   }
 }
@@ -105,6 +386,15 @@ export async function uploadFile(files, templateId = 1, onProgress = null) {
  * @returns {Promise<Object>} The upload response
  */
 export async function uploadSingleFile(file, templateId = 1, onProgress = null) {
+  // Check if we should use chunked upload based on file size
+  if (shouldUseChunkedUpload(file)) {
+    console.log(`File ${file.name} is large (${(file.size / (1024 * 1024)).toFixed(2)} MB), using chunked upload`);
+    return uploadLargeFile(file, { 
+      templateId, 
+      onProgress
+    });
+  }
+
   if (!file) {
     throw new Error("No file provided for upload");
   }
