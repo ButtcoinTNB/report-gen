@@ -11,7 +11,7 @@ import traceback
 import hashlib
 from datetime import datetime
 from utils.auth import get_current_user
-from utils.storage import get_report_path, does_file_exist
+from utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
 from services.docx_service import docx_service
 from utils.supabase_helper import create_supabase_client, supabase_client_context
 from typing import Optional, Dict, Any
@@ -50,13 +50,26 @@ def get_report_content(report_id: UUID4) -> Optional[str]:
         return response.data[0]["content"]
     
     # Check local storage as fallback
-    report_dir = os.path.join(settings.UPLOAD_DIR, str(report_id))
+    uploads_dir = os.path.abspath(settings.UPLOAD_DIR)
+    report_dir_name = str(report_id)
+    
+    # Validate the report_id before using it in path construction
+    is_valid, report_dir = validate_path(report_dir_name, uploads_dir)
+    if not is_valid:
+        print(f"Invalid report ID format or path: {report_id}")
+        return None
+    
     if os.path.exists(report_dir) and os.path.isdir(report_dir):
-        # Look for content.txt or similar files
-        content_files = glob.glob(os.path.join(report_dir, "content*.txt"))
-        if content_files:
-            with open(content_files[0], 'r', encoding='utf-8') as f:
-                return f.read()
+        # Look for content files securely
+        for entry in os.listdir(report_dir):
+            if entry.startswith("content") and entry.endswith(".txt"):
+                content_file_path = get_safe_file_path(report_dir, entry)
+                if content_file_path and os.path.isfile(content_file_path):
+                    try:
+                        with open(content_file_path, 'r', encoding='utf-8') as f:
+                            return f.read()
+                    except Exception as e:
+                        print(f"Error reading content file: {str(e)}")
     
     return None
 
@@ -69,12 +82,23 @@ def fetch_report_path_from_supabase(report_id: UUID4) -> Optional[str]:
         supabase = create_supabase_client()
         response = supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
         
-        if response.data and response.data[0].get("file_path"):
-            return response.data[0]["file_path"]
-        return None
+        if response.data and len(response.data) > 0 and response.data[0].get("file_path"):
+            file_path = response.data[0]["file_path"]
+            
+            # Validate the file path
+            base_dir = os.path.abspath(settings.GENERATED_REPORTS_DIR)
+            is_valid, validated_path = validate_path(file_path, base_dir)
+            
+            if is_valid and os.path.exists(validated_path):
+                return validated_path
+            
+            # If the path wasn't valid or file doesn't exist, log this
+            print(f"File path from Supabase is invalid or file doesn't exist: {file_path}")
+        
     except Exception as e:
-        print(f"Error fetching report path: {str(e)}")
-        return None
+        print(f"Error fetching report path from Supabase: {str(e)}")
+    
+    return None
 
 
 def find_report_file_locally(report_id: UUID4) -> Optional[str]:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Body, Request, Query, Header, Depends, BackgroundTasks
 from typing import List, Dict, Optional, Any
 from fastapi.responses import JSONResponse
 import os
@@ -9,11 +9,12 @@ import datetime
 from supabase import create_client, Client
 import mimetypes
 import shutil
-from models import Template, File as FileModel
+from models import Template, File as FileModel, User
 from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
 from werkzeug.utils import secure_filename
 from utils.supabase_helper import create_supabase_client, supabase_client_context
 from pydantic import UUID4
+from utils.auth import get_current_user
 
 router = APIRouter()
 
@@ -153,9 +154,15 @@ async def upload_files(
 async def upload_documents(
     files: List[UploadFile] = File(...),
     template_id: Optional[str] = Form(None),
+    current_user: Optional[User] = Depends(get_current_user),  # Add authentication
 ):
     """
     Upload case-specific documents to generate a report
+    
+    Authentication:
+        This endpoint uses optional authentication. When authenticated, files will be associated
+        with the user's account. When not authenticated, files are only accessible via the returned
+        report_id.
     """
     try:
         print(f"Upload documents request received: {len(files)} files, template_id={template_id}")

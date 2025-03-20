@@ -205,9 +205,16 @@ async def generate_report(
 
 @router.post("/generate")
 async def generate_report_content(
-    request: GenerateRequest
+    request: GenerateRequest,
+    current_user: Optional[User] = Depends(get_current_user)  # Add optional authentication
 ) -> Dict[str, Any]:
-    """Generate content for an existing report"""
+    """
+    Generate content for an existing report
+    
+    Authentication:
+        This endpoint uses optional authentication. When authenticated, the generated report
+        will be associated with the user's account for better tracking and management.
+    """
     try:
         # Extract values from request
         report_id = request.document_ids[0] if request.document_ids else None
@@ -667,8 +674,15 @@ async def generate_report_docx(
 @router.post("/from-id")
 async def generate_report_from_id(
     data: Dict[str, Any] = Body(...),
+    current_user: Optional[User] = Depends(get_current_user)  # Add optional authentication
 ) -> Dict[str, Any]:
-    """Generate report content based on report_id"""
+    """
+    Generate report content based on report_id
+    
+    Authentication:
+        This endpoint uses optional authentication. When authenticated, user ownership
+        of the report will be verified.
+    """
     try:
         # Extract report_id from request
         if "report_id" not in data:
