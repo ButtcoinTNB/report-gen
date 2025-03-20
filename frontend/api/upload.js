@@ -1,15 +1,24 @@
 import axios from "axios";
 import { config } from "../config";
 import { handleApiError } from "../utils/errorHandler";
+import { 
+  createRequestConfig,
+  withRetry,
+  createApiClient
+} from "../utils/corsHelper";
+
+// Create an API client for upload endpoints
+const uploadApi = createApiClient('upload');
 
 /**
  * Upload multiple files to the backend
  * 
  * @param {File|File[]} files - A single file or array of files to upload
  * @param {number} templateId - Template ID to use for the upload
+ * @param {Function} onProgress - Optional callback for upload progress
  * @returns {Promise<Object>} The upload response
  */
-export async function uploadFile(files, templateId = 1) {
+export async function uploadFile(files, templateId = 1, onProgress = null) {
   const formData = new FormData();
   
   // Validate files parameter
@@ -61,14 +70,23 @@ export async function uploadFile(files, templateId = 1) {
     } catch (logError) {
       console.warn("Could not log file details:", logError);
     }
-    
-    const response = await axios.post(`${config.endpoints.upload}/documents`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-        'Accept': 'application/json'
-      },
-      withCredentials: false, // Set to false when using "*" for allowed origins in the backend
-      timeout: 120000 // 120 second timeout for larger files
+
+    // Use our uploadApi client with retry functionality
+    const response = await uploadApi.post('/documents', formData, {
+      isMultipart: true,
+      timeout: 120000, // 120 second timeout for larger files
+      onUploadProgress: onProgress,
+      retryOptions: {
+        maxRetries: 2,
+        retryDelay: 2000,
+        onRetry: (attempt, max) => {
+          console.log(`Upload attempt ${attempt}/${max}...`);
+          if (onProgress) {
+            // Reset progress bar on retry
+            onProgress({ loaded: 0, total: 100 });
+          }
+        }
+      }
     });
     
     console.log("Upload response:", response.data);
@@ -83,9 +101,10 @@ export async function uploadFile(files, templateId = 1) {
  * 
  * @param {File} file - The file to upload
  * @param {number} templateId - Template ID to use for the upload
+ * @param {Function} onProgress - Optional callback for upload progress
  * @returns {Promise<Object>} The upload response
  */
-export async function uploadSingleFile(file, templateId = 1) {
+export async function uploadSingleFile(file, templateId = 1, onProgress = null) {
   if (!file) {
     throw new Error("No file provided for upload");
   }
@@ -97,11 +116,14 @@ export async function uploadSingleFile(file, templateId = 1) {
   try {
     console.log(`Uploading single file ${file.name} to ${config.endpoints.upload}/documents`);
     
-    const response = await axios.post(`${config.endpoints.upload}/documents`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
-      timeout: 60000 // 60 second timeout
+    // Use our uploadApi client with retry functionality
+    const response = await uploadApi.post('/documents', formData, {
+      isMultipart: true,
+      timeout: 60000, // 60 second timeout
+      onUploadProgress: onProgress,
+      retryOptions: {
+        maxRetries: 2
+      }
     });
     
     return response.data;
@@ -115,9 +137,10 @@ export async function uploadSingleFile(file, templateId = 1) {
  * 
  * @param {File} file - The template file to upload
  * @param {string} name - Name of the template
+ * @param {Function} onProgress - Optional callback for upload progress
  * @returns {Promise<Object>} The upload response
  */
-export async function uploadTemplate(file, name) {
+export async function uploadTemplate(file, name, onProgress = null) {
   if (!file) {
     throw new Error("No template file provided for upload");
   }
@@ -129,11 +152,14 @@ export async function uploadTemplate(file, name) {
   try {
     console.log(`Uploading template ${file.name} to ${config.endpoints.upload}/template`);
     
-    const response = await axios.post(`${config.endpoints.upload}/template`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
-      timeout: 60000 // 60 second timeout
+    // Use our uploadApi client with retry functionality
+    const response = await uploadApi.post('/template', formData, {
+      isMultipart: true,
+      timeout: 60000, // 60 second timeout
+      onUploadProgress: onProgress,
+      retryOptions: {
+        maxRetries: 2
+      }
     });
     
     return response.data;

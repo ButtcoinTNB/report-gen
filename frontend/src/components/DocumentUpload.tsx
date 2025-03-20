@@ -12,7 +12,6 @@ import {
   ListItemText,
   ListItemSecondaryAction,
   IconButton,
-  CircularProgress,
   Alert,
 } from '@mui/material';
 import {
@@ -20,16 +19,29 @@ import {
   Description as DescriptionIcon,
   Delete as DeleteIcon,
 } from '@mui/icons-material';
-import api from '../services/api';
+import { uploadFile } from '../../api/upload';
+import LoadingIndicator, { LoadingState } from './LoadingIndicator';
 
-interface DocumentUploadProps {
-  onUploadComplete: (documentIds: string[]) => void;
-  isLoading: boolean;
+// Define the response type from the uploadFile function
+interface UploadResponse {
+  report_id?: string;
+  message?: string;
+  file_count?: number;
+  status?: string;
+  detail?: string;
 }
 
-const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUploadComplete, isLoading }) => {
+interface DocumentUploadProps {
+  onUploadComplete: (reportId: string) => void;
+}
+
+const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUploadComplete }) => {
   const [files, setFiles] = useState<File[]>([]);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [loadingState, setLoadingState] = useState<LoadingState>({
+    isLoading: false,
+    progress: 0,
+    stage: 'initial'
+  });
   const [error, setError] = useState<string | null>(null);
   const [totalSize, setTotalSize] = useState<number>(0);
   const MAX_TOTAL_SIZE = 1073741824; // 1GB
@@ -50,43 +62,44 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUploadComplete, isLoa
       setError(errors.join('. '));
       return;
     }
-
-    // Check if adding these files would exceed total size limit
-    const newTotalSize = files.reduce((sum, file) => sum + file.size, 0) + 
-                        acceptedFiles.reduce((sum, file) => sum + file.size, 0);
     
-    if (newTotalSize > MAX_TOTAL_SIZE) {
-      setError(`Il caricamento totale supera il limite di 1GB. Attuale: ${(newTotalSize / (1024 * 1024 * 1024)).toFixed(2)}GB`);
+    // Calculate total size
+    const newTotalSize = acceptedFiles.reduce((sum, file) => sum + file.size, 0);
+    setTotalSize(prevSize => prevSize + newTotalSize);
+    
+    // Check total size before accepting files
+    const updatedTotalSize = totalSize + newTotalSize;
+    if (updatedTotalSize > MAX_TOTAL_SIZE) {
+      setError(`Il caricamento totale supera il limite di 1GB. Attuale: ${(updatedTotalSize / (1024 * 1024 * 1024)).toFixed(2)}GB`);
       return;
     }
-
-    setFiles((prevFiles) => [...prevFiles, ...acceptedFiles]);
-    setTotalSize(newTotalSize);
+    
+    setFiles(prevFiles => [...prevFiles, ...acceptedFiles]);
     setError(null);
-  }, [files]);
-
+  }, [totalSize]);
+  
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
       'application/pdf': ['.pdf'],
       'application/msword': ['.doc'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-      'image/jpeg': ['.jpg', '.jpeg'],
-      'image/png': ['.png'],
       'text/plain': ['.txt'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png']
     },
-    maxSize: 1073741824, // 1GB
+    maxSize: MAX_TOTAL_SIZE
   });
 
   const removeFile = (index: number) => {
-    const removedFile = files[index];
-    setFiles((prevFiles) => prevFiles.filter((_, i) => i !== index));
-    setTotalSize((prevSize) => prevSize - removedFile.size);
-    
-    // Clear error if it was about file size
-    if (error && (error.includes('limite di 1GB') || error.includes('supera il limite'))) {
-      setError(null);
-    }
+    setFiles(prevFiles => {
+      const fileToRemove = prevFiles[index];
+      setTotalSize(prevSize => prevSize - fileToRemove.size);
+      
+      const newFiles = [...prevFiles];
+      newFiles.splice(index, 1);
+      return newFiles;
+    });
   };
 
   const handleUpload = async () => {
@@ -103,45 +116,61 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUploadComplete, isLoa
     }
 
     setError(null);
-    setUploadProgress(0);
-
-    const formData = new FormData();
-    files.forEach((file) => {
-      formData.append('files', file);
+    setLoadingState({
+      isLoading: true,
+      progress: 0,
+      stage: 'loading',
+      message: 'Caricamento dei documenti in corso...'
     });
 
     try {
-      // Use the correct API endpoint for document uploads
-      const response = await api.post('/upload/documents', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setUploadProgress(progress);
-          }
-        },
-      });
+      // Use the uploadFile function with progress tracking
+      const response = await uploadFile(files, 1, (progressEvent: {loaded: number, total?: number}) => {
+        if (progressEvent.total) {
+          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setLoadingState(prevState => ({
+            ...prevState,
+            progress,
+            message: `Caricamento: ${progress}%`
+          }));
+        }
+      }) as UploadResponse;
 
-      if (response.data && response.data.report_id) {
-        onUploadComplete([response.data.report_id]);
+      if (response && response.report_id) {
+        setLoadingState({
+          isLoading: false,
+          progress: 100,
+          stage: 'completed',
+          message: 'Caricamento completato!'
+        });
+        onUploadComplete(response.report_id);
       } else {
-        setError(response.data.detail || 'Si è verificato un errore durante il caricamento.');
+        setLoadingState({
+          isLoading: false,
+          stage: 'error',
+          error: response.detail || 'Si è verificato un errore durante il caricamento.'
+        });
       }
     } catch (err: any) {
       console.error('Upload error:', err);
-      const errorMessage = err.response?.data?.detail || 'Si è verificato un errore durante il caricamento.';
+      const errorMessage = err.message || 'Si è verificato un errore durante il caricamento.';
       
-      // Handle specific error types
-      if (errorMessage.includes('size exceeds')) {
-        setError('Il caricamento supera il limite di 1GB. Riduci la dimensione totale dei file.');
-      } else if (errorMessage.includes('Unsupported file type')) {
-        setError('Uno o più file sono in un formato non supportato. Utilizza solo PDF, DOC, DOCX, TXT, JPG o PNG.');
-      } else {
-        setError(errorMessage);
-      }
+      setLoadingState({
+        isLoading: false,
+        stage: 'error',
+        error: errorMessage
+      });
     }
+  };
+
+  const handleRetry = () => {
+    setLoadingState({
+      isLoading: false,
+      progress: 0,
+      stage: 'initial'
+    });
+    setError(null);
+    // Don't auto-trigger upload on retry to let the user make adjustments if needed
   };
 
   return (
@@ -158,102 +187,77 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({ onUploadComplete, isLoa
             borderColor: isDragActive ? 'primary.main' : 'grey.300',
             borderRadius: 1,
             p: 3,
-            mb: 3,
             textAlign: 'center',
             cursor: 'pointer',
-            bgcolor: isDragActive ? 'action.hover' : 'background.paper',
-            transition: 'all 0.2s ease',
+            mb: 2,
+            backgroundColor: isDragActive ? 'rgba(25, 118, 210, 0.04)' : 'transparent',
+            transition: 'background-color 0.2s, border-color 0.2s',
             '&:hover': {
-              bgcolor: 'action.hover',
+              backgroundColor: 'rgba(0, 0, 0, 0.04)',
             },
           }}
         >
           <input {...getInputProps()} />
           <CloudUploadIcon sx={{ fontSize: 48, color: 'primary.main', mb: 1 }} />
-          <Typography variant="h6" gutterBottom>
-            {isDragActive ? 'Rilascia i file qui' : 'Trascina i file qui'}
+          <Typography variant="body1" gutterBottom>
+            {isDragActive
+              ? 'Rilascia qui i file'
+              : 'Trascina i file qui, o clicca per selezionarli'}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            o clicca per selezionare i file
-          </Typography>
-          <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1 }}>
-            Formati supportati: PDF, DOC, DOCX, TXT, JPG, PNG (max 1GB in totale)
+          <Typography variant="body2" color="textSecondary">
+            Formati supportati: PDF, DOC, DOCX, TXT, JPG, PNG (max 1GB)
           </Typography>
         </Box>
 
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>Come funziona:</strong> L'AI estrarrà informazioni <strong>solo dai documenti che carichi</strong>. 
-            Il sistema utilizza riferimenti stilistici per formattare il report finale, ma tutto il contenuto 
-            proverrà esclusivamente dai tuoi documenti e dalle informazioni aggiuntive che fornirai.
-          </Typography>
-        </Alert>
-
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>Nota sulla privacy:</strong> Tutti i documenti caricati e i dati generati sono temporanei e 
-            verranno eliminati automaticamente dopo il download del report finale o dopo 24 ore di inattività.
-          </Typography>
-        </Alert>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
 
         {files.length > 0 && (
           <>
-            <List>
+            <List sx={{ bgcolor: 'background.paper', borderRadius: 1 }}>
               {files.map((file, index) => (
-                <ListItem key={index}>
+                <ListItem key={`${file.name}-${index}`}>
                   <ListItemIcon>
                     <DescriptionIcon />
                   </ListItemIcon>
                   <ListItemText
                     primary={file.name}
-                    secondary={`${(file.size / 1024 / 1024).toFixed(2)} MB`}
+                    secondary={`${(file.size / (1024 * 1024)).toFixed(2)} MB • ${file.type || 'Tipo sconosciuto'}`}
                   />
                   <ListItemSecondaryAction>
-                    <IconButton
-                      edge="end"
-                      aria-label="delete"
-                      onClick={() => removeFile(index)}
-                      disabled={isLoading}
-                    >
+                    <IconButton edge="end" aria-label="delete" onClick={() => removeFile(index)}>
                       <DeleteIcon />
                     </IconButton>
                   </ListItemSecondaryAction>
                 </ListItem>
               ))}
             </List>
-            <Typography variant="body2" color="text.secondary" align="right" sx={{ mt: 1 }}>
-              Dimensione totale: {(totalSize / (1024 * 1024)).toFixed(2)} MB / 1024 MB
-              {totalSize > MAX_TOTAL_SIZE * 0.8 && (
-                <Typography component="span" color="error.main"> (Avvicinandosi al limite!)</Typography>
-              )}
-            </Typography>
+            
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2 }}>
+              <Typography variant="body2" color="textSecondary">
+                {files.length} file selezionati ({(totalSize / (1024 * 1024)).toFixed(2)} MB)
+              </Typography>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleUpload}
+                disabled={loadingState.isLoading || files.length === 0}
+              >
+                Carica
+              </Button>
+            </Box>
           </>
         )}
 
-        {error && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {error}
-          </Alert>
-        )}
-
-        <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            variant="contained"
-            onClick={handleUpload}
-            disabled={files.length === 0 || isLoading}
-            startIcon={isLoading ? <CircularProgress size={20} /> : undefined}
-          >
-            {isLoading ? 'Caricamento...' : 'Carica e Analizza'}
-          </Button>
-        </Box>
-
-        {isLoading && uploadProgress > 0 && (
-          <Box sx={{ mt: 2 }}>
-            <Typography variant="body2" color="text.secondary" align="center">
-              Caricamento in corso: {uploadProgress}%
-            </Typography>
-          </Box>
-        )}
+        {/* Use our standardized loading indicator */}
+        <LoadingIndicator
+          state={loadingState}
+          variant="linear"
+          onRetry={handleRetry}
+        />
       </CardContent>
     </Card>
   );

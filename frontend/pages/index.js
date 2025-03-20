@@ -10,7 +10,6 @@ import {
   Step, 
   StepLabel,
   TextField,
-  CircularProgress,
   Alert,
   Snackbar,
   Grid,
@@ -32,6 +31,7 @@ import { generateReport, refineReport, analyzeDocuments } from '../api/generate.
 import { finalizeReport, downloadReport } from '../api/report';
 import axios from 'axios';
 import { config } from '../config';
+import LoadingIndicator from '../components/LoadingIndicator';
 
 export default function Home() {
   const [activeStep, setActiveStep] = useState(0);
@@ -41,17 +41,19 @@ export default function Home() {
   const [editedText, setEditedText] = useState('');
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [loadingState, setLoadingState] = useState({
+    isLoading: false,
+    progress: 0,
+    stage: 'initial',
+    message: ''
+  });
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [error, setError] = useState(null);
   const [showError, setShowError] = useState(false);
   const [extractedVariables, setExtractedVariables] = useState({});
   const [fieldsNeedingAttention, setFieldsNeedingAttention] = useState([]);
   const [analysisComplete, setAnalysisComplete] = useState(false);
-  const [analysisInProgress, setAnalysisInProgress] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
-  const [analyzeLoading, setAnalyzeLoading] = useState(false);
   const [infoReady, setInfoReady] = useState(false);
   
   // Updated steps for new workflow
@@ -69,7 +71,12 @@ export default function Home() {
     
     // Reset states
     setAnalysisComplete(false);
-    setAnalysisInProgress(true);
+    setLoadingState({
+      isLoading: true,
+      progress: 0,
+      stage: 'analyzing',
+      message: 'Analisi dei documenti in corso...'
+    });
     setFieldsNeedingAttention([]);
     setExtractedVariables({});
     
@@ -81,7 +88,13 @@ export default function Home() {
   const analyzeDocumentsInBackground = async (id) => {
     try {
       // Use the analyzeDocuments function from the imported API
-      const response = await analyzeDocuments(id);
+      const response = await analyzeDocuments(id, (progress) => {
+        setLoadingState(prevState => ({
+          ...prevState,
+          progress,
+          message: `Analisi: ${progress}%`
+        }));
+      });
       
       console.log('Document analysis result:', response);
       
@@ -91,12 +104,22 @@ export default function Home() {
       }
       
       setAnalysisComplete(true);
+      setLoadingState({
+        isLoading: false,
+        progress: 100,
+        stage: 'completed',
+        message: 'Analisi completata con successo!'
+      });
     } catch (err) {
       console.error('Error analyzing documents:', err);
       setError('Analisi completata con alcuni problemi. Puoi comunque procedere.');
       setShowError(true);
-    } finally {
-      setAnalysisInProgress(false);
+      setLoadingState({
+        isLoading: false,
+        stage: 'error',
+        error: err.message || 'Errore durante l\'analisi',
+        message: 'Si è verificato un problema durante l\'analisi'
+      });
     }
   };
 
@@ -128,25 +151,35 @@ export default function Home() {
       return;
     }
     
-    setIsGenerating(true);
+    setLoadingState({
+      isLoading: true,
+      progress: 0,
+      stage: 'generating',
+      message: 'Generazione del report in corso...'
+    });
     setError(null);
     setShowFeedback(false);
     
     try {
       // Generate report with additional info
-      const result = await axios.post(`${config.endpoints.generate}/generate`, {
-        document_ids: [reportId],
+      const result = await generateReport(reportId, {
         additional_info: additionalInfo
+      }, (progress) => {
+        setLoadingState(prevState => ({
+          ...prevState,
+          progress,
+          message: `Generazione: ${progress}%`
+        }));
       });
       
-      console.log('Report generation result:', result.data);
+      console.log('Report generation result:', result);
       
-      if (result.data && result.data.report_id) {
+      if (result && result.report_id) {
         // Store the new report ID
-        setReportId(result.data.report_id);
+        setReportId(result.report_id);
         
         // Fetch the HTML preview
-        const previewUrl = result.data.preview_url;
+        const previewUrl = result.preview_url;
         if (previewUrl) {
           const previewResponse = await axios.get(previewUrl);
           setPreviewHtml(previewResponse.data);
@@ -162,42 +195,30 @@ export default function Home() {
         
         // Move to the Preview & Edit step
         setActiveStep(2);
+        
+        setLoadingState({
+          isLoading: false,
+          progress: 100,
+          stage: 'completed',
+          message: 'Report generato con successo!'
+        });
       } else {
         throw new Error('Impossibile generare l\'anteprima del report');
       }
     } catch (err) {
       console.error('Error generating report:', err);
       
-      // Improved error handling to extract string message from various error formats
-      let errorMessage = 'Si è verificato un errore durante la generazione del report. Riprova.';
-      
-      if (err.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
-        if (err.response.data) {
-          const responseData = err.response.data;
-          
-          if (typeof responseData === 'string') {
-            errorMessage = responseData;
-          } else if (responseData.detail) {
-            errorMessage = responseData.detail;
-          } else if (responseData.message) {
-            errorMessage = responseData.message;
-          } else if (responseData.error) {
-            errorMessage = typeof responseData.error === 'string' 
-              ? responseData.error 
-              : 'Si è verificato un errore sul server';
-          }
-        }
-      } else if (err.message) {
-        // Something happened in setting up the request that triggered an Error
-        errorMessage = err.message;
-      }
+      // Extract error message from various formats
+      const errorMessage = extractErrorMessage(err);
       
       setError(errorMessage);
       setShowError(true);
-    } finally {
-      setIsGenerating(false);
+      setLoadingState({
+        isLoading: false,
+        stage: 'error',
+        error: errorMessage,
+        message: 'Si è verificato un problema durante la generazione'
+      });
     }
   };
 
@@ -205,7 +226,11 @@ export default function Home() {
   const handleRetry = () => {
     setShowError(false);
     setError(null);
-    handleInfoSubmit();
+    setLoadingState({
+      isLoading: false,
+      progress: 0,
+      stage: 'initial'
+    });
   };
 
   // Handler for chat interaction
@@ -219,10 +244,21 @@ export default function Home() {
     setShowFeedback(false);
     
     try {
-      setIsGenerating(true);
+      setLoadingState({
+        isLoading: true,
+        progress: 0,
+        stage: 'refining',
+        message: 'Affinamento del report in corso...'
+      });
       
       // Call the refine endpoint
-      const result = await refineReport(reportId, chatInput);
+      const result = await refineReport(reportId, chatInput, (progress) => {
+        setLoadingState(prevState => ({
+          ...prevState,
+          progress,
+          message: `Affinamento: ${progress}%`
+        }));
+      });
       
       if (result && !result.error) {
         // Add AI response to chat
@@ -245,41 +281,45 @@ export default function Home() {
         
         // Show feedback request
         setShowFeedback(true);
+        
+        setLoadingState({
+          isLoading: false,
+          progress: 100,
+          stage: 'completed',
+          message: 'Report affinato con successo!'
+        });
       } else {
         // Add error message to chat
         const errorMessage = { 
-          role: 'assistant', 
-          content: 'Mi dispiace, non sono riuscito ad applicare le modifiche richieste. Puoi riprovare con istruzioni diverse?' 
+          role: 'system', 
+          content: result.error || 'Si è verificato un errore durante l\'elaborazione della richiesta.'
         };
         setChatMessages(prevMessages => [...prevMessages, errorMessage]);
+        
+        setLoadingState({
+          isLoading: false,
+          stage: 'error',
+          error: result.error || 'Errore durante l\'affinamento',
+          message: 'Si è verificato un problema durante l\'affinamento'
+        });
       }
     } catch (err) {
       console.error('Error refining report:', err);
       
-      // Improved error handling similar to handleInfoSubmit
-      let uiErrorMessage = 'Errore durante il perfezionamento del report: Errore sconosciuto';
+      // Add error message to chat
+      const errMsg = extractErrorMessage(err);
+      const errorChatMessage = { 
+        role: 'system', 
+        content: `Errore: ${errMsg}`
+      };
+      setChatMessages(prevMessages => [...prevMessages, errorChatMessage]);
       
-      if (err.response && err.response.data) {
-        const responseData = err.response.data;
-        if (typeof responseData === 'string') {
-          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + responseData;
-        } else if (responseData.detail) {
-          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + responseData.detail;
-        } else if (responseData.message) {
-          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + responseData.message;
-        } else if (responseData.error) {
-          uiErrorMessage = 'Errore durante il perfezionamento del report: ' + (typeof responseData.error === 'string' 
-            ? responseData.error 
-            : 'Si è verificato un errore sul server');
-        }
-      } else if (err.message) {
-        uiErrorMessage = 'Errore durante il perfezionamento del report: ' + err.message;
-      }
-      
-      setError(uiErrorMessage);
-      setShowError(true);
-    } finally {
-      setIsGenerating(false);
+      setLoadingState({
+        isLoading: false,
+        stage: 'error',
+        error: errMsg,
+        message: 'Si è verificato un problema durante l\'affinamento'
+      });
     }
   };
   
@@ -291,26 +331,50 @@ export default function Home() {
   // Handler for the "Download Current Version" action
   const handleDownloadCurrentVersion = async () => {
     if (!reportId) {
-      setError('Nessun ID report trovato. Genera prima un report.');
+      setError('Nessun ID report trovato. Impossibile scaricare.');
       setShowError(true);
       return;
     }
     
+    setLoadingState({
+      isLoading: true,
+      progress: 0,
+      stage: 'loading',
+      message: 'Preparazione del download...'
+    });
+    
     try {
-      setIsDownloading(true);
-      const result = await downloadReport(reportId);
+      const downloadResult = await downloadReport(reportId);
       
-      if (result && result.data && result.data.download_url) {
-        window.open(result.data.download_url, '_blank');
+      if (downloadResult && downloadResult.download_url) {
+        // Redirect to download URL
+        window.location.href = downloadResult.download_url;
+        
+        // Show a success message
+        setTimeout(() => {
+          alert('Nota: I documenti caricati e i relativi dati verranno eliminati dal server dopo il download.');
+        }, 1000);
+        
+        setLoadingState({
+          isLoading: false,
+          progress: 100,
+          stage: 'completed',
+          message: 'Download avviato con successo!'
+        });
       } else {
-        throw new Error('Impossibile ottenere l\'URL di download');
+        throw new Error('URL di download non disponibile');
       }
     } catch (err) {
       console.error('Error downloading report:', err);
-      setError('Errore durante il download del report: ' + (err.message || 'Errore sconosciuto'));
+      setError(extractErrorMessage(err) || 'Si è verificato un errore durante il download.');
       setShowError(true);
-    } finally {
-      setIsDownloading(false);
+      
+      setLoadingState({
+        isLoading: false,
+        stage: 'error',
+        error: extractErrorMessage(err),
+        message: 'Si è verificato un problema durante il download'
+      });
     }
   };
   
@@ -342,8 +406,12 @@ export default function Home() {
       return;
     }
     
-    setIsDownloading(true);
-    setError(null);
+    setLoadingState({
+      isLoading: true,
+      progress: 0,
+      stage: 'finalizing',
+      message: 'Finalizzazione del report in corso...'
+    });
     
     try {
       // Download the report directly from the download URL
@@ -365,6 +433,13 @@ export default function Home() {
         
         // Move to final step
         setActiveStep(3);
+        
+        setLoadingState({
+          isLoading: false,
+          progress: 100,
+          stage: 'completed',
+          message: 'Report finalizzato con successo!'
+        });
       } else {
         throw new Error('Failed to get download URL');
       }
@@ -377,8 +452,12 @@ export default function Home() {
       
       setError(errorMessage);
       setShowError(true);
-    } finally {
-      setIsDownloading(false);
+      setLoadingState({
+        isLoading: false,
+        stage: 'error',
+        error: errorMessage,
+        message: 'Si è verificato un problema durante la finalizzazione'
+      });
     }
   };
   
@@ -387,61 +466,36 @@ export default function Home() {
   };
 
   return (
-    <div>
+    <div className="flex flex-col min-h-screen">
       <Navbar />
-      <Container maxWidth="lg" sx={{ py: 5 }}>
-        <Box 
-          sx={{ 
-            textAlign: 'center', 
-            mb: 5,
-            maxWidth: 800,
-            mx: 'auto'
-          }}
-        >
-          <Typography 
-            variant="h2" 
-            component="h1" 
-            sx={{ 
-              fontWeight: 600, 
-              mb: 2,
-              fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' } 
-            }}
-          >
-            Generatore di Perizie
+      <Container className="flex-grow py-8">
+        <Box mb={4}>
+          <Typography variant="h4" gutterBottom align="center">
+            Generatore Automatico di Perizie
           </Typography>
-          <Typography 
-            variant="h5" 
-            color="text.secondary" 
-            sx={{ 
-              mb: 3,
-              fontWeight: 400,
-              fontSize: { xs: '1rem', sm: '1.25rem' } 
-            }}
-          >
-            Carica i tuoi documenti e l'AI genererà un report formattato per te
+          <Typography variant="subtitle1" color="textSecondary" align="center" gutterBottom>
+            Carica i tuoi documenti e genera report strutturati basati sul loro contenuto
           </Typography>
         </Box>
-        
-        <Stepper 
-          activeStep={activeStep} 
-          alternativeLabel 
-          sx={{ 
-            mb: 5,
-            '& .MuiStepLabel-root .Mui-completed': {
-              color: 'success.main', 
-            },
-            '& .MuiStepLabel-root .Mui-active': {
-              color: 'primary.main', 
-            } 
-          }}
-        >
-          {steps.map((label) => (
-            <Step key={label}>
-              <StepLabel>{label}</StepLabel>
-            </Step>
-          ))}
-        </Stepper>
-        
+
+        <Box mb={6}>
+          <Stepper activeStep={activeStep} alternativeLabel>
+            {steps.map((label) => (
+              <Step key={label}>
+                <StepLabel>{label}</StepLabel>
+              </Step>
+            ))}
+          </Stepper>
+        </Box>
+
+        {/* Display our new LoadingIndicator component */}
+        <LoadingIndicator 
+          state={loadingState}
+          variant="linear"
+          onRetry={handleRetry}
+          showAlways={loadingState.stage !== 'initial'}
+        />
+
         {/* Step 1: Upload Documents */}
         {activeStep === 0 && (
           <FileUpload onUploadSuccess={handleUploadSuccess} />
@@ -463,28 +517,6 @@ export default function Home() {
             <Typography variant="body1" sx={{ mb: 2, color: 'text.secondary' }}>
               Fornisci eventuali informazioni aggiuntive non presenti nei documenti caricati.
             </Typography>
-            
-            {/* Analysis in progress indicator */}
-            {analyzeLoading && (
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, p: 2, bgcolor: 'rgba(3, 169, 244, 0.05)', borderRadius: 2 }}>
-                <CircularProgress size={24} sx={{ mr: 2 }} />
-                <Typography>
-                  Analisi dei documenti in corso... Puoi iniziare ad aggiungere informazioni nel frattempo.
-                </Typography>
-              </Box>
-            )}
-            
-            {/* Analysis complete notification */}
-            {analysisComplete && (
-              <Fade in={analysisComplete}>
-                <Box sx={{ mb: 3, p: 2, bgcolor: 'rgba(76, 175, 80, 0.05)', borderRadius: 2, display: 'flex', alignItems: 'center' }}>
-                  <CheckCircleIcon color="success" sx={{ mr: 2 }} />
-                  <Typography>
-                    Analisi completata! Abbiamo estratto le informazioni dai tuoi documenti.
-                  </Typography>
-                </Box>
-              </Fade>
-            )}
             
             {fieldsNeedingAttention.length > 0 && (
               <Box sx={{ mb: 4 }}>
@@ -534,7 +566,7 @@ export default function Home() {
               color="primary"
               size="large"
               onClick={handleInfoSubmit}
-              disabled={isGenerating}
+              disabled={loadingState.isLoading}
               sx={{ 
                 py: 1.5,
                 px: 4,
@@ -542,17 +574,12 @@ export default function Home() {
                 minWidth: 200
               }}
             >
-              {isGenerating ? (
+              {loadingState.isLoading ? (
                 <>
-                  <CircularProgress
+                  <LoadingIndicator 
+                    state={loadingState}
+                    variant="circular"
                     size={24}
-                    sx={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      marginTop: '-12px',
-                      marginLeft: '-12px',
-                    }}
                   />
                   <span style={{ opacity: 0 }}>Genera Report</span>
                 </>
@@ -605,7 +632,7 @@ export default function Home() {
                       size="small"
                       startIcon={<DownloadIcon />}
                       onClick={handleDownloadCurrentVersion}
-                      disabled={isDownloading || !previewHtml}
+                      disabled={loadingState.isLoading || !previewHtml}
                     >
                       Scarica Versione Attuale
                     </Button>
@@ -622,7 +649,11 @@ export default function Home() {
                     />
                   ) : (
                     <Box sx={{ textAlign: 'center', p: 4 }}>
-                      <CircularProgress size={40} />
+                      <LoadingIndicator 
+                        state={loadingState}
+                        variant="circular"
+                        size={40}
+                      />
                       <Typography sx={{ mt: 2 }}>Caricamento anteprima...</Typography>
                     </Box>
                   )}
@@ -636,7 +667,7 @@ export default function Home() {
                     size="large"
                     startIcon={<ThumbUpIcon />}
                     onClick={handleApproveReport}
-                    disabled={!previewHtml || isDownloading}
+                    disabled={!previewHtml || loadingState.isLoading}
                   >
                     Approva Report
                   </Button>
@@ -646,7 +677,7 @@ export default function Home() {
                     size="large"
                     startIcon={<ThumbDownIcon />}
                     onClick={handleNegativeFeedback}
-                    disabled={!previewHtml || isGenerating}
+                    disabled={!previewHtml || loadingState.isLoading}
                   >
                     Richiedi Modifiche
                   </Button>
@@ -735,7 +766,7 @@ export default function Home() {
                       </Box>
                     )}
                     
-                    {isGenerating && (
+                    {loadingState.isLoading && (
                       <Box 
                         sx={{
                           p: 2,
@@ -745,7 +776,11 @@ export default function Home() {
                           bgcolor: 'grey.100'
                         }}
                       >
-                        <CircularProgress size={20} sx={{ mr: 1 }} />
+                        <LoadingIndicator 
+                          state={loadingState}
+                          variant="circular"
+                          size={20}
+                        />
                         <Typography variant="body2" component="span">
                           Elaborazione...
                         </Typography>
@@ -763,13 +798,13 @@ export default function Home() {
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
                       onKeyPress={(e) => e.key === 'Enter' && handleChatSubmit()}
-                      disabled={isGenerating}
+                      disabled={loadingState.isLoading}
                     />
                     <Button
                       variant="contained"
                       color="primary"
                       onClick={handleChatSubmit}
-                      disabled={isGenerating || !chatInput.trim()}
+                      disabled={loadingState.isLoading || !chatInput.trim()}
                       startIcon={<ChatIcon />}
                     >
                       Invia
