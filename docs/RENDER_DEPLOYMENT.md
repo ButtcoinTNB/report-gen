@@ -53,6 +53,36 @@ DEBUG=false
 
 ## Fixing Import Issues
 
+### ModuleNotFoundError: No module named 'backend.utils.file_handler'
+
+If you encounter import errors related to the `backend` prefix, we've implemented two solutions:
+
+1. **Path Fixing Module (Recommended)**: We've added a `fix_paths.py` module that automatically handles both relative and absolute imports
+   - This module is now imported at the top of `main.py` 
+   - It adds the necessary directories to the Python path
+   - It creates a mock 'backend' module in `sys.modules` to handle imports with the 'backend' prefix
+
+2. **Update Import Statements**: As a fallback solution, you can also update import statements:
+   ```python
+   # Change FROM this (problematic in production):
+   from backend.utils.file_handler import save_uploaded_file
+   
+   # TO this (works in both environments):
+   from utils.file_handler import save_uploaded_file
+   ```
+
+### Start Command for Render
+
+Make sure your start command in Render is set to:
+
+```
+cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+The `python -m` prefix is critical as it ensures proper module resolution regardless of the current working directory.
+
+### UploadQueryResult Import Error
+
 If you encounter the "UploadQueryResult is not defined" error or similar import issues:
 
 1. Check the import statements in your API files (particularly in `backend/api/upload.py`)

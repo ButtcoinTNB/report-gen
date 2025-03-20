@@ -126,6 +126,105 @@ Check your Python code for circular imports, which can cause issues during start
 2. Restructuring your code to avoid circular references
 3. Using proper dependency injection patterns
 
+### 9. Fix Import Path Issues
+
+If you encounter import errors like `ModuleNotFoundError: No module named 'backend.utils.file_handler'`, this indicates a Python path resolution issue. We've implemented a comprehensive solution:
+
+#### Automatic Path Resolution with fix_paths.py
+
+We've added a path fixing module that handles both relative and absolute imports automatically:
+
+1. Create a file named `fix_paths.py` in your backend directory:
+
+```python
+"""
+Fix Python import paths for Render deployment
+"""
+
+import os
+import sys
+
+def fix_python_path():
+    """
+    Adjust Python path to make both relative and prefixed imports work.
+    This handles the specific path issues on Render deployment.
+    """
+    current_dir = os.getcwd()
+    print(f"Current working directory: {current_dir}")
+    
+    # Get the directory of this file
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"Backend directory: {backend_dir}")
+    
+    # Get the project root (parent of backend dir)
+    project_root = os.path.dirname(backend_dir)
+    print(f"Project root: {project_root}")
+    
+    # Add the project root and backend dir to the path if not already there
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+        print(f"Added project root to Python path: {project_root}")
+    
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+        print(f"Added backend directory to Python path: {backend_dir}")
+    
+    # Create a 'backend' directory in sys.modules if it doesn't exist
+    # This allows 'from backend.X import Y' to work as if importing from the actual backend directory
+    if 'backend' not in sys.modules:
+        import types
+        backend_module = types.ModuleType('backend')
+        sys.modules['backend'] = backend_module
+        print("Created 'backend' module in sys.modules")
+    
+    # Return the paths so they can be used elsewhere
+    return project_root, backend_dir
+
+# Run the function when this module is imported
+project_root, backend_dir = fix_python_path()
+```
+
+2. Import this module at the top of your `main.py` file:
+
+```python
+# Import the path fixer before any other imports to ensure proper module resolution
+import os
+import sys
+try:
+    # Try to resolve paths for both development and production
+    from fix_paths import project_root, backend_dir
+    print("Successfully imported fix_paths")
+except ImportError:
+    print("Could not import fix_paths directly, adjusting path...")
+    # If running from a different directory, try to add the backend directory to the path
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+        print(f"Added backend directory to path: {backend_dir}")
+    try:
+        from fix_paths import project_root, backend_dir
+        print("Successfully imported fix_paths after path adjustment")
+    except ImportError:
+        # If still cannot import, just use rootpath as before
+        from rootpath import ensure_root_in_path
+        project_root, backend_dir = ensure_root_in_path()
+        print("Using fallback rootpath module for path resolution")
+```
+
+#### Alternative: Update Import Statements
+
+As a fallback option, you can modify import statements in problematic files:
+
+```python
+# Change FROM this (problematic in production):
+from backend.utils.file_handler import save_uploaded_file
+
+# TO this (works in both environments):
+from utils.file_handler import save_uploaded_file
+```
+
+This approach requires changing imports in multiple files but can work if you prefer to avoid modifying system path settings.
+
 ## Testing Locally Before Deployment
 
 Test your build process locally to identify issues before deploying to Render:

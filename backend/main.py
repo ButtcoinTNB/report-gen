@@ -1,18 +1,39 @@
+"""
+Main application entrypoint for the Insurance Report Generator API
+"""
+
+# Import the path fixer before any other imports to ensure proper module resolution
+import os
+import sys
+try:
+    # Try to resolve paths for both development and production
+    from fix_paths import project_root, backend_dir
+    print("Successfully imported fix_paths")
+except ImportError:
+    print("Could not import fix_paths directly, adjusting path...")
+    # If running from a different directory, try to add the backend directory to the path
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+        print(f"Added backend directory to path: {backend_dir}")
+    try:
+        from fix_paths import project_root, backend_dir
+        print("Successfully imported fix_paths after path adjustment")
+    except ImportError:
+        # If still cannot import, just use rootpath as before
+        from rootpath import ensure_root_in_path
+        project_root, backend_dir = ensure_root_in_path()
+        print("Using fallback rootpath module for path resolution")
+
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 import uvicorn
-import os
-import sys
 import asyncio
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-
-# Import rootpath utility to ensure proper module imports
-from rootpath import ensure_root_in_path
-project_root, backend_dir = ensure_root_in_path()
 
 # Import API route modules
 from api import upload, generate, format, edit, download
