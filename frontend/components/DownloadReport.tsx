@@ -19,7 +19,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { downloadPDF, downloadDOCX, generateDOCX } from '../api/download';
+import { downloadApi } from '../src/services';
 import PDFPreview from './PDFPreview';
 
 interface DownloadReportProps {
@@ -46,8 +46,20 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
     setError(null);
 
     try {
-      await downloadPDF(reportId);
-      // Success is handled by the downloadPDF function (it triggers the browser download)
+      // Use the new TypeScript API service
+      const pdfBlob = await downloadApi.downloadReport(reportId, 'docx');
+      
+      // Create a download link
+      const url = window.URL.createObjectURL(pdfBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `report_${reportId}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      
+      // Clean up the URL object
+      window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error downloading PDF report:', err);
       setError(err instanceof Error ? err.message : 'Failed to download the PDF report. Please try again.');
@@ -66,12 +78,8 @@ const DownloadReport: React.FC<DownloadReportProps> = ({
     setError(null);
 
     try {
-      // First generate the DOCX
-      await generateDOCX(reportId);
-      
-      // Then download it
-      await downloadDOCX(reportId);
-      // Success is handled by the downloadDOCX function (it triggers the browser download)
+      // Use the new TypeScript API service
+      downloadApi.downloadToDevice(reportId, `report_${reportId}.docx`, 'docx');
     } catch (err) {
       console.error('Error downloading DOCX report:', err);
       setError(err instanceof Error ? err.message : 'Failed to download the DOCX report. Please try again.');

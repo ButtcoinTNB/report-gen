@@ -23,7 +23,7 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { downloadReport, getReport } from '../api/report';
+import { downloadApi, generateApi } from '../src/services';
 import { Report as ReportType } from '../src/types';
 
 // Local interface that extends the base Report type with additional properties
@@ -60,10 +60,10 @@ const DownloadPage = () => {
       setIsLoading(true);
       try {
         // Call the API client function to fetch the report
-        const reportData = await getReport(id as string) as unknown as DownloadPageReport;
+        const reportData = await generateApi.getReport(id as string);
         
-        // Then get the download information - wrap with type assertion since the API returns different types
-        const downloadBlob = await downloadReport(id as string, 'docx');
+        // Then get the download information
+        const downloadBlob = await downloadApi.downloadReport(id as string, 'docx');
         
         // Create object URL from the blob
         const url = URL.createObjectURL(downloadBlob);

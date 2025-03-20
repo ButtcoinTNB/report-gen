@@ -20,7 +20,7 @@ import {
 } from '@mui/material';
 import dynamic from 'next/dynamic';
 import 'easymde/dist/easymde.min.css';
-import { getReport, updateReport, refineReport, finalizeReport } from '../api/report';
+import { generateApi, editApi, formatApi } from '../src/services';
 import { Report } from '../src/types';
 
 // Dynamic import for the Markdown editor to avoid SSR issues
@@ -58,7 +58,7 @@ const EditPage = () => {
   const loadReport = async (reportId: string) => {
     try {
       setLoading(true);
-      const reportData = await getReport(reportId) as Report;
+      const reportData = await generateApi.getReport(reportId);
       setReport({
         report_id: reportData.report_id,
         template_id: reportData.template_id,
@@ -86,13 +86,21 @@ const EditPage = () => {
     setSuccess('');
     
     try {
-      const updatedReport = await updateReport(report.report_id, {
-        title,
-        content,
-        is_finalized: false
-      }) as Report;
+      await editApi.editReport(report.report_id, `Update the report with title: "${title}" and content: "${content}"`);
       
-      setReport(updatedReport);
+      const updatedReport = await generateApi.getReport(report.report_id);
+      
+      setReport({
+        report_id: updatedReport.report_id,
+        template_id: updatedReport.template_id,
+        title: updatedReport.title,
+        content: updatedReport.content,
+        is_finalized: updatedReport.is_finalized,
+        files_cleaned: updatedReport.files_cleaned,
+        created_at: updatedReport.created_at,
+        updated_at: updatedReport.updated_at
+      });
+      
       setSuccess('Report saved successfully!');
     } catch (err) {
       console.error('Error saving report:', err);
@@ -107,17 +115,21 @@ const EditPage = () => {
 
     try {
       setIsRefining(true);
-      const refinedReport = await refineReport(report.report_id, aiInstructions) as Report;
+      const result = await editApi.editReport(report.report_id, aiInstructions);
+      
+      const updatedReport = await generateApi.getReport(report.report_id);
+      
       setReport({
-        report_id: refinedReport.report_id,
-        template_id: refinedReport.template_id,
-        title: refinedReport.title,
-        content: refinedReport.content,
-        is_finalized: refinedReport.is_finalized,
-        files_cleaned: refinedReport.files_cleaned,
-        created_at: refinedReport.created_at,
-        updated_at: refinedReport.updated_at
+        report_id: updatedReport.report_id,
+        template_id: updatedReport.template_id,
+        title: updatedReport.title,
+        content: updatedReport.content,
+        is_finalized: updatedReport.is_finalized,
+        files_cleaned: updatedReport.files_cleaned,
+        created_at: updatedReport.created_at,
+        updated_at: updatedReport.updated_at
       });
+      
       setAiInstructions('');
     } catch (err) {
       console.error('Error refining report:', err);
@@ -134,10 +146,7 @@ const EditPage = () => {
     setError('');
     
     try {
-      await finalizeReport({
-        report_id: report.report_id,
-        template_id: 1  // Always use template ID 1
-      });
+      await formatApi.formatReport(report.report_id, { previewMode: false });
       
       setSuccess('Report finalized successfully!');
       

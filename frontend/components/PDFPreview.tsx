@@ -14,7 +14,7 @@ import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { fetchPDFPreview } from '../api/download';
+import { downloadApi } from '../src/services';
 
 interface Props {
   previewId?: string;  // UUID
@@ -43,11 +43,13 @@ const PDFPreview: React.FC<Props> = ({ previewId, reportId, onError, onClose }) 
   const loadPreview = async () => {
     try {
       setLoading(true);
-      const result = await fetchPDFPreview(reportId as string) as PDFPreviewResult;
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      setPreviewUrl(result.url);
+      
+      // Get the download URL for the report
+      const downloadUrl = downloadApi.getDownloadUrl(reportId as string, 'docx');
+      
+      // Since we don't have a direct preview URL method in the new API,
+      // we'll use the download URL as the preview URL
+      setPreviewUrl(downloadUrl);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load preview';
       setError(errorMessage);

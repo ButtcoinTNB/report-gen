@@ -14,8 +14,7 @@ import {
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
-import { formatReport } from '../api/format';
-import { getReport } from '../api/report';
+import { formatApi, generateApi } from '../src/services';
 import { Report } from '../src/types';
 
 interface Props {
@@ -29,6 +28,8 @@ const ReportPreview: React.FC<Props> = ({ reportId, onError }) => {
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editedContent, setEditedContent] = useState('');
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [previewErrorMessage, setPreviewErrorMessage] = useState('');
 
   useEffect(() => {
     if (reportId) {
@@ -45,7 +46,7 @@ const ReportPreview: React.FC<Props> = ({ reportId, onError }) => {
   const loadReport = async () => {
     try {
       setLoading(true);
-      const reportData = await getReport(reportId as string) as Report;
+      const reportData = await generateApi.getReport(reportId as string);
       setReport(reportData);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load report';
@@ -69,32 +70,46 @@ const ReportPreview: React.FC<Props> = ({ reportId, onError }) => {
   };
 
   const handlePreview = async () => {
-    if (!reportId) return;
-    
-    setLoading(true);
-    setError(null);
-    
     try {
-      await formatReport(reportId, true); // true = preview mode
-    } catch (err) {
-      console.error('Error generating preview:', err);
-      setError(err instanceof Error ? err.message : 'Failed to generate preview. Please try again.');
+      setLoading(true);
+      setPreviewErrorMessage('');
+      
+      if (!reportId) {
+        setPreviewErrorMessage('Report ID not found');
+        return;
+      }
+      
+      await formatApi.formatReport(reportId, { previewMode: true });
+      const reportData = await generateApi.getReportPreview(reportId);
+      
+      if (reportData.content) {
+        setPreviewHtml(reportData.content);
+      } else {
+        setPreviewErrorMessage('No preview content available');
+      }
+    } catch (error) {
+      console.error('Error in preview:', error);
+      setPreviewErrorMessage('Errore durante la generazione del preview: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setLoading(false);
     }
   };
 
   const handleFinalize = async () => {
-    if (!reportId) return;
-    
-    setLoading(true);
-    setError(null);
-    
     try {
-      await formatReport(reportId, false); // false = final mode
-    } catch (err) {
-      console.error('Error finalizing report:', err);
-      setError(err instanceof Error ? err.message : 'Failed to finalize report. Please try again.');
+      setLoading(true);
+      setPreviewErrorMessage('');
+      
+      if (!reportId) {
+        setPreviewErrorMessage('Report ID not found');
+        return;
+      }
+      
+      await formatApi.formatReport(reportId, { previewMode: false });
+      window.location.href = `/download?id=${reportId}`;
+    } catch (error) {
+      console.error('Error in finalize:', error);
+      setPreviewErrorMessage('Errore durante la finalizzazione: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setLoading(false);
     }
@@ -129,8 +144,8 @@ const ReportPreview: React.FC<Props> = ({ reportId, onError }) => {
       
       {loading ? (
         <CircularProgress />
-      ) : error ? (
-        <Typography color="error">{error}</Typography>
+      ) : previewErrorMessage ? (
+        <Typography color="error">{previewErrorMessage}</Typography>
       ) : editing ? (
         <Box sx={{ mb: 3 }}>
           <TextField
