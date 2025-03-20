@@ -152,7 +152,7 @@ async def upload_files(
 @router.post("/documents", status_code=201)
 async def upload_documents(
     files: List[UploadFile] = File(...),
-    template_id: Optional[UUID4] = Form(None),
+    template_id: Optional[str] = Form(None),
 ):
     """
     Upload case-specific documents to generate a report
