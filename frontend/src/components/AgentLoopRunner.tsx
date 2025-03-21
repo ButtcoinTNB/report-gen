@@ -111,7 +111,7 @@ export function AgentLoopRunner() {
               multiple
               hidden
               onChange={e => setFiles(Array.from(e.target.files || []))}
-              accept=".doc,.docx,.txt,.pdf"
+              accept=".doc,.docx,.pdf,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff,.rtf,.odt,.csv,.md,.html,.xls,.xlsx"
             />
           </Button>
           {files.length > 0 && (

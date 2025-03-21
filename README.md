@@ -1,209 +1,125 @@
 # Insurance Report Generator
 
-An advanced web application for generating, editing, and managing insurance reports using AI-powered document analysis.
+An AI-powered system that generates professional insurance reports from various document types. The system uses a dual-agent approach with a writer and reviewer to ensure high-quality, consistent reports following company guidelines.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+## Features
 
-## 🚀 Features
+- **Multi-format Document Support**:
+  - Documents: PDF, DOC, DOCX, RTF, ODT, TXT, CSV, MD, HTML
+  - Spreadsheets: XLS, XLSX
+  - Images: JPG, JPEG, PNG, GIF, BMP, WEBP, TIFF
+  - OCR support for text extraction from images
+  - Excel data extraction with sheet preservation
 
-- **Document Upload**: Support for various file formats (PDF, DOCX, JPG, PNG)
-- **Chunked Uploads**: Handle large files efficiently
-- **AI-Powered Analysis**: Extract relevant information from insurance documents
-- **Report Generation**: Create structured reports based on document analysis
-- **Interactive Editing**: Edit and refine generated reports
-- **Multiple Export Formats**: Download reports in various formats (PDF, DOCX, TXT)
-- **Real-time Updates**: WebSocket integration for progress tracking
-- **Responsive UI**: Modern interface that works on desktop and mobile
-- **Type Safety**: Fully TypeScript codebase with comprehensive type definitions
+- **AI Agent Loop**:
+  - Writer Agent: Generates initial report drafts
+  - Reviewer Agent: Evaluates and provides feedback
+  - Iterative improvement process
+  - Quality scoring system
+  - Automatic formatting according to brand guidelines
 
-## 📋 Prerequisites
+- **Modern UI/UX**:
+  - Real-time progress tracking
+  - Live preview of generated reports
+  - Interactive feedback display
+  - Document upload with drag-and-drop
+  - DOCX export functionality
 
-- Python 3.9+
-- Node.js 16+
-- TypeScript 4.9+
-- PostgreSQL 13+ (or Supabase account)
-- OpenAI API key or compatible AI service
+## Installation
 
-## 🛠️ Installation
-
-### Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/insurance-report-generator.git
-cd insurance-report-generator
-```
-
-### Setting Up the Backend
-
-1. Create and activate a virtual environment:
-
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/insurance-report-generator.git
+   cd insurance-report-generator
+   ```
 
 2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-```bash
-pip install -r backend/requirements.txt
-```
+3. Set up environment variables:
+   ```bash
+   cp .env.example .env.local
+   ```
+   Edit `.env.local` with your API keys and configuration.
 
-3. Configure environment variables:
+## Development
 
-```bash
-# Run the environment setup script
-python backend/scripts/setup_env.py --env local
-
-# Edit the environment variables
-nano backend/.env
-```
-
-4. Run the backend server:
-
-```bash
-cd backend
-uvicorn main:app --reload
-```
-
-### Setting Up the Frontend
-
-1. Install dependencies:
-
-```bash
-cd frontend
-npm install
-```
-
-2. Run the development server:
-
+Start the development server:
 ```bash
 npm run dev
 ```
 
-## 🚀 Using the Application
+The application will be available at `http://localhost:3000`.
 
-1. Open your browser and navigate to `http://localhost:3000`
-2. Upload insurance-related documents
-3. Wait for the AI to process the documents
-4. Review and edit the generated report
-5. Export the report in your preferred format
+## File Processing
 
-## 🌍 Production Deployment
+The system supports various file formats through specialized processors:
 
-### Backend Deployment on Render
+- **Documents**: Uses `mammoth` for DOCX, native text processing for TXT/CSV/etc.
+- **PDFs**: Utilizes `pdfjs-dist` for text extraction
+- **Images**: Implements `tesseract.js` for OCR in Italian and English
+- **Excel**: Processes spreadsheets using `xlsx` with sheet preservation
 
-For detailed instructions on deploying the backend to Render, see [Render Deployment Guide](docs/RENDER_DEPLOYMENT.md).
+## AI Agent Loop
 
-### Frontend Deployment on Vercel
+The system implements a dual-agent approach for report generation:
 
-For detailed instructions on deploying the frontend to Vercel, see [Vercel Deployment Guide](docs/VERCEL_DEPLOYMENT.md).
+1. **Writer Agent**:
+   - Analyzes input documents
+   - Extracts relevant information
+   - Generates initial report draft
+   - Follows brand guidelines and formatting rules
 
-### Production Checklist
+2. **Reviewer Agent**:
+   - Evaluates report quality
+   - Checks compliance with guidelines
+   - Provides specific improvement suggestions
+   - Assigns quality score
 
-Before deploying to production, go through the [Production Checklist](docs/PRODUCTION_CHECKLIST.md) to ensure your application is properly configured.
+3. **Iteration Process**:
+   - Maximum 3 iterations
+   - Continues until quality threshold is met (90% score)
+   - Each iteration improves based on reviewer feedback
+   - Final report includes quality score and suggestions
 
-## 🔑 Configuration
+## API Routes
 
-### Backend Configuration
+### POST /api/agent-loop
 
-Key environment variables for the backend:
+Handles document processing and report generation:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| OPENAI_API_KEY | API key for OpenAI | - |
-| SUPABASE_URL | URL for Supabase | - |
-| SUPABASE_KEY | API key for Supabase | - |
-| UPLOAD_DIR | Directory for uploaded files | ./uploads |
-| GENERATED_DIR | Directory for generated reports | ./generated |
-| DATA_RETENTION_HOURS | Hours to keep data before cleanup | 24 |
-| DEBUG | Enable debug mode | false |
-| ALLOWED_ORIGINS | CORS allowed origins | http://localhost:3000 |
-| API_RATE_LIMIT | Rate limit for API requests | 100 |
-| AI_SERVICE | AI service provider | openai |
-
-See `.env.example` for a complete list of configuration options.
-
-### Frontend Configuration
-
-Key environment variables for the frontend:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| NEXT_PUBLIC_API_URL | URL of the backend API | http://localhost:8000 |
-| NEXT_PUBLIC_WS_URL | WebSocket URL | ws://localhost:8000 |
-
-## 🧪 Testing
-
-Run backend tests:
-
-```bash
-cd insurance-report-generator
-./run_tests.sh
+```typescript
+interface AgentLoopResponse {
+  draft: string;
+  feedback: {
+    score: number;
+    suggestions: string[];
+  };
+  downloadUrl: string;
+  iterations: number;
+}
 ```
 
-Run frontend tests:
+## Error Handling
 
-```bash
-cd frontend
-npm test
-```
+The system implements comprehensive error handling:
 
-## 🔒 Security Considerations
+- File validation and MIME type checking
+- Graceful fallbacks for unsupported formats
+- Detailed error messages for debugging
+- User-friendly error displays
+- Automatic retry mechanisms for OCR
 
-- API rate limiting is enabled by default
-- Input validation on all endpoints
-- File type and size restrictions
-- Sanitization of user inputs
-- Regular data cleanup to prevent storage overflow
-
-## 📖 API Documentation
-
-For detailed API documentation, see [API_DOCUMENTATION.md](backend/API_DOCUMENTATION.md).
-
-## 🏗️ Architecture
-
-The application follows a client-server architecture:
-
-- **Frontend**: Next.js React application with TypeScript
-- **Backend**: FastAPI Python application
-- **Database**: PostgreSQL (via Supabase)
-- **File Storage**: Local filesystem or Supabase Storage
-- **AI Processing**: OpenAI API or compatible service
-
-### Backend Components:
-
-- **API Layer**: FastAPI routes handling requests
-- **Service Layer**: Business logic and AI integration
-- **Data Layer**: Database access and file handling
-- **Background Tasks**: Processing long-running operations
-
-### Frontend Components:
-
-- **Pages**: Next.js pages for routing and layout
-- **Components**: Reusable TypeScript React components 
-- **Services**: API client services for backend communication
-- **Store**: Redux state management with TypeScript types
-- **Types**: TypeScript interfaces and type definitions
-- **Utils**: Utility functions and helpers
-- **Styles**: Global and component-specific styling
-
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create your feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -am 'Add my feature'`
+4. Push to the branch: `git push origin feature/my-feature`
+5. Submit a pull request
 
-For development guidelines, see [DEV_GUIDELINES.md](docs/DEV_GUIDELINES.md) and [FRONTEND_TYPESCRIPT_FIX.md](docs/FRONTEND_TYPESCRIPT_FIX.md).
+## License
 
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 👏 Acknowledgments
-
-- OpenAI for providing the AI capabilities
-- FastAPI for the efficient backend framework
-- Next.js team for the frontend framework
-- All contributors who have helped with the project 
+This project is licensed under the MIT License - see the LICENSE file for details. 
