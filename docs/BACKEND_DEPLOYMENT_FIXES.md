@@ -110,4 +110,65 @@ from utils.file_processor import FileProcessor
    - Modules importing from `file_handler.py` but not using the imported functions are updated
    - Modules actively using these functions will be refactored in future iterations
 
-This approach ensures we can modernize the codebase while maintaining stability. 
+This approach ensures we can modernize the codebase while maintaining stability.
+
+## Automated Import Fixes and Deployment Checks
+
+To systematically address import issues and prevent deployment failures, we've implemented the following tools:
+
+### 1. Fix Imports Script
+
+The `fix_imports.py` script automatically fixes relative imports to use absolute paths:
+
+```bash
+# Run from project root
+python backend/scripts/fix_imports.py
+```
+
+This script scans all Python files in the backend directory and converts imports like:
+```python
+from utils.logger import get_logger
+```
+to
+```python
+from backend.utils.logger import get_logger
+```
+
+### 2. Pre-Deployment Check
+
+The `pre_deploy_check.py` script validates the codebase before deployment to catch potential issues:
+
+```bash
+# Run from project root
+python backend/scripts/pre_deploy_check.py
+```
+
+This script checks for:
+- Relative imports that should be absolute
+- Missing `__init__.py` files in directories
+- Import references to non-existent modules
+
+### Deployment Pipeline Integration
+
+For robust deployments, add this to your CI/CD pipeline:
+
+```yaml
+# In your CI/CD workflow
+steps:
+  - name: Check for deployment issues
+    run: python backend/scripts/pre_deploy_check.py
+  
+  - name: Fix imports if needed
+    run: python backend/scripts/fix_imports.py
+    
+  # Continue with your deployment steps
+```
+
+## Best Practices
+
+1. **Always use absolute imports** with the `backend.` prefix for internal modules
+2. **Run the pre-deployment check** before pushing code that will be deployed
+3. **Keep `__init__.py` files** in all Python directories
+4. **Don't mix relative and absolute imports** - be consistent with absolute imports
+
+By following these practices and using the provided tools, you can avoid the common deployment issues related to imports and module resolution. 
