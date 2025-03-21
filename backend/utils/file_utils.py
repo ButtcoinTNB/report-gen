@@ -5,7 +5,45 @@ File utility functions for secure file operations.
 from pathlib import Path
 from typing import Union, List
 import os
+import re
 from utils.error_handler import logger
+
+# Try to import from werkzeug first
+try:
+    from werkzeug.utils import secure_filename
+except ImportError:
+    # Fallback implementation if werkzeug is not available
+    def secure_filename(filename: str) -> str:
+        """
+        Pass a filename and return a secure version of it.
+        
+        This function works similar to the werkzeug.utils.secure_filename function.
+        It returns a filename that can safely be stored on a regular file system and passed
+        to os.path.join() without risking directory traversal attacks.
+        
+        Args:
+            filename: The filename to secure
+            
+        Returns:
+            A sanitized filename
+        """
+        if not filename:
+            return 'unnamed_file'
+            
+        # Remove non-ASCII characters
+        filename = ''.join(c for c in filename if c.isalnum() or c in '._- ')
+        
+        # Remove leading/trailing spaces and dots
+        filename = filename.strip('. ')
+        
+        # Replace all potentially problematic characters with underscores
+        filename = re.sub(r'[^\w\.-]', '_', filename)
+        
+        # Ensure filename is not empty after sanitization
+        if not filename:
+            filename = 'unnamed_file'
+        
+        return filename
 
 def safe_path_join(base_dir: Union[str, Path], *paths) -> Path:
     """
