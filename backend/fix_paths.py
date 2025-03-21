@@ -39,13 +39,30 @@ def fix_python_path():
         parent_dir = str(backend_dir.parent)
         if parent_dir not in sys.path:
             sys.path.insert(0, parent_dir)
-            print(f"Python path fixed for deployment. sys.path: {sys.path}")
+            print(f"Added parent directory to sys.path: {parent_dir}")
             
         # In production, we don't need to look for 'backend.module'
         # because we're already in the backend directory
         if is_production():
             print("Running in production (Render) environment.")
             print("Import paths should NOT use 'backend.' prefix.")
+            
+            # CRITICAL: Make sure the current directory is in sys.path
+            # This ensures modules like 'utils' can be imported directly
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+                print(f"Added current directory to sys.path: {current_dir}")
+                
+            # Also add utils, api, and other key directories directly
+            utils_dir = os.path.join(current_dir, 'utils')
+            if os.path.exists(utils_dir) and utils_dir not in sys.path:
+                sys.path.insert(0, utils_dir)
+                print(f"Added utils directory to sys.path: {utils_dir}")
+                
+            api_dir = os.path.join(current_dir, 'api')
+            if os.path.exists(api_dir) and api_dir not in sys.path:
+                sys.path.insert(0, api_dir)
+                print(f"Added api directory to sys.path: {api_dir}")
         else:
             print("Running in local development environment from backend directory.")
             print("Import paths should still use 'backend.' prefix in non-entry-point modules.")
@@ -61,10 +78,22 @@ def fix_python_path():
             if root_dir not in sys.path:
                 sys.path.insert(0, root_dir)
     
+    # For debugging: Print the full sys.path
+    print(f"Full Python sys.path: {sys.path}")
+    
     # Verify it worked
     try:
         importlib.util.find_spec('backend')
         print("Successfully imported backend module")
+        
+        if is_production():
+            # In production, also verify we can import utils directly
+            try:
+                importlib.util.find_spec('utils')
+                print("Successfully verified utils module can be imported")
+            except ImportError:
+                print("WARNING: Could not import 'utils' module! Path fixing may not be sufficient.")
+        
         return True
     except ImportError:
         print("WARNING: Could not import 'backend' module after path fix!")

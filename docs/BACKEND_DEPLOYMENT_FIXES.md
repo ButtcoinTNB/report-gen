@@ -348,4 +348,55 @@ It means you need to run the Render import fix script before deploying:
 python backend/scripts/fix_render_imports.py
 ```
 
-This script removes the `backend.` prefix from all imports, making them compatible with the Render deployment environment. 
+This script removes the `backend.` prefix from all imports, making them compatible with the Render deployment environment.
+
+## Critical Path Fix for Render Deployment
+
+We've identified and fixed a critical path issue with Render deployments. After removing the `backend.` prefix from imports, we encountered a `ModuleNotFoundError: No module named 'utils.logger'` error.
+
+### Root Cause
+
+The issue has two parts:
+1. When Render runs the application from `/opt/render/project/src/backend/`, the backend directory is correctly in `sys.path`
+2. However, the Python interpreter still doesn't recognize `utils` as an importable module
+
+### Complete Solution
+
+We've implemented a comprehensive solution:
+
+1. **Enhanced Path Fixing**: Updated `fix_paths.py` to explicitly add the current directory and key subdirectories to `sys.path`:
+   ```python
+   # Make sure current directory is in sys.path
+   if current_dir not in sys.path:
+       sys.path.insert(0, current_dir)
+    
+   # Also add utils, api, and other key directories directly
+   utils_dir = os.path.join(current_dir, 'utils')
+   if os.path.exists(utils_dir) and utils_dir not in sys.path:
+       sys.path.insert(0, utils_dir)
+   ```
+
+2. **Fallback Mechanism**: Enhanced `main.py` with a similar fallback mechanism that runs if `fix_paths.py` can't be imported
+
+3. **Verification Tool**: Added a verification script `verify_imports.py` to test that all modules can be imported correctly:
+   ```bash
+   python backend/scripts/verify_imports.py
+   ```
+
+### Updated Deployment Process
+
+For Render deployment success:
+
+1. First, run the Render import fix script to remove `backend.` prefixes:
+   ```bash
+   python backend/scripts/fix_render_imports.py
+   ```
+
+2. Verify imports are working:
+   ```bash
+   python backend/scripts/verify_imports.py
+   ```
+
+3. Deploy the fixed code to Render
+
+This approach ensures that your application works in both local development and production environments without manual changes. 

@@ -23,11 +23,24 @@ except ImportError:
     parent_dir = os.path.dirname(backend_dir)
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
-        print(f"Python path fixed for deployment. sys.path: {sys.path}")
+        print(f"Added parent directory to sys.path: {parent_dir}")
+    
+    # CRITICAL ADDITION: Make sure current directory is in sys.path
+    # This is essential for Render deployment to find modules like 'utils'
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+        print(f"Added current directory to sys.path: {current_dir}")
+        
+    # Also add utils, api, and other key directories directly
+    for dir_name in ['utils', 'api', 'services', 'models']:
+        dir_path = os.path.join(current_dir, dir_name)
+        if os.path.isdir(dir_path) and dir_path not in sys.path:
+            sys.path.insert(0, dir_path)
+            print(f"Added {dir_name} directory to sys.path: {dir_path}")
     
     # Create any necessary __init__.py files
     for dir_name in ['api', 'utils', 'services', 'models']:
-        dir_path = os.path.join(backend_dir, dir_name)
+        dir_path = os.path.join(current_dir, dir_name)
         if os.path.isdir(dir_path):
             init_file = os.path.join(dir_path, '__init__.py')
             if not os.path.exists(init_file):
