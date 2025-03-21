@@ -105,6 +105,13 @@ class AIAgentLoop:
             f"=== ESEMPIO {i+1} ===\nInput:\n{ex['messages'][0]['content']}\n\nOutput:\n{ex['messages'][1]['content']}\n"
             for i, ex in enumerate(self.reference_examples)
         ])
+
+        # Pre-format feedback section
+        def format_feedback():
+            if not feedback["suggestions"]:
+                return ""
+            suggestions = "\n".join(f"- {s}" for s in feedback["suggestions"])
+            return f"=== FEEDBACK PRECEDENTE ===\n{suggestions}"
         
         for i in range(self.max_loops):
             logger.info(f"Starting iteration {i + 1}/{self.max_loops}")
@@ -120,7 +127,7 @@ class AIAgentLoop:
             === CONTENUTO UTENTE ===
             {user_content}
 
-            {('=== FEEDBACK PRECEDENTE ===\n' + '\n'.join(['- ' + s for s in feedback['suggestions']])) if feedback['suggestions'] else ''}
+            {format_feedback()}
             """
             
             draft = await self._call_model(writer_input, self.writer_prompt)
