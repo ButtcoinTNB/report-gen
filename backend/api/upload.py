@@ -35,23 +35,25 @@ try:
     from models import User, Template
     from utils.supabase_helper import create_supabase_client, supabase_client_context
     from utils.file_utils import secure_filename, safe_path_join
+    from utils.error_handler import api_error_handler, logger, handle_exception
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from config import settings
-    from utils.file_processor import FileProcessor
-    from utils.logger import get_logger
-    from api.schemas import APIResponse, UploadQueryResult
-    from utils.exceptions import (
+    from backend.config import settings
+    from backend.utils.file_processor import FileProcessor
+    from backend.utils.logger import get_logger
+    from backend.api.schemas import APIResponse, UploadQueryResult
+    from backend.utils.exceptions import (
         FileNotFoundError, 
         ProcessingError,
         DatabaseException,
         ValidationException,
         FileProcessingException
     )
-    from utils.auth import get_current_user
-    from models import User, Template
-    from utils.supabase_helper import create_supabase_client, supabase_client_context
-    from utils.file_utils import secure_filename, safe_path_join
+    from backend.utils.auth import get_current_user
+    from backend.models import User, Template
+    from backend.utils.supabase_helper import create_supabase_client, supabase_client_context
+    from backend.utils.file_utils import secure_filename, safe_path_join
+    from backend.utils.error_handler import api_error_handler, logger, handle_exception
 
 # Create logger
 logger = get_logger(__name__)
