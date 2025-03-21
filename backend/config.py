@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     API_RATE_LIMIT: int = int(
         os.getenv("API_RATE_LIMIT", "100")
     )  # Requests per hour
-    NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL", "")
+    NEXT_PUBLIC_API_URL: str = os.getenv("NEXT_PUBLIC_API_URL", "https://report-gen-5wtl.onrender.com")
 
     # AI Model Settings
     DEFAULT_MODEL: str = os.getenv(
@@ -116,47 +116,37 @@ class Settings(BaseSettings):
     MAX_TOKENS: int = int(os.getenv("MAX_TOKENS", "16000"))
     
     # CORS Settings
-    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    
-    # Parse allowed origins from environment
-    @validator('FRONTEND_URL')
-    def parse_frontend_url(cls, v):
-        if not v:
-            logger.warning("FRONTEND_URL is missing")
-            return ["http://localhost:3000"]
-        
-        # Split by comma if it's a comma-separated list
-        urls = v.split(',') if ',' in v else [v]
-        
-        # Add common local development URLs if they're not already included
-        common_local_urls = ["http://localhost:3000", "http://127.0.0.1:3000"]
-        for local_url in common_local_urls:
-            if local_url not in urls:
-                urls.append(local_url)
-                
-        return urls
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://report-gen-liard.vercel.app")
     
     # Additional allowed origins beyond the FRONTEND_URL
     ADDITIONAL_ALLOWED_ORIGINS: List[str] = Field(
-        default=os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").split(",") if os.getenv("ADDITIONAL_ALLOWED_ORIGINS") else [
+        default=[
+            "https://report-gen-liard.vercel.app",  # Vercel frontend
+            "https://report-gen-5wtl.onrender.com",  # Render backend
             "http://localhost:3000",
             "http://127.0.0.1:3000"
         ],
-        description="Additional allowed origins for CORS (comma-separated list in env var)"
+        description="Additional allowed origins for CORS"
     )
     
     # All allowed origins combining FRONTEND_URL and ADDITIONAL_ALLOWED_ORIGINS
     @property
     def allowed_origins(self) -> List[str]:
         """Get all allowed origins for CORS configuration"""
+        # Ensure both production URLs are always included
+        required_origins = [
+            "https://report-gen-liard.vercel.app",  # Vercel frontend
+            "https://report-gen-5wtl.onrender.com"  # Render backend
+        ]
+        
         if os.getenv("CORS_ALLOW_ALL", "").lower() in ("true", "1", "yes"):
             return ["*"]
             
         # Get frontend URLs as a list
         frontend_urls = self.FRONTEND_URL if isinstance(self.FRONTEND_URL, list) else [self.FRONTEND_URL]
         
-        # Combine and deduplicate URLs
-        all_origins = list(set(frontend_urls + self.ADDITIONAL_ALLOWED_ORIGINS))
+        # Combine and deduplicate URLs, ensuring required origins are included
+        all_origins = list(set(frontend_urls + self.ADDITIONAL_ALLOWED_ORIGINS + required_origins))
         
         # Log the allowed origins in development
         if not IS_PRODUCTION:
