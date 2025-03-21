@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from utils.agents_loop import AIAgentLoop
-from utils.docx_generator import generate_docx
+from services.docx_formatter import generate_docx
 
 router = APIRouter()
 agent_loop = AIAgentLoop()
