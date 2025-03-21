@@ -465,4 +465,41 @@ except ImportError:
 werkzeug>=2.3.8,<3.0.0
 ```
 
-This approach ensures that your code will work even if werkzeug isn't available, though it's preferable to use the well-tested werkzeug implementation. 
+This approach ensures that your code will work even if werkzeug isn't available, though it's preferable to use the well-tested werkzeug implementation.
+
+### Missing `api_error_handler` Decorator Import
+
+Another common deployment error is related to the `api_error_handler` decorator import:
+
+```
+NameError: name 'api_error_handler' is not defined
+```
+
+This occurs when API endpoint files use the `@api_error_handler` decorator but fail to import it from the error handler module.
+
+#### How to Fix:
+
+1. Add the `api_error_handler` import to your API module:
+
+```python
+# In api/upload.py, edit.py, etc.
+
+# Use imports with fallbacks for better compatibility
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    # ... other imports ...
+    from utils.error_handler import api_error_handler, logger, handle_exception
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    # ... other imports ...
+    from backend.utils.error_handler import api_error_handler, logger, handle_exception
+```
+
+2. Make sure `api_error_handler` is included in all API files where the decorator is used.
+
+3. Run the import verification script to catch this issue automatically:
+   ```bash
+   python backend/scripts/verify_imports.py
+   ```
+
+The `api_error_handler` is a critical component that standardizes error handling across all API endpoints. Without it properly imported, the decorated endpoints will fail with a `NameError`. 
