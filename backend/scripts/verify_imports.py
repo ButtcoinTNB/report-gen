@@ -29,6 +29,7 @@ COMMON_IMPORTS = {
     'utils.auth': ['get_current_user'],
     'utils.supabase_helper': ['create_supabase_client', 'supabase_client_context'],
     'utils.exceptions': ['ValidationException', 'DatabaseException', 'FileProcessingException'],
+    'utils.error_handler': ['api_error_handler', 'logger', 'handle_exception'],
     'api.schemas': ['APIResponse'],
     'models': ['User']
 }
