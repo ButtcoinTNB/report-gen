@@ -1,6 +1,6 @@
 import React from 'react';
 import { Container, Box, Typography, Paper } from '@mui/material';
-import Navbar from '../components/Navbar';
+import Navbar from '../src/components/Navbar';
 import { ReportStepper } from '../src/components';
 import type { NextPage } from 'next';
 

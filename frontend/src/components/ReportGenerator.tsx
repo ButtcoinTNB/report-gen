@@ -1,188 +1,384 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Box, 
   Button, 
-  TextField, 
   Typography, 
-  Paper, 
+  Paper,
+  CircularProgress, 
+  Alert,
+  Divider,
+  Stepper,
+  Step,
+  StepLabel,
   LinearProgress,
-  Alert
+  keyframes,
+  Fade
 } from '@mui/material';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { 
-  setLoading, 
-  setContent, 
-  setError,
-  setActiveStep,
-  setReportId
-} from '../store/reportSlice';
-import { config } from '../../config';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import DescriptionIcon from '@mui/icons-material/Description';
+import SchemaIcon from '@mui/icons-material/Schema';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import { generateApi } from '../src/services'; // Import the API adapter
+import { Report, ReportCamel, adaptReport } from '../src/types';
+import { logger } from '../src/utils/logger';
 
-const ReportGenerator: React.FC = () => {
-  const dispatch = useAppDispatch();
-  const [additionalInfo, setAdditionalInfo] = useState<string>('');
-  
-  // Get state from Redux
-  const documentIds = useAppSelector(state => state.report.documentIds);
-  const reportId = useAppSelector(state => state.report.reportId);
-  const loading = useAppSelector(state => state.report.loading);
-  const error = useAppSelector(state => state.report.error);
-  const activeStep = useAppSelector(state => state.report.activeStep);
-  
-  const handleGenerateReport = async (): Promise<void> => {
-    if (!documentIds || documentIds.length === 0) {
-      dispatch(setError('No documents uploaded. Please upload documents first.'));
-      return;
-    }
+// Define a subtle pulsing animation for the progress bar
+const pulse = keyframes`
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 1;
+  }
+`;
+
+// Define a shimmer animation for the loading button
+const shimmer = keyframes`
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+`;
+
+interface Props {
+    reportId: string | null;  // UUID
+    onGenerate: (report: ReportCamel) => void;
+    onError: (error: Error) => void;
+}
+
+interface State {
+    isGenerating: boolean;
+    error: Error | null;  // Changed from string to Error
+    documentIds: string[];  // UUIDs
+    additionalInfo: string;
+    templateId?: string;  // UUID
+}
+
+interface ProgressUpdate {
+    step: number;
+    message: string;
+    progress: number;
+}
+
+interface ReportResponse {
+    content: string;
+    error?: boolean;
+}
+
+// Define the processing steps
+const PROCESSING_STEPS = [
+  { label: "Extracting content 📄", value: 30, icon: <DescriptionIcon /> },
+  { label: "Understanding document structure 📊", value: 60, icon: <SchemaIcon /> },
+  { label: "Generating report with AI 🤖", value: 90, icon: <SmartToyIcon /> },
+  { label: "Done! Reviewing your report... ✅", value: 100, icon: <CheckCircleIcon /> }
+];
+
+const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => {
+  const [state, setState] = useState<State>({
+    isGenerating: false,
+    error: null,
+    documentIds: [],
+    additionalInfo: '',
+  });
+  const [currentStep, setCurrentStep] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [processingTime, setProcessingTime] = useState(0);
+  const [showLongProcessingMessage, setShowLongProcessingMessage] = useState(false);
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [displayStep, setDisplayStep] = useState(0);
+  const [stepTransition, setStepTransition] = useState(false);
+  const actualProgressRef = useRef(0);
+
+  // Effect to handle processing time and long processing message
+  useEffect(() => {
+    let timeInterval: NodeJS.Timeout;
     
-    try {
-      dispatch(setLoading({
-        isLoading: true,
-        stage: 'generating',
-        progress: 10,
-        message: 'Generating report from documents...'
-      }));
+    if (state.isGenerating) {
+      // Start the processing time counter
+      let seconds = 0;
+      timeInterval = setInterval(() => {
+        seconds += 1;
+        setProcessingTime(seconds);
+        
+        // Show "still working on it" message after 20 seconds
+        if (seconds >= 20 && currentStep < PROCESSING_STEPS.length - 1) {
+          setShowLongProcessingMessage(true);
+        }
+      }, 1000);
       
-      // Prepare the request payload
-      const payload: {
-        document_ids: string[];
-        additional_info: string;
-        report_id?: string;
-      } = {
-        document_ids: documentIds,
-        additional_info: additionalInfo
+      return () => {
+        clearInterval(timeInterval);
+      };
+    }
+  }, [state.isGenerating, currentStep]);
+
+  // Simulate progress between API progress updates
+  useEffect(() => {
+    let progressInterval: NodeJS.Timeout;
+    
+    if (state.isGenerating) {
+      // Update progress bar smoothly between steps
+      progressInterval = setInterval(() => {
+        setProgress(prevProgress => {
+          const targetProgress = PROCESSING_STEPS[currentStep].value;
+          // Move towards the target progress gradually
+          if (prevProgress < targetProgress) {
+            return Math.min(prevProgress + 1, targetProgress);
+          }
+          return prevProgress;
+        });
+      }, 200);
+      
+      return () => {
+        clearInterval(progressInterval);
+      };
+    }
+  }, [state.isGenerating, currentStep]);
+
+  // Effect to animate the progress counter smoothly
+  useEffect(() => {
+    actualProgressRef.current = progress;
+    
+    const animateProgress = () => {
+      setDisplayProgress(prev => {
+        if (prev < actualProgressRef.current) {
+          return prev + 1;
+        }
+        return prev;
+      });
+    };
+    
+    const progressAnimationInterval = setInterval(animateProgress, 50);
+    
+    return () => {
+      clearInterval(progressAnimationInterval);
+    };
+  }, [progress]);
+
+  // Effect to handle step transitions with animation
+  useEffect(() => {
+    if (currentStep !== displayStep) {
+      setStepTransition(true);
+      const timer = setTimeout(() => {
+        setDisplayStep(currentStep);
+        setStepTransition(false);
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [currentStep, displayStep]);
+
+  const handleGenerateReport = async () => {
+    try {
+      setState(prev => ({ ...prev, isGenerating: true, error: null }));
+      
+      // Start the progress animation - use setProgress with a number value
+      setProgress(10);
+      // First step
+      setCurrentStep(0);
+      
+      // Call the generateReport method from the generateApi adapter
+      const result = await generateApi.generateReport(
+        reportId || '', 
+        { text: state.additionalInfo }
+      );
+      
+      // Success! Create a report object from the result
+      const newReport: Report = {
+        report_id: result.reportId || reportId || '',
+        content: result.message || '', // Use message instead of content
+        file_path: '',
+        title: 'Report Generated from API',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
       
-      // If we have a report ID already, use it
-      if (reportId) {
-        payload.report_id = reportId;
-      }
+      // Convert to camelCase for frontend use
+      const camelReport = adaptReport(newReport);
       
-      // Call the API to generate the report
-      const response = await fetch(`${config.API_URL}/api/generate/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
+      // Update progress to complete
+      setProgress(100);
+      setCurrentStep(PROCESSING_STEPS.length - 1);
       
-      // Update progress
-      dispatch(setLoading({
-        progress: 50,
-        message: 'Processing content...'
-      }));
+      // Call onGenerate callback with camelCase report
+      onGenerate(camelReport);
+    } catch (error) {
+      logger.error("Error generating report:", error);
       
-      const data = await response.json();
-      
-      if (!response.ok || data.status === 'error') {
-        throw new Error(data.message || `Generation failed with status ${response.status}`);
-      }
-      
-      // Process the successful response
-      dispatch(setLoading({
-        progress: 90,
-        message: 'Finalizing report...'
-      }));
-      
-      // Store the report content and ID
-      if (data.data) {
-        // Handle both snake_case and camelCase responses
-        const content = data.data.content || '';
-        const reportIdFromResponse = data.data.report_id || data.data.reportId;
-        
-        // Store report content
-        if (content) {
-          dispatch(setContent(content));
-        }
-        
-        // Store report ID if we got one
-        if (reportIdFromResponse) {
-          dispatch(setReportId(reportIdFromResponse));
-        }
-        
-        // Move to the next step after a brief delay to show completion
-        setTimeout(() => {
-          dispatch(setLoading({
-            isLoading: false,
-            progress: 100,
-            stage: 'complete',
-            message: 'Report generated successfully!'
-          }));
-          
-          dispatch(setActiveStep(activeStep + 1));
-        }, 500);
-      } else {
-        throw new Error('No data received from the server');
-      }
-    } catch (err) {
-      console.error('Generation error:', err);
-      dispatch(setError(err instanceof Error ? err.message : 'Failed to generate report'));
-      dispatch(setLoading({
-        isLoading: false,
-        stage: 'error'
-      }));
+      // Transform to Error if it's a string
+      const errorObj = error instanceof Error ? error : new Error(String(error));
+      setState(prev => ({ ...prev, isGenerating: false, error: errorObj }));
+      onError(errorObj);
     }
   };
-  
+
   return (
-    <Paper elevation={2} sx={{ p: 3, mt: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        Generate Insurance Report
+    <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
+      <Typography variant="h5" gutterBottom>
+        AI Report Generation
       </Typography>
       
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      <Divider sx={{ my: 2 }} />
       
-      {documentIds && documentIds.length > 0 ? (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          {documentIds.length} document{documentIds.length !== 1 ? 's' : ''} ready for processing
-        </Alert>
-      ) : (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          No documents uploaded yet. Please upload documents first.
-        </Alert>
-      )}
-      
-      <TextField
-        fullWidth
-        label="Additional Information"
-        placeholder="Add any additional details or specific instructions for the report generation"
-        multiline
-        rows={4}
-        value={additionalInfo}
-        onChange={(e) => setAdditionalInfo(e.target.value)}
-        disabled={loading.isLoading}
-        margin="normal"
-        variant="outlined"
-      />
-      
-      {loading.isLoading && (
-        <Box sx={{ mt: 2, mb: 2 }}>
-          <Typography variant="body2" gutterBottom>
-            {loading.message || 'Processing...'}
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="body1" paragraph>
+          Click the button below to analyze your uploaded documents and generate a 
+          professional insurance report using AI.
+        </Typography>
+        {!state.isGenerating && (
+          <Typography variant="body2" color="text.secondary">
+            Processing typically takes 10-15 seconds.
           </Typography>
-          <LinearProgress 
-            variant="determinate" 
-            value={loading.progress} 
-            sx={{ height: 8, borderRadius: 4 }}
+        )}
+      </Box>
+      
+      <Button
+        variant="contained"
+        color="secondary"
+        size="large"
+        onClick={handleGenerateReport}
+        disabled={state.isGenerating || !reportId}
+        startIcon={state.isGenerating ? <CircularProgress size={20} color="inherit" /> : <AutoAwesomeIcon />}
+        fullWidth
+        sx={{ 
+          mb: 2,
+          position: 'relative',
+          '&:disabled': {
+            bgcolor: state.isGenerating ? 'secondary.main' : 'action.disabledBackground',
+            color: state.isGenerating ? 'secondary.contrastText' : 'action.disabled',
+            opacity: state.isGenerating ? 0.8 : 0.7
+          },
+          transition: 'all 0.3s ease',
+          overflow: 'hidden',
+          ...(state.isGenerating && {
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)',
+              backgroundSize: '200% 100%',
+              animation: `${shimmer} 2s infinite`,
+              zIndex: 0
+            }
+          })
+        }}
+      >
+        {state.isGenerating ? 'Generating Report...' : 'Generate AI Report'}
+        {state.isGenerating && (
+          <Box 
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(0,0,0,0.05)',
+              borderRadius: 'inherit'
+            }}
           />
+        )}
+      </Button>
+      
+      {state.isGenerating && (
+        <Box sx={{ mt: 3 }}>
+          <Stepper activeStep={displayStep} alternativeLabel sx={{ mb: 3 }}>
+            {PROCESSING_STEPS.map((step, index) => (
+              <Step key={index} completed={index < displayStep}>
+                <StepLabel StepIconProps={{ 
+                  icon: step.icon || index + 1,
+                  sx: { 
+                    transition: 'transform 0.3s ease, color 0.3s ease',
+                    ...(displayStep === index && {
+                      transform: 'scale(1.2)',
+                      color: 'secondary.main'
+                    })
+                  }
+                }}>
+                  {step.label.split(' ')[0]}
+                </StepLabel>
+              </Step>
+            ))}
+          </Stepper>
+          
+          <Fade in={!stepTransition} timeout={400}>
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Typography variant="body2" sx={{ 
+                  flexGrow: 1, 
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1
+                }}>
+                  <Box component="span" sx={{ 
+                    display: 'inline-flex',
+                    bgcolor: 'secondary.light',
+                    color: 'secondary.contrastText',
+                    p: 0.5,
+                    borderRadius: 1,
+                    fontSize: '1rem'
+                  }}>
+                    {PROCESSING_STEPS[displayStep].icon}
+                  </Box>
+                  {PROCESSING_STEPS[displayStep].label}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{
+                  minWidth: '36px',
+                  textAlign: 'right'
+                }}>
+                  {displayProgress}%
+                </Typography>
+              </Box>
+              
+              <LinearProgress 
+                variant="determinate" 
+                value={progress} 
+                sx={{ 
+                  height: 8, 
+                  borderRadius: 4, 
+                  mb: 2,
+                  animation: `${pulse} 1.5s ease-in-out infinite`,
+                  '& .MuiLinearProgress-bar': {
+                    transition: 'transform 0.3s ease'
+                  } 
+                }} 
+                color="secondary"
+              />
+              
+              <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
+                {processingTime < 20 ? (
+                  `Processing time: ${processingTime} seconds (typically takes 10-15 seconds)`
+                ) : showLongProcessingMessage ? (
+                  <Fade in={true}>
+                    <Box sx={{ fontWeight: 'medium', color: 'warning.main' }}>
+                      Still working on it... AI is carefully reviewing your documents.
+                    </Box>
+                  </Fade>
+                ) : (
+                  `Processing time: ${processingTime} seconds`
+                )}
+              </Typography>
+            </Box>
+          </Fade>
         </Box>
       )}
       
-      <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handleGenerateReport}
-          disabled={loading.isLoading || !documentIds || documentIds.length === 0}
-        >
-          {loading.isLoading ? 'Generating...' : 'Generate Report'}
-        </Button>
-      </Box>
+      {state.error && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {state.error.message}
+        </Alert>
+      )}
     </Paper>
   );
 };

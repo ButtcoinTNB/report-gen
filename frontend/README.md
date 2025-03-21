@@ -1,6 +1,6 @@
 # Insurance Report Generator - Frontend
 
-This is the frontend application for the Insurance Report Generator, built with React and Redux.
+This is the frontend application for the Insurance Report Generator, built with React, Redux, and TypeScript.
 
 ## Application Structure
 
@@ -11,35 +11,56 @@ The application follows a step-by-step process for generating insurance reports:
 3. **Review & Edit** - Users can review, edit, and refine the report
 4. **Download Report** - The final report can be downloaded in various formats
 
+## Directory Structure
+
+The frontend follows the standard Next.js with TypeScript project structure:
+
+```
+frontend/
+├── pages/           # Next.js pages and API routes
+│   └── api/         # API proxy routes
+├── src/             # Source code
+│   ├── components/  # React components
+│   ├── services/    # API services
+│   ├── store/       # Redux store
+│   ├── types/       # TypeScript types
+│   └── utils/       # Utility functions
+├── public/          # Static assets
+├── styles/          # Global styles
+└── config.ts        # Application configuration
+```
+
 ## Components
 
 ### Main Components
 
-- `ReportStepper.js` - Manages the step-by-step process and coordinates all other components
-- `FileUploader.js` - Handles document uploads with drag-and-drop and progress tracking
-- `ReportGenerator.js` - Manages the report generation process with real API calls
-- `ReportEditor.js` - Allows users to edit report content and request AI refinements
-- `ReportDownloader.js` - Provides options for previewing and downloading the final report
+- `ReportStepper.tsx` - Manages the step-by-step process and coordinates all other components
+- `FileUploader.tsx` - Handles document uploads with drag-and-drop and progress tracking
+- `ReportGenerator.tsx` - Manages the report generation process with real API calls
+- `ReportEditor.tsx` - Allows users to edit report content and request AI refinements
+- `ReportDownloader.tsx` - Provides options for previewing and downloading the final report
 
 ### Redux State Management
 
-The application uses Redux for state management. The main state is defined in `reportSlice.js` and includes:
+The application uses Redux for state management. The main state is defined in `reportSlice.ts` and includes:
 
-```javascript
-{
-  activeStep: 0,                 // Current step in the process
-  reportId: null,                // ID of the generated report
-  loading: {                     // Loading state information
-    isLoading: false,
-    progress: 0,
-    stage: 'initial',
-    message: ''
-  },
-  documentIds: [],               // IDs of uploaded documents
-  content: null,                 // Content of the generated report
-  previewUrl: null,              // URL to preview the report
-  additionalInfo: '',            // Additional information for report generation
-  error: null                    // Error information
+```typescript
+interface ReportState {
+  activeStep: number;           // Current step in the process
+  reportId: string | null;      // ID of the generated report
+  loading: LoadingState;        // Loading state information
+  documentIds: string[];        // IDs of uploaded documents
+  content: string | null;       // Content of the generated report
+  previewUrl: string | null;    // URL to preview the report
+  additionalInfo: string;       // Additional information for report generation
+  error: string | null;         // Error information
+}
+
+interface LoadingState {
+  isLoading: boolean;
+  progress: number;
+  stage: 'initial' | 'uploading' | 'analyzing' | 'generating' | 'refining' | 'preview' | 'downloading' | 'formatting' | 'saving' | 'complete' | 'error';
+  message: string;
 }
 ```
 
@@ -65,7 +86,7 @@ The frontend integrates with the backend API for various operations:
 
 2. Start the development server:
    ```
-   npm start
+   npm run dev
    ```
 
 3. Build for production:
@@ -77,6 +98,7 @@ The frontend integrates with the backend API for various operations:
 
 - React - UI library
 - Redux Toolkit - State management
+- TypeScript - Type safety
 - Material-UI - Component library
 - React Dropzone - For file upload functionality
-- Axios - For API requests
+- Next.js - React framework

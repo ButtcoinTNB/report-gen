@@ -14,11 +14,13 @@ An advanced web application for generating, editing, and managing insurance repo
 - **Multiple Export Formats**: Download reports in various formats (PDF, DOCX, TXT)
 - **Real-time Updates**: WebSocket integration for progress tracking
 - **Responsive UI**: Modern interface that works on desktop and mobile
+- **Type Safety**: Fully TypeScript codebase with comprehensive type definitions
 
 ## 📋 Prerequisites
 
 - Python 3.9+
 - Node.js 16+
+- TypeScript 4.9+
 - PostgreSQL 13+ (or Supabase account)
 - OpenAI API key or compatible AI service
 
@@ -100,7 +102,7 @@ For detailed instructions on deploying the frontend to Vercel, see [Vercel Deplo
 
 Before deploying to production, go through the [Production Checklist](docs/PRODUCTION_CHECKLIST.md) to ensure your application is properly configured.
 
-## �� Configuration
+## 🔑 Configuration
 
 ### Backend Configuration
 
@@ -162,7 +164,7 @@ For detailed API documentation, see [API_DOCUMENTATION.md](backend/API_DOCUMENTA
 
 The application follows a client-server architecture:
 
-- **Frontend**: Next.js React application
+- **Frontend**: Next.js React application with TypeScript
 - **Backend**: FastAPI Python application
 - **Database**: PostgreSQL (via Supabase)
 - **File Storage**: Local filesystem or Supabase Storage
@@ -177,10 +179,13 @@ The application follows a client-server architecture:
 
 ### Frontend Components:
 
-- **Upload Module**: File upload and chunking
-- **Editor Module**: Report viewing and editing
-- **Export Module**: Report formatting and downloading
-- **Notification System**: Real-time updates via WebSockets
+- **Pages**: Next.js pages for routing and layout
+- **Components**: Reusable TypeScript React components 
+- **Services**: API client services for backend communication
+- **Store**: Redux state management with TypeScript types
+- **Types**: TypeScript interfaces and type definitions
+- **Utils**: Utility functions and helpers
+- **Styles**: Global and component-specific styling
 
 ## 🤝 Contributing
 
@@ -189,6 +194,8 @@ The application follows a client-server architecture:
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+For development guidelines, see [DEV_GUIDELINES.md](docs/DEV_GUIDELINES.md) and [FRONTEND_TYPESCRIPT_FIX.md](docs/FRONTEND_TYPESCRIPT_FIX.md).
 
 ## 📄 License
 

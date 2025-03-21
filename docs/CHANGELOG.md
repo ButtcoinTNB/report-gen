@@ -36,4 +36,18 @@
   - `GenerateReportResponse` model
   - `GenerateContentResponse` model
   - `UpdateReportResponse` model
-  - `AIRefineResponse` model 
+  - `AIRefineResponse` model
+
+### Changed
+- Fully migrated frontend to TypeScript-only codebase:
+  - Removed JavaScript versions of components in favor of TypeScript versions
+  - Consolidated components into `frontend/src/components` directory following Next.js conventions
+  - Updated import paths throughout the application
+  - Added comprehensive TypeScript types for components, API requests, and responses
+- Updated documentation to reflect TypeScript-only approach:
+  - Added TypeScript development guidelines
+  - Updated README with clearer structure information
+  - Added dedicated `FRONTEND_TYPESCRIPT_FIX.md` documentation
+- Improved directory structure clarity:
+  - Standardized component imports to use `src/components` path
+  - Added clear documentation on project structure 

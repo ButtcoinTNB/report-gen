@@ -1,14 +1,9 @@
 import React from 'react';
 import { Box, Typography, Button, TextField, Paper } from '@mui/material';
-import { ReportPreview as ReportPreviewType, ReportPreviewCamel } from '../types';
-import { createHybridReportPreview } from '../utils/adapters';
+import { ReportPreview as ReportPreviewType } from '../src/types';
 
-/**
- * Props for the ReportPreview component
- * Uses the camelCase version of ReportPreview for type safety
- */
 interface ReportPreviewProps {
-  preview: ReportPreviewCamel;
+  preview: ReportPreviewType;
   onRefine: () => void;
   onDownload: () => void;
   onBack: () => void;
@@ -16,15 +11,6 @@ interface ReportPreviewProps {
   onInstructionsChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 }
 
-/**
- * Component to display a preview of the generated report
- * @param preview - The report preview data in camelCase format
- * @param onRefine - Function to trigger report refinement
- * @param onDownload - Function to download the report
- * @param onBack - Function to go back to the previous step
- * @param instructions - Refinement instructions text
- * @param onInstructionsChange - Handler for instruction changes
- */
 const ReportPreview: React.FC<ReportPreviewProps> = ({
   preview,
   onRefine,
@@ -33,10 +19,6 @@ const ReportPreview: React.FC<ReportPreviewProps> = ({
   instructions,
   onInstructionsChange
 }) => {
-  // Convert the camelCase preview to a hybrid format that includes both formats
-  // This ensures compatibility with older code that might expect snake_case
-  const hybridPreview = createHybridReportPreview(preview);
-
   return (
     <Paper elevation={3} sx={{ p: 3 }}>
       <Typography variant="h6" gutterBottom>

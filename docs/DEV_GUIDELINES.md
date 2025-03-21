@@ -71,6 +71,58 @@ This document provides guidelines, best practices, and troubleshooting tips for 
    ```
    The frontend will be available at http://localhost:3000
 
+## TypeScript Development Guidelines
+
+### TypeScript Version
+
+The project uses TypeScript 4.9+. Ensure your IDE/editor has TypeScript support installed.
+
+### Component Structure
+
+1. All React components should be written in TypeScript (`.tsx` files)
+2. Components should be located in the `frontend/src/components` directory
+3. Each component should have its props interface defined:
+
+```tsx
+interface ButtonProps {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'secondary' | 'outline';
+}
+
+const Button: React.FC<ButtonProps> = ({ label, onClick, disabled = false, variant = 'primary' }) => {
+  // Component implementation
+};
+```
+
+### Type Safety
+
+1. Avoid using `any` type whenever possible
+2. Define interfaces for all API responses and requests
+3. Use TypeScript's utility types when appropriate (`Partial<T>`, `Pick<T>`, etc.)
+4. Enable strict type checking in `tsconfig.json`
+
+### Importing Components
+
+Always import components from the `src/components` directory:
+
+```tsx
+// Correct
+import { Button } from '../src/components';
+import TextField from '../src/components/TextField';
+
+// Incorrect - Do not use these patterns
+import { Button } from '../components';
+import TextField from 'frontend/components/TextField';
+```
+
+### Type Organization
+
+1. Shared types should be in the `frontend/src/types` directory
+2. Component-specific types can be defined in the component file
+3. Export/import types as needed to maintain DRY principles
+
 ## Code Style and Standards
 
 ### Backend (Python)
