@@ -277,9 +277,26 @@ Our `render_app.py` entry point:
 3. Creates any missing `__init__.py` files
 4. Verifies that key modules can be imported
 5. Only imports the main app after paths are fixed
+6. **NEW**: Dynamically creates missing critical modules if they don't exist
 
 This approach guarantees that all imports will work correctly regardless of Python's import behavior.
 
 ### No Extra Branches Needed
 
-This solution works directly from your `main` branch - no need to create a separate deployment branch. You can develop and deploy from the same codebase without any special preparation steps. 
+This solution works directly from your `main` branch - no need to create a separate deployment branch. You can develop and deploy from the same codebase without any special preparation steps.
+
+### Recent Fixes
+
+We've made the following improvements to the deployment process:
+
+1. **Added Missing Logger Module**: Created a proper `utils/logger.py` module with the `get_logger` function
+2. **Made render_app.py Resilient**: Enhanced it to continue even if certain modules are missing by creating them dynamically
+3. **Improved Path Resolution**: Ensured all critical directories are properly added to Python's path
+
+### Troubleshooting Deployment
+
+If you encounter any issues with the updated deployment process:
+
+1. Check the Render logs for specific import errors
+2. Verify that the `utils/logger.py` module exists and contains the `get_logger` function
+3. Make sure your start command is correctly configured to use `render_app:app` 
