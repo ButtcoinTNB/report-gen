@@ -42,6 +42,23 @@ class NotFoundException(BaseAPIException):
         )
 
 
+class FileNotFoundError(NotFoundException):
+    """404 File Not Found - Specialized version of NotFoundException"""
+    def __init__(self, message: str = "File not found", details: Any = None):
+        super().__init__(message=message, details=details)
+
+
+class ProcessingError(BaseAPIException):
+    """422 Processing Error"""
+    def __init__(self, message: str = "Error processing request", details: Any = None):
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            code="PROCESSING_ERROR",
+            message=message,
+            details=details
+        )
+
+
 class ValidationException(BaseAPIException):
     """422 Validation Error"""
     def __init__(self, message: str = "Validation error", details: Any = None):
