@@ -9,14 +9,23 @@ export default async function handler(
   req: NextApiRequest, 
   res: NextApiResponse
 ) {
-  // Handle OPTIONS requests for CORS preflight
+  // Set CORS headers for all responses
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': req.headers.origin || '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Max-Age': '86400',
+    'Access-Control-Expose-Headers': 'Content-Disposition'
+  };
+
+  // Set CORS headers for all responses
+  Object.entries(corsHeaders).forEach(([key, value]) => {
+    res.setHeader(key, value);
+  });
+
+  // Handle OPTIONS request (preflight)
   if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
     return res.status(200).end();
   }
 
@@ -30,47 +39,25 @@ export default async function handler(
     const backendUrl = `${config.API_URL}/api/upload/documents`;
     console.log(`Forwarding upload request to: ${backendUrl}`);
     
-    // Prepare headers to forward (ensuring they're string values)
-    const forwardHeaders: Record<string, string> = {};
+    // Prepare headers to forward
+    const forwardHeaders: Record<string, string> = {
+      ...corsHeaders,
+      'Origin': req.headers.origin || '',
+      'Content-Type': req.headers['content-type'] || 'application/json'
+    };
     
-    // Only include headers we want to forward and convert arrays to strings
-    Object.entries(req.headers).forEach(([key, value]) => {
-      // Skip headers we don't want to forward
-      if (!['host', 'connection'].includes(key.toLowerCase()) && value !== undefined) {
-        // Convert array headers to comma-separated strings
-        forwardHeaders[key] = Array.isArray(value) ? value.join(', ') : value;
-      }
-    });
-    
-    // Forward the request with the same body and properly formatted headers
+    // Forward the request
     const response = await fetch(backendUrl, {
       method: 'POST',
       body: req.body,
-      headers: {
-        ...forwardHeaders,
-        'Origin': req.headers.origin || '',
-      },
+      headers: forwardHeaders,
       credentials: 'include'
     });
-
-    // Copy CORS headers from backend response
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': req.headers.origin || '*',
-      'Access-Control-Allow-Credentials': 'true',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': '*',
-      'Access-Control-Expose-Headers': 'Content-Disposition'
-    };
 
     // Get the response data
     const data = await response.json();
 
-    // Set CORS headers and return the response
-    Object.entries(corsHeaders).forEach(([key, value]) => {
-      res.setHeader(key, value);
-    });
-
-    // Return the response from the backend
+    // Return the response with appropriate status code
     return res.status(response.status).json(data);
   } catch (error) {
     console.error('Error forwarding upload request:', error instanceof Error ? error.message : String(error));

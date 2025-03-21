@@ -81,13 +81,36 @@ app.add_middleware(
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
-    max_age=86400,
+    allow_headers=["*"],  # This is safe since we validate the origin
+    expose_headers=["Content-Disposition", "Content-Type"],
+    max_age=86400,  # 24 hours
 )
 
 # Add custom middleware
 app.middleware("http")(add_process_time_header)
+
+# Add error handling middleware to ensure CORS headers are set even on errors
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        # Ensure CORS headers are set even on errors
+        if request.headers.get("origin") in settings.allowed_origins:
+            headers = {
+                "Access-Control-Allow-Origin": request.headers["origin"],
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Expose-Headers": "Content-Disposition, Content-Type",
+            }
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(e)},
+                headers=headers
+            )
+        raise  # Re-raise the exception if origin is not allowed
 
 # Add exception handlers - similar to those in backend/main.py
 @app.exception_handler(utils.exceptions.BaseAPIException)

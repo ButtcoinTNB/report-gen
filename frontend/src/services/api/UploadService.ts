@@ -128,6 +128,30 @@ export interface CompletedUploadResponseCamel {
   };
 }
 
+// Add allowed MIME types constant
+const ALLOWED_MIME_TYPES = [
+  // Documents
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/rtf',
+  'application/vnd.oasis.opendocument.text',
+  'text/plain',
+  'text/csv',
+  'text/markdown',
+  'text/html',
+  // Spreadsheets
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  // Images
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/bmp',
+  'image/webp',
+  'image/tiff'
+];
+
 /**
  * Service for handling file uploads with support for large files via chunking
  */
@@ -136,14 +160,8 @@ export class UploadService extends ApiClient {
    * Create a new Upload Service
    */
   constructor() {
-    // Get the base URL for the upload API
-    let baseUrl: string;
-    
-    if (config.endpoints?.upload) {
-      baseUrl = config.endpoints.upload;
-    } else {
-      baseUrl = `${config.API_URL}/api/upload`;
-    }
+    // Get the base URL for the upload API - use the Next.js API route
+    let baseUrl = '/api/upload';
     
     super({
       baseUrl,
@@ -151,6 +169,17 @@ export class UploadService extends ApiClient {
       defaultRetries: 3,
       defaultRetryDelay: 2000,
     });
+  }
+
+  /**
+   * Validate file type
+   * @param file The file to validate
+   * @throws Error if file type is not allowed
+   */
+  private validateFileType(file: File): void {
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      throw new Error(`File type ${file.type} is not allowed. Allowed types: ${ALLOWED_MIME_TYPES.join(', ')}`);
+    }
   }
 
   /**
@@ -197,6 +226,9 @@ export class UploadService extends ApiClient {
     onProgress?: (progress: number) => void
   ): Promise<ReportResponseCamel> {
     try {
+      // Validate file type
+      this.validateFileType(file);
+      
       const formData = new FormData();
       formData.append('files', file);
       

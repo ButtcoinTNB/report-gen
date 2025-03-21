@@ -138,14 +138,11 @@ class Settings(BaseSettings):
     
     # Additional allowed origins beyond the FRONTEND_URL
     ADDITIONAL_ALLOWED_ORIGINS: List[str] = Field(
-        default=[
-            "https://report-gen-liard.vercel.app",
-            "https://report-gen.vercel.app",
-            "https://report-gen-5wtl.onrender.com",
+        default=os.getenv("ADDITIONAL_ALLOWED_ORIGINS", "").split(",") if os.getenv("ADDITIONAL_ALLOWED_ORIGINS") else [
             "http://localhost:3000",
             "http://127.0.0.1:3000"
         ],
-        description="Additional allowed origins for CORS"
+        description="Additional allowed origins for CORS (comma-separated list in env var)"
     )
     
     # All allowed origins combining FRONTEND_URL and ADDITIONAL_ALLOWED_ORIGINS
