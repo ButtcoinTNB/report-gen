@@ -59,6 +59,9 @@ generated_reports/*
 !requirements.txt
 !templates/*.docx
 !reference_reports/template.docx
+!backend/data/brand_guide.txt
+!backend/data/prompts.json
+!backend/data/reference_reports.jsonl
 
 # Temporary files
 tmp/

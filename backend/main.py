@@ -52,7 +52,7 @@ except ImportError:
                     print(f"Failed to create {init_file}: {str(e)}")
 
 # Now the rest of the imports should work correctly, regardless of how the app is started
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, HTTPException, RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -75,6 +75,7 @@ from utils.error_handler import api_exception_handler
 from utils.openapi import custom_openapi
 from api.openapi_examples import ENDPOINT_EXAMPLES
 from utils.middleware import setup_middleware
+from api.agent_loop import router as agent_loop_router  # Add this import
 
 # Debug imports
 import traceback
@@ -101,9 +102,9 @@ else:
     logger.info("✅ All required environment variables are properly configured.")
 
 app = FastAPI(
-    title="Scrittore Automatico di Perizie",
-    description="API for generating structured insurance claim reports",
-    version="0.1.0",
+    title="Insurance Report Generator API",
+    description="API for generating insurance reports using AI agents",
+    version="2.0.0"
 )
 
 # Add a function to clean up old reports and uploads
@@ -306,6 +307,7 @@ app.include_router(generate.router, prefix="/api/generate", tags=["Generate"])
 app.include_router(format.router, prefix="/api/format", tags=["Format"])
 app.include_router(edit.router, prefix="/api/edit", tags=["Edit"])
 app.include_router(download.router, prefix="/api/download", tags=["Download"])
+app.include_router(agent_loop_router, prefix="/api/v2", tags=["AI Agent Loop"])
 
 # Apply custom OpenAPI documentation
 app.openapi = lambda: custom_openapi(app, ENDPOINT_EXAMPLES)

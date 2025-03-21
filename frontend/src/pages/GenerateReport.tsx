@@ -2,8 +2,9 @@ import { useState, useCallback, useEffect, ChangeEvent, FormEvent } from 'react'
 import { Container, Box, Typography, Paper, Button, TextField, Divider, Alert } from '@mui/material';
 import DocumentUpload from '../components/DocumentUpload';
 import AdditionalInfo from '../components/AdditionalInfo';
-import ReportPreview from '../components/ReportPreview';
 import LoadingIndicator from '../components/LoadingIndicator';
+import { AgentLoopRunner } from '../components/AgentLoopRunner';
+import { DocxPreviewEditor } from '../components/DocxPreviewEditor';
 import { downloadApi, generateApi, editApi } from '../services';
 import { 
   AnalysisResponse, 
@@ -212,14 +213,7 @@ const GenerateReport: React.FC = () => {
         
         return (
           <Box sx={{ mt: 4 }}>
-            <ReportPreview
-              preview={reportPreview}
-              onRefine={handleRefineReport}
-              onDownload={handleDownload}
-              onBack={handleBack}
-              instructions={instructions}
-              onInstructionsChange={handleInstructionsChange}
-            />
+            <AgentLoopRunner />
           </Box>
         );
       
@@ -248,25 +242,27 @@ const GenerateReport: React.FC = () => {
         </Typography>
         
         <Typography variant="body1" paragraph align="center" sx={{ mb: 6 }}>
-          Carica i tuoi documenti e genera un report dettagliato
+          {step === 'upload' && 'Carica i documenti per iniziare la generazione del report.'}
+          {step === 'additional-info' && 'Fornisci informazioni aggiuntive per migliorare il report.'}
+          {step === 'preview' && 'Anteprima del report generato dall\'AI.'}
         </Typography>
-        
+
         {error && (
-          <Alert severity="error" sx={{ mb: 3 }}>
+          <Alert severity="error" sx={{ mb: 4 }}>
             {error}
           </Alert>
         )}
-        
-        {isLoading && (
-          <LoadingIndicator
+
+        {isLoading ? (
+          <LoadingIndicator 
             loadingState={{
               isLoading: true,
               stage: step === 'upload' ? 'uploading' : step === 'additional-info' ? 'analyzing' : 'generating'
             }}
           />
+        ) : (
+          renderStep()
         )}
-        
-        {renderStep()}
       </Box>
     </Container>
   );
