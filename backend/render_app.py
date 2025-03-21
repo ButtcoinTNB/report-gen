@@ -81,6 +81,67 @@ try:
         sys.modules['utils.logger'].get_logger = LoggerModule.get_logger
         print("[RENDER] Created dynamic utils.logger module with get_logger function")
     
+    # Now also try to import utils.exceptions and ensure required exceptions exist
+    try:
+        import utils.exceptions
+        print("[RENDER] Successfully imported utils.exceptions module")
+        
+        # Check if required exceptions exist and add them if not
+        missing_exceptions = []
+        
+        # Check for FileNotFoundError
+        if not hasattr(utils.exceptions, 'FileNotFoundError'):
+            missing_exceptions.append('FileNotFoundError')
+            
+        # Check for ProcessingError    
+        if not hasattr(utils.exceptions, 'ProcessingError'):
+            missing_exceptions.append('ProcessingError')
+            
+        if missing_exceptions:
+            print(f"[RENDER] Warning: Missing exceptions in utils.exceptions: {missing_exceptions}")
+            print("[RENDER] Creating missing exception classes dynamically...")
+            
+            from fastapi import HTTPException, status
+            
+            # Add missing exception classes
+            if 'FileNotFoundError' in missing_exceptions:
+                # Create FileNotFoundError as a subclass of NotFoundException if it exists, otherwise HTTPException
+                if hasattr(utils.exceptions, 'NotFoundException'):
+                    class FileNotFoundError(utils.exceptions.NotFoundException):
+                        def __init__(self, message="File not found", details=None):
+                            super().__init__(message=message, details=details)
+                else:
+                    class FileNotFoundError(HTTPException):
+                        def __init__(self, message="File not found", details=None):
+                            super().__init__(status_code=404, detail={"message": message, "details": details})
+                
+                # Add to the module
+                utils.exceptions.FileNotFoundError = FileNotFoundError
+                print("[RENDER] Created FileNotFoundError exception class")
+                
+            if 'ProcessingError' in missing_exceptions:
+                # Create ProcessingError as a subclass of BaseAPIException if it exists, otherwise HTTPException
+                if hasattr(utils.exceptions, 'BaseAPIException'):
+                    class ProcessingError(utils.exceptions.BaseAPIException):
+                        def __init__(self, message="Error processing request", details=None):
+                            super().__init__(
+                                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                code="PROCESSING_ERROR",
+                                message=message,
+                                details=details
+                            )
+                else:
+                    class ProcessingError(HTTPException):
+                        def __init__(self, message="Error processing request", details=None):
+                            super().__init__(status_code=422, detail={"message": message, "details": details})
+                
+                # Add to the module
+                utils.exceptions.ProcessingError = ProcessingError
+                print("[RENDER] Created ProcessingError exception class")
+                
+    except ImportError as e:
+        print(f"[RENDER] Warning: {str(e)}. Exceptions module not available.")
+    
 except ImportError as e:
     print(f"[RENDER] ERROR: {str(e)}")
     # Raise a clear error
