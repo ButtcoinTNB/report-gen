@@ -304,6 +304,18 @@ If you encounter any issues with the updated deployment process:
 2. Verify that all necessary Python modules are installed in requirements.txt
 3. Make sure your start command is correctly configured to use `render_main:app` 
 
+### Common Import Errors
+
+#### Missing Pydantic BaseModel
+
+If you see an error like `NameError: name 'BaseModel' is not defined`, ensure all API modules properly import BaseModel:
+
+```python
+from pydantic import BaseModel, UUID4  # Add this at the top of API modules
+```
+
+This is particularly important for any module that defines request or response models. All API modules should include this import when using Pydantic models.
+
 ### Comprehensive Render Deployment Fixes
 
 We've implemented multiple fixes to ensure reliable deployments on Render:
