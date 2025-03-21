@@ -399,4 +399,70 @@ For Render deployment success:
 
 3. Deploy the fixed code to Render
 
-This approach ensures that your application works in both local development and production environments without manual changes. 
+This approach ensures that your application works in both local development and production environments without manual changes.
+
+## Missing Utility Functions
+
+### Missing `secure_filename` Function
+
+One common deployment error is related to the `secure_filename` function import:
+
+```
+ImportError: cannot import name 'secure_filename' from 'utils.file_utils'
+```
+
+This occurs because the `upload.py` module expects to import `secure_filename` from `utils.file_utils`, but this function might not be defined there.
+
+#### How to Fix:
+
+1. Add the `secure_filename` function to your `utils/file_utils.py` module:
+
+```python
+# In utils/file_utils.py
+
+# Try to import from werkzeug first
+try:
+    from werkzeug.utils import secure_filename
+except ImportError:
+    # Fallback implementation if werkzeug is not available
+    def secure_filename(filename: str) -> str:
+        """
+        Pass a filename and return a secure version of it.
+        
+        This function works similar to the werkzeug.utils.secure_filename function.
+        It returns a filename that can safely be stored on a regular file system and passed
+        to os.path.join() without risking directory traversal attacks.
+        
+        Args:
+            filename: The filename to secure
+            
+        Returns:
+            A sanitized filename
+        """
+        import re
+        if not filename:
+            return 'unnamed_file'
+            
+        # Remove non-ASCII characters
+        filename = ''.join(c for c in filename if c.isalnum() or c in '._- ')
+        
+        # Remove leading/trailing spaces and dots
+        filename = filename.strip('. ')
+        
+        # Replace all potentially problematic characters with underscores
+        filename = re.sub(r'[^\w\.-]', '_', filename)
+        
+        # Ensure filename is not empty after sanitization
+        if not filename:
+            filename = 'unnamed_file'
+        
+        return filename
+```
+
+2. Make sure `werkzeug` is in your `requirements.txt`:
+
+```
+werkzeug>=2.3.8,<3.0.0
+```
+
+This approach ensures that your code will work even if werkzeug isn't available, though it's preferable to use the well-tested werkzeug implementation. 
