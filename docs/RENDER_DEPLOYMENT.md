@@ -533,4 +533,49 @@ To integrate these tools with your CI/CD pipeline:
        git commit -m "Fix: Apply import standardization" || echo "No changes to commit"
    ```
 
-This ensures that your deployment always uses properly structured imports that work in all environments. 
+This ensures that your deployment always uses properly structured imports that work in all environments.
+
+## GitHub Actions Workflows
+
+We've implemented comprehensive GitHub Actions workflows to automate import verification and pre-deployment preparation:
+
+### Import Verification Workflow
+
+The `.github/workflows/verify-imports.yml` workflow automatically checks for import issues on pull requests and pushes to main:
+
+- **Triggers**: Pull requests to main/develop, pushes to main/develop, or manual trigger
+- **Actions**:
+  - Verifies all imports are correctly structured
+  - Posts results as PR comments
+  - Automatically fixes import issues on PRs
+  - Blocks merges to main if import verification fails
+
+This workflow helps catch import-related issues early in development, before they cause problems in production.
+
+### Render Pre-Deployment Workflow
+
+The `.github/workflows/render-predeploy.yml` workflow prepares the codebase for deployment to Render:
+
+- **Triggers**: Pushes to main branch or manual trigger before deployment
+- **Actions**:
+  - Runs the full `prepare_for_production` script
+  - Automatically commits any necessary fixes
+  - Generates a deployment status report
+  - Can integrate with Render's deploy hooks
+
+To set up automatic deployment to Render when the pre-deployment checks pass:
+
+1. In your Render dashboard, go to your service settings
+2. Navigate to the "Deploy Hooks" section
+3. Create a new deploy hook and copy the URL
+4. In your GitHub repository, go to Settings > Secrets > Actions
+5. Add a new secret named `RENDER_DEPLOY_HOOK_URL` with the copied URL
+6. Uncomment the webhook line in the workflow file
+
+With this setup, your deployment process will:
+1. Automatically verify and fix imports
+2. Ensure all necessary files are present
+3. Only deploy when the codebase is properly prepared
+4. Provide clear feedback when issues are found
+
+This automation ensures reliable deployments without manual fixes, reducing the risk of production errors. 

@@ -1,0 +1,132 @@
+name: Verify Imports
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**/*.py'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**/*.py'
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  verify-imports:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        
+    - name: Check imports with dry run
+      run: |
+        python -m backend.scripts.prepare_for_production --check-only --verbose
+      
+    - name: Verify all imports are correctly structured
+      id: verify_imports
+      run: |
+        python -m backend.scripts.verify_imports --verbose
+      continue-on-error: true
+    
+    - name: Create or update comment with verification results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const { issue, repo } = context;
+          
+          const commentBody = `## Import Verification Results
+          
+          ${process.env.VERIFY_IMPORTS_OUTPUT || 'Import verification completed, see workflow logs for details.'}
+          
+          Please run the following locally to fix any import issues:
+          
+          \`\`\`bash
+          python -m backend.scripts.prepare_for_production
+          \`\`\`
+          `;
+          
+          // Find existing bot comments
+          const comments = await github.rest.issues.listComments({
+            ...repo,
+            issue_number: issue.number,
+          });
+          
+          const botComment = comments.data.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('Import Verification Results');
+          });
+          
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              ...repo,
+              comment_id: botComment.id,
+              body: commentBody
+            });
+          } else {
+            await github.rest.issues.createComment({
+              ...repo,
+              issue_number: issue.number,
+              body: commentBody
+            });
+          }
+      
+    - name: Check if failures should block
+      if: steps.verify_imports.outcome == 'failure' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        echo "Import verification failed on main branch push. Failing the workflow."
+        exit 1
+
+  auto-fix-imports:
+    needs: verify-imports
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.head_ref }}
+        
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        
+    - name: Fix imports automatically
+      run: |
+        python -m backend.scripts.prepare_for_production
+        
+    - name: Check for changes
+      id: git-check
+      run: |
+        git diff --exit-code || echo "changes=true" >> $GITHUB_OUTPUT
+        
+    - name: Commit changes
+      if: steps.git-check.outputs.changes == 'true'
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add .
+        git commit -m "Fix: Standardize imports automatically via CI"
+        git push 

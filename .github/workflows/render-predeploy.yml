@@ -1,0 +1,86 @@
+name: Render Pre-Deployment Checks
+
+on:
+  # Run this workflow before the deployment to Render
+  # This can be triggered manually before deployment
+  workflow_dispatch:
+  
+  # Or integrate with Render's GitHub deploy hooks
+  # When a PR is merged to main, this will run
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**/*.py'
+
+jobs:
+  prepare-for-production:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend/requirements.txt
+        
+    - name: Prepare for production deployment
+      id: prepare
+      run: |
+        python -m backend.scripts.prepare_for_production
+        
+    - name: Check for changes
+      id: git-check
+      run: |
+        git diff --exit-code || echo "changes=true" >> $GITHUB_OUTPUT
+        
+    - name: Commit production fixes
+      if: steps.git-check.outputs.changes == 'true'
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add .
+        git commit -m "Fix: Prepare codebase for production deployment"
+        git push
+        
+    - name: Verify production readiness
+      run: |
+        python -m backend.scripts.verify_imports
+        
+    - name: Create deployment marker
+      run: |
+        echo "DEPLOYMENT_READY=true" >> $GITHUB_ENV
+        echo "DEPLOYMENT_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
+        
+    - name: Notify Render (Optional - for webhook setup)
+      if: env.DEPLOYMENT_READY == 'true'
+      run: |
+        echo "Deployment is ready. You can set up a webhook to Render here if you want to trigger deployment automatically."
+        # Uncomment and configure if using Render deploy hooks:
+        # curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      
+    - name: Create deployment status file
+      if: always()
+      run: |
+        mkdir -p deployment-status
+        if [ "${{ env.DEPLOYMENT_READY }}" == "true" ]; then
+          echo "✅ Backend is ready for deployment to Render!" > deployment-status/status.txt
+          echo "Last verified: ${{ env.DEPLOYMENT_TIMESTAMP }}" >> deployment-status/status.txt
+        else
+          echo "❌ Backend is NOT ready for deployment. Please fix the issues before deploying." > deployment-status/status.txt
+        fi
+        
+    - name: Upload deployment status
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-status
+        path: deployment-status/ 
