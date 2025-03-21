@@ -2,12 +2,23 @@ from fastapi import APIRouter, HTTPException, Body
 from typing import Dict, Any
 from uuid import UUID
 from pydantic import UUID4, BaseModel
-from models import ReportUpdate, Report
-from services.ai_service import refine_report_text
-from utils.supabase_helper import create_supabase_client
 from datetime import datetime
-from utils.error_handler import api_error_handler
-from api.schemas import APIResponse
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models import ReportUpdate, Report
+    from services.ai_service import refine_report_text
+    from utils.supabase_helper import create_supabase_client
+    from utils.error_handler import api_error_handler
+    from api.schemas import APIResponse
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from models import ReportUpdate, Report
+    from services.ai_service import refine_report_text
+    from utils.supabase_helper import create_supabase_client
+    from utils.error_handler import api_error_handler
+    from api.schemas import APIResponse
 
 router = APIRouter()
 

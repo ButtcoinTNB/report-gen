@@ -2,35 +2,67 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File,
 import requests
 import os
 import json
-from config import settings
-from typing import Dict, Any, List, Optional
-from services.pdf_extractor import extract_text_from_files, extract_text_from_file
-from services.ai_service import (
-    generate_report_text, 
-    extract_template_variables, 
-    refine_report_text, 
-    AIServiceError, 
-    AIConnectionError, 
-    AITimeoutError, 
-    AIResponseError, 
-    AIParsingError
-)
-from services.docx_formatter import format_report_as_docx
-from services.template_processor import template_processor
 import time
 import re
+from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
-from models import Report, File as FileModel, User, Template
-from utils.error_handler import logger, handle_exception, api_error_handler, retry_operation
-from utils.exceptions import (
-    NotFoundException, 
-    BadRequestException, 
-    InternalServerException, 
-    AIServiceException, 
-    DatabaseException
-)
-from utils.auth import get_current_user
-from utils.db import get_db
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from config import settings
+    from services.pdf_extractor import extract_text_from_files, extract_text_from_file
+    from services.ai_service import (
+        generate_report_text, 
+        extract_template_variables, 
+        refine_report_text, 
+        AIServiceError, 
+        AIConnectionError, 
+        AITimeoutError, 
+        AIResponseError, 
+        AIParsingError
+    )
+    from services.docx_formatter import format_report_as_docx
+    from services.template_processor import template_processor
+    from models import Report, File as FileModel, User, Template
+    from utils.error_handler import logger, handle_exception, api_error_handler, retry_operation
+    from utils.exceptions import (
+        NotFoundException, 
+        BadRequestException, 
+        InternalServerException, 
+        AIServiceException, 
+        DatabaseException
+    )
+    from utils.auth import get_current_user
+    from utils.db import get_db
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from config import settings
+    from services.pdf_extractor import extract_text_from_files, extract_text_from_file
+    from services.ai_service import (
+        generate_report_text, 
+        extract_template_variables, 
+        refine_report_text, 
+        AIServiceError, 
+        AIConnectionError, 
+        AITimeoutError, 
+        AIResponseError, 
+        AIParsingError
+    )
+    from services.docx_formatter import format_report_as_docx
+    from services.template_processor import template_processor
+    from models import Report, File as FileModel, User, Template
+    from utils.error_handler import logger, handle_exception, api_error_handler, retry_operation
+    from utils.exceptions import (
+        NotFoundException, 
+        BadRequestException, 
+        InternalServerException, 
+        AIServiceException, 
+        DatabaseException
+    )
+    from utils.auth import get_current_user
+    from utils.db import get_db
+
 from pydantic import BaseModel, UUID4
 import uuid
 from api.schemas import GenerateReportRequest, AdditionalInfoRequest, APIResponse

@@ -1,26 +1,39 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import FileResponse
+from typing import Optional, Dict, Any, List
+from uuid import UUID
+from pydantic import UUID4, BaseModel
+from fastapi import status
 import os
 import glob
 import json
-from uuid import UUID
-from pydantic import UUID4, BaseModel
-from supabase import create_client, Client
-from config import settings
 import traceback
 import hashlib
 from datetime import datetime
-from utils.auth import get_current_user
-from utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
-from services.docx_service import docx_service
-from utils.supabase_helper import create_supabase_client, supabase_client_context
-from typing import Optional, Dict, Any, List
-from fastapi import status
-from utils.error_handler import handle_exception, api_error_handler, logger
-from utils.file_utils import safe_path_join
-from api.schemas import APIResponse
-from services.supabase_client import supabase_client_context
-from utils.file_processor import FileProcessor
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from config import settings
+    from utils.auth import get_current_user
+    from utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
+    from services.docx_service import docx_service
+    from utils.supabase_helper import create_supabase_client, supabase_client_context
+    from utils.error_handler import handle_exception, api_error_handler, logger
+    from utils.file_utils import safe_path_join
+    from api.schemas import APIResponse
+    from supabase import create_client, Client
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from config import settings
+    from utils.auth import get_current_user
+    from utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
+    from services.docx_service import docx_service
+    from utils.supabase_helper import create_supabase_client, supabase_client_context
+    from utils.error_handler import handle_exception, api_error_handler, logger
+    from utils.file_utils import safe_path_join
+    from api.schemas import APIResponse
+    from supabase import create_client, Client
 
 # Import format functions to avoid circular imports later
 try:
