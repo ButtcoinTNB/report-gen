@@ -86,4 +86,28 @@ Before deploying to production:
 3. Ensure environment variables are correctly set in the Render dashboard
 4. Use the proper start command for Render deployments
 
-Remember to review the [Render Deployment Guide](./RENDER_DEPLOYMENT.md) for complete setup instructions. 
+Remember to review the [Render Deployment Guide](./RENDER_DEPLOYMENT.md) for complete setup instructions.
+
+## Module Import Refactoring
+
+To streamline the codebase and reduce unnecessary compatibility layers, we've implemented a gradual refactoring approach:
+
+1. **Direct FileProcessor Usage**: Instead of using the `file_handler.py` compatibility layer, modules should import directly from `FileProcessor`:
+
+```python
+# Before
+from utils.file_handler import save_uploaded_file, delete_uploaded_file, get_file_info
+
+# After
+from utils.file_processor import FileProcessor
+# Then use: FileProcessor.save_upload(), FileProcessor.delete_file(), FileProcessor.get_file_info()
+```
+
+2. **Compatibility Mode**: The `file_handler.py` compatibility layer remains in place to prevent breaking changes but logs deprecation warnings. This enables a smooth transition without disrupting functionality.
+
+3. **Refactoring Implementation**: We're applying this refactoring incrementally to minimize disruption:
+   - Modules directly using `FileProcessor` already are left unchanged
+   - Modules importing from `file_handler.py` but not using the imported functions are updated
+   - Modules actively using these functions will be refactored in future iterations
+
+This approach ensures we can modernize the codebase while maintaining stability. 

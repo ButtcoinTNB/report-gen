@@ -14,10 +14,9 @@ from fastapi.responses import JSONResponse
 
 # Use imports relative to the backend directory
 from config import settings
-from utils.file_handler import save_uploaded_file, delete_uploaded_file, get_file_info
+from utils.file_processor import FileProcessor
 from utils.logger import get_logger
 from api.schemas import APIResponse, UploadQueryResult
-from utils.file_processor import FileProcessor
 from utils.exceptions import (
     FileNotFoundError, 
     ProcessingError,
