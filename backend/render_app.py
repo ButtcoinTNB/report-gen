@@ -54,8 +54,33 @@ for dir_name in ['api', 'utils', 'services', 'models', 'config']:
 try:
     import utils
     print("[RENDER] Successfully imported utils module")
-    import utils.logger
-    print("[RENDER] Successfully imported utils.logger module")
+    
+    # Try to import utils.logger, but don't fail if not found
+    try:
+        import utils.logger
+        print("[RENDER] Successfully imported utils.logger module")
+    except ImportError as e:
+        print(f"[RENDER] Warning: {str(e)}. Creating basic logger module...")
+        # Create a basic logger module on-the-fly if it doesn't exist
+        import logging
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        
+        # Create a mock utils.logger module
+        class LoggerModule:
+            @staticmethod
+            def get_logger(name):
+                return logging.getLogger(name)
+        
+        # Add it to sys.modules
+        import types
+        sys.modules['utils.logger'] = types.ModuleType('utils.logger')
+        sys.modules['utils.logger'].get_logger = LoggerModule.get_logger
+        print("[RENDER] Created dynamic utils.logger module with get_logger function")
+    
 except ImportError as e:
     print(f"[RENDER] ERROR: {str(e)}")
     # Raise a clear error
