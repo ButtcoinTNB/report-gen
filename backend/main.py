@@ -52,10 +52,10 @@ except ImportError:
                     print(f"Failed to create {init_file}: {str(e)}")
 
 # Now the rest of the imports should work correctly, regardless of how the app is started
-from fastapi import FastAPI, Request, status, HTTPException, RequestValidationError
+from fastapi import FastAPI, Request, status, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
 import uvicorn
 import asyncio
 import time
