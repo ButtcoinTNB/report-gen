@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import File
 from fastapi.responses import FileResponse
 from typing import Optional, Dict, Any, List
 from uuid import UUID
