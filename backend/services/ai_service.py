@@ -5,7 +5,7 @@ import asyncio
 from uuid import UUID
 from pydantic import UUID4
 from config import settings
-from utils.error_handler import handle_exception, logger, retry_operation
+from backend.utils.error_handler import handle_exception, logger, retry_operation
 import re
 import json
 from pathlib import Path
@@ -14,8 +14,8 @@ import requests
 from datetime import datetime
 import base64
 
-from services.supabase_client import supabase_client_context
-from utils.file_processor import FileProcessor
+from backend.services.supabase_client import supabase_client_context
+from backend.utils.file_processor import FileProcessor
 
 
 # Custom exception classes for AI service

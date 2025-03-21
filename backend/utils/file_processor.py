@@ -24,7 +24,7 @@ import json
 import time
 
 # Import custom exceptions
-from utils.exceptions import (
+from backend.utils.exceptions import (
     NotFoundException, 
     ValidationException, 
     BadRequestException, 

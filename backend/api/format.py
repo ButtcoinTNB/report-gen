@@ -6,19 +6,19 @@ import requests
 from uuid import UUID
 from pydantic import UUID4, BaseModel
 from config import settings
-from services.pdf_formatter import format_report_as_pdf
-from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
-from services.docx_formatter import format_report_as_docx
+from backend.services.pdf_formatter import format_report_as_pdf
+from backend.services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
+from backend.services.docx_formatter import format_report_as_docx
 import uuid
 import glob
 from supabase import create_client, Client
-from utils.supabase_helper import create_supabase_client
+from backend.utils.supabase_helper import create_supabase_client
 import json
 import datetime
 import hashlib
-from utils.file_utils import safe_path_join
-from api.schemas import APIResponse
-from utils.error_handler import api_error_handler
+from backend.utils.file_utils import safe_path_join
+from backend.api.schemas import APIResponse
+from backend.utils.error_handler import api_error_handler
 
 # Export key functions for other modules
 __all__ = ['format_report_as_pdf', 'get_reference_metadata', 'update_report_file_path', 'format_final']

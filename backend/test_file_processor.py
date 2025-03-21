@@ -3,7 +3,7 @@ import uuid
 import tempfile
 import shutil
 import io
-from utils.file_processor import FileProcessor
+from backend.utils.file_processor import FileProcessor
 
 def create_test_file(size_bytes=1024):
     """Create a test file of a specific size"""

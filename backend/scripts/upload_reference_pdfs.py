@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Now we can import from the backend modules
 from supabase import create_client, Client
-from services.pdf_extractor import extract_text_from_file
+from backend.services.pdf_extractor import extract_text_from_file
 from config import settings
 import argparse
 

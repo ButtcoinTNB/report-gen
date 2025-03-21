@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from config import settings
-from utils.error_handler import logger
+from backend.utils.error_handler import logger
 from typing import Optional
 
 def get_document_path(document_id: str) -> str:

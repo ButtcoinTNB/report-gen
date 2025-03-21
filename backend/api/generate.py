@@ -4,8 +4,8 @@ import os
 import json
 from config import settings
 from typing import Dict, Any, List, Optional
-from services.pdf_extractor import extract_text_from_files, extract_text_from_file
-from services.ai_service import (
+from backend.services.pdf_extractor import extract_text_from_files, extract_text_from_file
+from backend.services.ai_service import (
     generate_report_text, 
     extract_template_variables, 
     refine_report_text, 
@@ -15,34 +15,34 @@ from services.ai_service import (
     AIResponseError, 
     AIParsingError
 )
-from services.docx_formatter import format_report_as_docx
-from services.template_processor import template_processor
+from backend.services.docx_formatter import format_report_as_docx
+from backend.services.template_processor import template_processor
 import time
 import re
 from sqlalchemy.orm import Session
 from models import Report, File as FileModel, User, Template
-from utils.error_handler import logger, handle_exception, api_error_handler, retry_operation
-from utils.exceptions import (
+from backend.utils.error_handler import logger, handle_exception, api_error_handler, retry_operation
+from backend.utils.exceptions import (
     NotFoundException, 
     BadRequestException, 
     InternalServerException, 
     AIServiceException, 
     DatabaseException
 )
-from utils.auth import get_current_user
-from utils.db import get_db
+from backend.utils.auth import get_current_user
+from backend.utils.db import get_db
 from pydantic import BaseModel, UUID4
 import uuid
-from api.schemas import GenerateReportRequest, AdditionalInfoRequest, APIResponse
-from services.storage import get_document_path
+from backend.api.schemas import GenerateReportRequest, AdditionalInfoRequest, APIResponse
+from backend.services.storage import get_document_path
 import logging
-from services.docx_service import docx_service
-from services.preview_service import preview_service
+from backend.services.docx_service import docx_service
+from backend.services.preview_service import preview_service
 from pathlib import Path
 import asyncio
-from utils.supabase_helper import create_supabase_client, supabase_client_context
+from backend.utils.supabase_helper import create_supabase_client, supabase_client_context
 from uuid import UUID
-from utils.file_utils import safe_path_join
+from backend.utils.file_utils import safe_path_join
 import shutil
 
 router = APIRouter(tags=["Report Generation"])

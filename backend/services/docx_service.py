@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 from uuid import UUID
 from pydantic import UUID4
-from utils.error_handler import handle_exception, logger
+from backend.utils.error_handler import handle_exception, logger
 from config import settings
-from utils.file_utils import safe_path_join
+from backend.utils.file_utils import safe_path_join
 
 class DocxService:
     def __init__(self):

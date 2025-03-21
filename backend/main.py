@@ -48,13 +48,13 @@ from pathlib import Path
 # Import API route modules
 from api import upload, generate, format, edit, download
 from config import settings
-from utils.file_utils import safe_path_join
-from api.schemas import APIResponse
-from utils.exceptions import BaseAPIException
-from utils.error_handler import api_exception_handler
-from utils.openapi import custom_openapi
-from api.openapi_examples import ENDPOINT_EXAMPLES
-from utils.middleware import setup_middleware
+from backend.utils.file_utils import safe_path_join
+from backend.api.schemas import APIResponse
+from backend.utils.exceptions import BaseAPIException
+from backend.utils.error_handler import api_exception_handler
+from backend.utils.openapi import custom_openapi
+from backend.api.openapi_examples import ENDPOINT_EXAMPLES
+from backend.utils.middleware import setup_middleware
 
 # Debug imports
 import traceback

@@ -3,11 +3,11 @@ from typing import Dict, Any
 from uuid import UUID
 from pydantic import UUID4, BaseModel
 from models import ReportUpdate, Report
-from services.ai_service import refine_report_text
-from utils.supabase_helper import create_supabase_client
+from backend.services.ai_service import refine_report_text
+from backend.utils.supabase_helper import create_supabase_client
 from datetime import datetime
-from utils.error_handler import api_error_handler
-from api.schemas import APIResponse
+from backend.utils.error_handler import api_error_handler
+from backend.api.schemas import APIResponse
 
 router = APIRouter()
 

@@ -3,8 +3,8 @@ import os
 import docx
 import re
 from typing import Dict, Any, List, Optional
-from utils.error_handler import logger
-from utils.file_processor import FileProcessor
+from backend.utils.error_handler import logger
+from backend.utils.file_processor import FileProcessor
 import time
 import pytesseract
 from PIL import Image

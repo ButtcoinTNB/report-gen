@@ -16,7 +16,7 @@ from reportlab.platypus.flowables import KeepTogether
 from reportlab.platypus.frames import Frame
 from reportlab.platypus.doctemplate import PageTemplate, BaseDocTemplate
 from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT, TA_RIGHT
-from utils.file_utils import safe_path_join
+from backend.utils.file_utils import safe_path_join
 
 logger = logging.getLogger(__name__)
 

@@ -16,8 +16,8 @@ backend_dir = dirname(dirname(abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from utils.file_processor import FileProcessor
-from utils.exceptions import (
+from backend.utils.file_processor import FileProcessor
+from backend.utils.exceptions import (
     NotFoundException, 
     ValidationException, 
     BadRequestException, 

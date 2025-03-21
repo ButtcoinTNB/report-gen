@@ -11,7 +11,7 @@ from typing import Callable, Dict, Any
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
-from utils.error_handler import logger
+from backend.utils.error_handler import logger
 
 # Check if we're in production mode
 IS_PRODUCTION = os.getenv("NODE_ENV") == "production"

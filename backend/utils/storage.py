@@ -7,7 +7,7 @@ import re
 from typing import Optional, Tuple
 from pydantic import UUID4
 from config import settings
-from utils.file_utils import safe_path_join
+from backend.utils.file_utils import safe_path_join
 
 def validate_path(path: str, base_dir: str) -> Tuple[bool, str]:
     """

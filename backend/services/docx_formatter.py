@@ -8,7 +8,7 @@ import re
 from config import settings
 from pathlib import Path
 from typing import Dict, Any, Optional
-from utils.error_handler import handle_exception, logger
+from backend.utils.error_handler import handle_exception, logger
 from .docx_service import docx_service
 
 
