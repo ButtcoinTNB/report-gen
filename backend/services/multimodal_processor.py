@@ -9,9 +9,9 @@ import requests
 from PIL import Image
 from config import settings
 import fitz  # PyMuPDF for PDF handling
-from backend.utils.file_utils import safe_path_join
-from backend.utils.error_handler import logger
-from backend.utils.file_processor import FileProcessor
+from utils.file_utils import safe_path_join
+from utils.error_handler import logger
+from utils.file_processor import FileProcessor
 import httpx
 import asyncio
 from html.parser import HTMLParser

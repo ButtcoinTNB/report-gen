@@ -6,8 +6,8 @@ from utils.file_handler but should use utils.file_utils instead.
 """
 
 # Import and re-export functions from file_utils for backward compatibility
-from backend.utils.file_utils import safe_path_join, get_safe_file_paths, is_safe_path
-from backend.utils.file_processor import FileProcessor
+from utils.file_utils import safe_path_join, get_safe_file_paths, is_safe_path
+from utils.file_processor import FileProcessor
 
 # Define the compatibility functions that redirect to FileProcessor
 def save_uploaded_file(file, directory, filename=None):

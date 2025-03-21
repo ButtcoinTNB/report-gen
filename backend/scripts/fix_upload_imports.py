@@ -21,14 +21,14 @@ def fix_upload_imports():
         content = f.read()
     
     # Replace all imports that need fixing
-    # 1. Replace 'from utils.' with 'from backend.utils.'
-    content = re.sub(r'from utils\.', 'from backend.utils.', content)
+    # 1. Replace 'from utils.' with 'from utils.'
+    content = re.sub(r'from utils\.', 'from utils.', content)
     
-    # 2. Replace 'from api.' with 'from backend.api.'
-    content = re.sub(r'from api\.', 'from backend.api.', content)
+    # 2. Replace 'from api.' with 'from api.'
+    content = re.sub(r'from api\.', 'from api.', content)
     
-    # 3. Replace 'from config import' with 'from backend.config import'
-    content = re.sub(r'from config import', 'from backend.config import', content)
+    # 3. Replace 'from config import' with 'from config import'
+    content = re.sub(r'from config import', 'from config import', content)
     
     # 4. Import statements on their own line
     content = re.sub(r'import utils\.', 'import backend.utils.', content)

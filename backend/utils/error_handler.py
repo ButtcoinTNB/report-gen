@@ -13,10 +13,10 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 # Import the standard APIResponse model
-from backend.api.schemas import APIResponse
+from api.schemas import APIResponse
 
 # Import our custom exceptions
-from backend.utils.exceptions import (
+from utils.exceptions import (
     BaseAPIException,
     ValidationException,
     BadRequestException,

@@ -6,7 +6,7 @@ from PIL import Image
 import io
 import json
 
-from backend.utils.file_processor import FileProcessor
+from utils.file_processor import FileProcessor
 
 class TestFileProcessor:
     """Unit tests for the FileProcessor utility class"""

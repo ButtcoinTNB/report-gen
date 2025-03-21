@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from typing import Optional
 from supabase import create_client, Client
 from config import settings
-from backend.utils.error_handler import logger
+from utils.error_handler import logger
 
 # Define specific exceptions for better error handling
 class SupabaseConnectionError(Exception):

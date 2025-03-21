@@ -306,15 +306,113 @@ If you encounter any issues with the updated deployment process:
 
 ### Common Import Errors
 
-#### Missing Pydantic BaseModel
+#### Missing Type Imports
 
-If you see an error like `NameError: name 'BaseModel' is not defined`, ensure all API modules properly import BaseModel:
+If you see errors like `NameError: name 'X' is not defined`, ensure all necessary type imports are included:
 
 ```python
-from pydantic import BaseModel, UUID4  # Add this at the top of API modules
+# From typing module
+from typing import List, Optional, Dict, Any  # Common type annotations
+
+# From pydantic
+from pydantic import BaseModel, UUID4  # For request/response models
+
+# From fastapi
+from fastapi import Depends  # For dependency injection
 ```
 
-This is particularly important for any module that defines request or response models. All API modules should include this import when using Pydantic models.
+This is particularly important for any module that defines request or response models. All API modules should include the appropriate imports when using type annotations.
+
+#### Missing Utility Functions
+
+Some utility functions are used throughout the codebase and may need explicit imports:
+
+```python
+# Import utility functions explicitly
+from utils.file_utils import secure_filename, safe_path_join
+from utils.supabase_helper import create_supabase_client, supabase_client_context
+from utils.auth import get_current_user
+```
+
+#### Missing Exception Classes
+
+When using custom exception types, make sure they're properly imported:
+
+```python
+from utils.exceptions import (
+    ValidationException,
+    FileProcessingException,
+    DatabaseException,
+    FileNotFoundError,
+    ProcessingError
+)
+```
+
+#### Best Practices for Import Management
+
+To prevent import errors in deployment:
+
+1. **Use try/except patterns** for imports to handle both development and production environments
+2. **Explicitly import all classes, functions and types** you use - don't rely on implicit imports
+3. **Verify imports after adding new dependencies** by running a test deployment
+4. **Create a checklist** of commonly used imports for quick reference
+
+#### Import Statement Template
+
+Here's a comprehensive template for import statements that covers most common dependencies:
+
+```python
+# Standard library imports
+import os
+import json
+import uuid
+import asyncio
+import shutil
+import mimetypes
+from datetime import datetime
+
+# Type annotation imports
+from typing import List, Dict, Any, Optional, Union
+
+# FastAPI imports
+from fastapi import (
+    APIRouter, 
+    Depends, 
+    HTTPException, 
+    Form, 
+    File, 
+    UploadFile, 
+    Body, 
+    Query, 
+    BackgroundTasks
+)
+from fastapi.responses import JSONResponse, FileResponse
+
+# Pydantic imports
+from pydantic import BaseModel, UUID4, validator, Field
+
+# Project imports with fallback pattern for both environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from config import settings
+    from utils.file_utils import secure_filename, safe_path_join
+    from utils.logger import get_logger
+    from utils.auth import get_current_user
+    from utils.supabase_helper import create_supabase_client, supabase_client_context
+    from utils.exceptions import ValidationException, DatabaseException
+    from models import User, Report, Template
+    from api.schemas import APIResponse
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.config import settings
+    from backend.utils.file_utils import secure_filename, safe_path_join
+    from backend.utils.logger import get_logger
+    from backend.utils.auth import get_current_user
+    from backend.utils.supabase_helper import create_supabase_client, supabase_client_context
+    from backend.utils.exceptions import ValidationException, DatabaseException
+    from backend.models import User, Report, Template
+    from backend.api.schemas import APIResponse
+```
 
 ### Comprehensive Render Deployment Fixes
 

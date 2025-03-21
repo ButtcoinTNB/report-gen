@@ -4,9 +4,9 @@ import asyncio
 import os
 from uuid import UUID
 from pydantic import UUID4
-from backend.utils.error_handler import handle_exception, logger
-from backend.services.docx_service import docx_service
-from backend.utils.file_utils import safe_path_join
+from utils.error_handler import handle_exception, logger
+from services.docx_service import docx_service
+from utils.file_utils import safe_path_join
 import tempfile
 import subprocess
 import base64
@@ -20,7 +20,7 @@ from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import pythoncom
 
-from backend.utils.file_processor import FileProcessor
+from utils.file_processor import FileProcessor
 
 class PreviewService:
     def __init__(self):

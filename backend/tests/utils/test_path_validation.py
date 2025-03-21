@@ -14,7 +14,7 @@ from typing import Dict, List, Tuple
 from pathlib import Path
 
 # Import the functions we want to test
-from backend.utils.storage import validate_path, get_safe_file_path
+from utils.storage import validate_path, get_safe_file_path
 
 
 def test_valid_paths():

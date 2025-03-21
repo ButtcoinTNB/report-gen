@@ -8,7 +8,7 @@ Usage:
 
 The script will:
 1. Scan all Python files in the backend directory
-2. Replace relative imports with absolute imports (e.g., 'from utils.logger' -> 'from backend.utils.logger')
+2. Replace relative imports with absolute imports (e.g., 'from utils.logger' -> 'from utils.logger')
 3. Update imports that access modules in the same directory to use the backend prefix
 """
 

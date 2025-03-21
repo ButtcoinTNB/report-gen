@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import UUID4
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
-from backend.utils.error_handler import handle_exception, logger
+from utils.error_handler import handle_exception, logger
 from config import settings
 
 class TemplateProcessor:

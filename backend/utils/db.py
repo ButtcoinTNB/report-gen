@@ -3,8 +3,8 @@ Database utility functions for the FastAPI application.
 Using Supabase for all database operations.
 """
 
-from backend.utils.supabase_helper import create_supabase_client
-from backend.utils.error_handler import logger
+from utils.supabase_helper import create_supabase_client
+from utils.error_handler import logger
 
 def get_db():
     """

@@ -5,7 +5,7 @@ File utility functions for secure file operations.
 from pathlib import Path
 from typing import Union, List
 import os
-from backend.utils.error_handler import logger
+from utils.error_handler import logger
 
 def safe_path_join(base_dir: Union[str, Path], *paths) -> Path:
     """
