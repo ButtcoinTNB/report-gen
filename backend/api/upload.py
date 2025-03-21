@@ -10,10 +10,10 @@ import asyncio
 import shutil
 import mimetypes
 from datetime import datetime
-from fastapi import File
+from fastapi import File, Request
 from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body, Depends
+from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4
 
