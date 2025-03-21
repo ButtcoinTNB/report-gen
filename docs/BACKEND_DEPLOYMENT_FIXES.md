@@ -502,4 +502,200 @@ except ImportError:
    python backend/scripts/verify_imports.py
    ```
 
-The `api_error_handler` is a critical component that standardizes error handling across all API endpoints. Without it properly imported, the decorated endpoints will fail with a `NameError`. 
+The `api_error_handler` is a critical component that standardizes error handling across all API endpoints. Without it properly imported, the decorated endpoints will fail with a `NameError`.
+
+### Missing `Request` Class Import
+
+Another common error encountered during deployment is related to the `Request` class from FastAPI:
+
+```
+NameError: name 'Request' is not defined
+```
+
+This occurs when an API endpoint has a parameter typed as `Request` but the import for this class is missing.
+
+#### How to Fix:
+
+1. Add the `Request` class to your FastAPI imports in the API module:
+
+```python
+# In api/upload.py, edit.py, etc.
+
+from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body, Depends, Request
+```
+
+2. If you're using the hybrid import pattern, make sure `Request` is included in both import blocks:
+
+```python
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    # ... other imports ...
+    from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body, Depends, Request
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    # ... other imports ...
+    from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body, Depends, Request
+```
+
+3. Update the verification script to check for this common import in files that use request objects.
+
+For FastAPI applications, the `Request` class is frequently used in endpoints that need to access raw request data, manipulate headers, or perform other low-level operations on the HTTP request. Ensuring this class is properly imported will prevent runtime errors when these endpoints are called.
+
+### Incorrect Module Path Imports
+
+A common issue in service modules is the use of incorrect import paths:
+
+```
+ModuleNotFoundError: No module named 'services.supabase_client'
+```
+
+This occurs when a module tries to import another module using an incorrect path, often resulting from:
+1. Moving files or renaming modules without updating imports
+2. Mixing different import styles (relative vs absolute)
+3. Assuming a module structure that differs from the actual filesystem
+
+#### How to Fix:
+
+1. Verify the actual location of the module or function being imported:
+
+```python
+# Incorrect import
+from services.supabase_client import supabase_client_context
+
+# Correct import (if the function is actually in utils.supabase_helper)
+from utils.supabase_helper import supabase_client_context
+```
+
+2. Use consistent import approaches across modules:
+
+```python
+# If you use the hybrid import pattern, make sure all modules follow it
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from utils.supabase_helper import supabase_client_context
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.utils.supabase_helper import supabase_client_context
+```
+
+3. Run the import verification script to catch mismatches:
+   ```bash
+   python backend/scripts/verify_imports.py
+   ```
+
+### Circular Import Issues
+
+A particularly challenging deployment issue involves circular imports, which often manifest as:
+
+```
+ImportError: cannot import name 'app' from partially initialized module 'main' (most likely due to a circular import)
+```
+
+This occurs when two modules import each other, creating a dependency cycle that Python cannot resolve.
+
+#### How to Fix:
+
+1. **Implement Fallback Mechanisms**:
+   In entry point files like `render_app.py` or `main.py`, add fallback mechanisms that create a basic app instance when imports fail:
+
+   ```python
+   try:
+       # Try to import app from the main module
+       from backend.main import app
+   except ImportError:
+       # If that fails, create a minimal FastAPI app
+       from fastapi import FastAPI
+       
+       app = FastAPI(title="Insurance Report Generator API")
+       
+       @app.get("/health")
+       async def health_check():
+           return {"status": "ok", "message": "Service is running (fallback app)"}
+   ```
+
+2. **Restructure Imports**:
+   Change how modules import each other to avoid circular dependencies:
+   
+   ```python
+   # Instead of importing the app directly
+   from main import app
+   
+   # Import the main module and reference its app attribute
+   import main as backend_main
+   app = backend_main.app
+   ```
+
+3. **Use Lazy Imports**:
+   Import problematic modules only within functions to delay import resolution:
+   
+   ```python
+   def get_app():
+       from backend.main import app
+       return app
+   ```
+
+These strategies ensure that your application can initialize even if there are complex import relationships, making deployment more robust.
+
+### Platform-Specific Dependencies
+
+A common challenge when deploying applications to different environments is managing platform-specific dependencies. For example, certain libraries may only work on Windows but not on Linux (which Render uses).
+
+#### Problem: Windows-specific Module Dependencies
+
+The deployment was failing with the following error:
+```
+ModuleNotFoundError: No module named 'pythoncom'
+```
+
+This occurred because:
+1. The `preview_service.py` module depends on `pythoncom` for PDF conversion
+2. The `pythoncom` module is part of `pywin32`, which is Windows-specific
+3. Render uses Linux, where this module isn't available
+
+#### Solution:
+
+1. **Implement Platform Detection and Conditional Imports**:
+   ```python
+   import platform
+   
+   # Conditionally import Windows-specific modules
+   IS_WINDOWS = platform.system() == "Windows"
+   if IS_WINDOWS:
+       try:
+           import pythoncom
+           import docx2pdf
+       except ImportError:
+           logger.warning("pythoncom or docx2pdf not available, PDF conversion will be limited")
+   else:
+       logger.info("Running on non-Windows platform, using alternative PDF conversion")
+   ```
+
+2. **Provide Alternative Implementations for Different Platforms**:
+   ```python
+   # Generate PDF from DOCX
+   if IS_WINDOWS:
+       # Windows-specific conversion using docx2pdf
+       pythoncom.CoInitialize()
+       docx2pdf.convert(docx_path, pdf_path)
+   else:
+       # Non-Windows conversion alternatives
+       try:
+           # Try LibreOffice if available
+           cmd = ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", temp_dir, docx_path]
+           subprocess.run(cmd, check=True)
+       except:
+           # Try alternative methods...
+   ```
+
+3. **Install Required System Dependencies**:
+   Add the necessary system packages to your Render configuration in `render.yaml`:
+   ```yaml
+   buildCommand: |
+     # Install LibreOffice for PDF conversion on Linux
+     apt-get update && apt-get install -y libreoffice
+     
+     # Install Python dependencies
+     pip install -r requirements.txt
+   ```
+
+This approach ensures your application can run on both Windows development environments and Linux production environments, gracefully handling platform-specific features with appropriate fallbacks when needed. 
