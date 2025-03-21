@@ -209,4 +209,78 @@ steps:
 3. **Keep `__init__.py` files** in all Python directories
 4. **Don't mix relative and absolute imports** - be consistent with absolute imports
 
-By following these practices and using the provided tools, you can avoid the common deployment issues related to imports and module resolution. 
+By following these practices and using the provided tools, you can avoid the common deployment issues related to imports and module resolution.
+
+## Import System Fixes
+
+The application code has been structured to work properly both in local development and in production environments. However, there are key differences in how Python modules are imported between these environments.
+
+### Path Fixing on Startup
+
+To handle different Python paths in different environments, we've implemented a path fixing system:
+
+- `backend/scripts/fix_paths.py` is loaded at startup in all environments
+- It detects whether the application is running in production or development
+- It adjusts `sys.path` accordingly to ensure imports work properly
+
+### Environment-Aware Import Strategy
+
+For most robust operation, we now use:
+
+1. **Absolute imports with backend prefix** for all internal project imports:
+   ```python
+   # ✅ Correct - Works in both development and production
+   from backend.utils.logger import get_logger
+   from backend.services.ai_service import generate_report
+   ```
+
+2. **Standard library and external package imports** remain unchanged:
+   ```python
+   import os
+   import json
+   from fastapi import APIRouter
+   ```
+
+### Emergency Import Fixer
+
+We've created an emergency script that can be run to fix imports in all API modules:
+
+```bash
+python backend/scripts/emergency_fix_imports.py
+```
+
+This script:
+- Targets all API modules (upload.py, generate.py, format.py, etc.)
+- Updates import statements to use the `backend.` prefix
+- Can be run before deployment to ensure all imports are correctly formatted
+
+### Best Practices
+
+To maintain a codebase that works in both environments:
+
+1. **Always use absolute imports with the backend prefix** for internal modules
+2. Add the `fix_paths.py` module to any new entry points
+3. Run the import fixer before deployment if you've made changes to import statements
+4. Consider adding the import fixer to your CI/CD pipeline
+
+## Deployment Checklist
+
+Before deploying to production:
+
+1. Ensure all `__init__.py` files exist in all package directories
+2. Run the import fixer script:
+   ```bash
+   python backend/scripts/emergency_fix_imports.py
+   ```
+3. Verify imports are correctly formatted with `backend.` prefix
+4. Commit and push changes to the main branch
+5. Deploy to production
+
+## Troubleshooting
+
+If you encounter import errors in production:
+
+1. Check the logs for specific import errors
+2. Run the emergency import fixer script
+3. Review the failing module's imports and ensure they use the backend prefix
+4. Re-deploy the application 
