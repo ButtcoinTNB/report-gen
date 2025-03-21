@@ -149,39 +149,35 @@ except ImportError as e:
 
 # Only import the app after paths are fixed
 try:
-    from backend.main import app
-    print("[RENDER] Successfully imported app from backend.main")
+    from main import app
+    print("[RENDER] Successfully imported app from main.py")
 except ImportError as e:
-    try:
-        from main import app
-        print("[RENDER] Successfully imported app from main")
-    except ImportError as e:
-        print(f"[RENDER] ERROR importing app from main: {str(e)}")
-        print("[RENDER] Creating a new FastAPI app instance as fallback")
-        
-        # Create a minimal FastAPI app as fallback
-        from fastapi import FastAPI, Request
-        from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.responses import JSONResponse
-        
-        app = FastAPI(
-            title="Insurance Report Generator API",
-            description="API for generating and managing insurance reports",
-            version="1.0.0"
-        )
-        
-        # Add CORS middleware
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],  # For production, you should restrict this
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-        
-        @app.get("/health")
-        async def health_check():
-            return {"status": "ok", "message": "Service is running (fallback app)"}
+    print(f"[RENDER] ERROR importing app from main.py: {str(e)}")
+    print("[RENDER] Creating a new FastAPI app instance as fallback")
+    
+    # Create a minimal FastAPI app as fallback
+    from fastapi import FastAPI, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+    
+    app = FastAPI(
+        title="Insurance Report Generator API",
+        description="API for generating and managing insurance reports",
+        version="1.0.0"
+    )
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # For production, you should restrict this
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    @app.get("/health")
+    async def health_check():
+        return {"status": "ok", "message": "Service is running (fallback app)"}
 
 # Expose the app for uvicorn
 print("[RENDER] Render entry point initialized successfully!") 
