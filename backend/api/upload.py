@@ -11,6 +11,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, UUID4
 
 # Use imports with fallbacks for better compatibility across environments
 try:
@@ -26,11 +27,11 @@ try:
     )
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.config import settings
-    from backend.utils.file_processor import FileProcessor
-    from backend.utils.logger import get_logger
-    from backend.api.schemas import APIResponse, UploadQueryResult
-    from backend.utils.exceptions import (
+    from config import settings
+    from utils.file_processor import FileProcessor
+    from utils.logger import get_logger
+    from api.schemas import APIResponse, UploadQueryResult
+    from utils.exceptions import (
         FileNotFoundError, 
         ProcessingError,
         DatabaseException
