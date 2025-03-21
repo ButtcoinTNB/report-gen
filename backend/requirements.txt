@@ -16,13 +16,17 @@ pdfplumber>=0.10.3
 pytesseract==0.3.10
 Pillow>=10.0.1,<11.0.0
 mammoth>=1.6.0
-docx2pdf>=0.1.8
+docx2pdf>=0.1.8  # Note: docx2pdf requires 'pythoncom' module (Windows-only)
 docx2txt>=0.8
 reportlab>=4.1.0,<5.0.0
 PyMuPDF>=1.22.5,<2.0.0
 pdfrw>=0.4
 weasyprint>=60.2
 python-magic>=0.4.27
+
+# Note: For Linux deployment (like Render), ensure LibreOffice or unoconv is installed
+# at the system level for PDF conversion: 
+# apt-get update && apt-get install -y libreoffice
 
 # ---------------- API / Networking ----------------
 requests>=2.31.0  # Updated from 2.30.0 to fix Proxy-Authorization header leakage

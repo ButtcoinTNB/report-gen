@@ -11,14 +11,25 @@ import tempfile
 import subprocess
 import base64
 from typing import Dict, Any, Optional, List
+import platform
 
 # Third-party imports
 import fitz  # PyMuPDF
 from docx import Document
-import docx2pdf
+import sys
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import pythoncom
+
+# Conditionally import Windows-specific modules
+IS_WINDOWS = platform.system() == "Windows"
+if IS_WINDOWS:
+    try:
+        import pythoncom
+        import docx2pdf
+    except ImportError:
+        logger.warning("pythoncom or docx2pdf not available, PDF conversion will be limited")
+else:
+    logger.info("Running on non-Windows platform, using alternative PDF conversion")
 
 from utils.file_processor import FileProcessor
 
@@ -324,16 +335,58 @@ def generate_docx_preview(content: str, include_header: bool = True, include_foo
         logger.info(f"Generated DOCX preview at {docx_path}")
         
         # Generate PDF from DOCX
+        pdf_data = None
         try:
-            pythoncom.CoInitialize()  # Initialize COM for thread safety
-            logger.info(f"Converting DOCX to PDF: {docx_path} -> {pdf_path}")
-            docx2pdf.convert(docx_path, pdf_path)
-            logger.info(f"Generated PDF preview at {pdf_path}")
-            pdf_data = None
-            
-            # Get base64 encoded PDF data
-            pdf_data = FileProcessor.get_file_as_base64(pdf_path)
-            
+            if IS_WINDOWS:
+                # Windows-specific conversion using docx2pdf
+                pythoncom.CoInitialize()  # Initialize COM for thread safety
+                logger.info(f"Converting DOCX to PDF using docx2pdf: {docx_path} -> {pdf_path}")
+                docx2pdf.convert(docx_path, pdf_path)
+                logger.info(f"Generated PDF preview at {pdf_path}")
+                
+                # Get base64 encoded PDF data
+                pdf_data = FileProcessor.get_file_as_base64(pdf_path)
+            else:
+                # Non-Windows conversion alternatives
+                logger.info("Attempting alternative PDF conversion for non-Windows platform")
+                
+                # Try LibreOffice if available
+                try:
+                    logger.info("Attempting conversion with LibreOffice")
+                    cmd = ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", temp_dir, docx_path]
+                    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                    
+                    if result.returncode == 0:
+                        # LibreOffice may use a different naming convention
+                        pdf_name = os.path.basename(docx_path).replace(".docx", ".pdf")
+                        pdf_path = os.path.join(temp_dir, pdf_name)
+                        logger.info(f"Generated PDF preview using LibreOffice at {pdf_path}")
+                        pdf_data = FileProcessor.get_file_as_base64(pdf_path)
+                    else:
+                        logger.warning(f"LibreOffice conversion failed: {result.stderr.decode('utf-8')}")
+                        raise Exception("LibreOffice conversion failed")
+                except Exception as libreoffice_error:
+                    logger.warning(f"LibreOffice conversion failed: {str(libreoffice_error)}")
+                    
+                    # Try using unoconv as an alternative
+                    try:
+                        logger.info("Attempting conversion with unoconv")
+                        cmd = ["unoconv", "-f", "pdf", "-o", pdf_path, docx_path]
+                        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                        
+                        if result.returncode == 0:
+                            logger.info(f"Generated PDF preview using unoconv at {pdf_path}")
+                            pdf_data = FileProcessor.get_file_as_base64(pdf_path)
+                        else:
+                            logger.warning(f"unoconv conversion failed: {result.stderr.decode('utf-8')}")
+                            raise Exception("unoconv conversion failed")
+                    except Exception as unoconv_error:
+                        logger.warning(f"unoconv conversion failed: {str(unoconv_error)}")
+                        
+                        # If all else fails, indicate PDF generation isn't available
+                        logger.info("PDF conversion not available on this platform")
+                        pdf_path = None
+                
         except Exception as pdf_error:
             logger.error(f"Error generating PDF preview: {str(pdf_error)}")
             pdf_path = None
