@@ -265,19 +265,20 @@ Configure your Render service with:
 
 1. **Root Directory**: `backend`
 2. **Build Command**: `pip install -r requirements.txt`
-3. **Start Command**: `python -m uvicorn render_app:app --host 0.0.0.0 --port $PORT`
+3. **Start Command**: `python -m uvicorn render_main:app --host 0.0.0.0 --port $PORT`
 
-> **CRITICAL**: Note that we're using `render_app:app` instead of `main:app` - this is our special Render entry point that ensures paths are properly configured before any imports happen.
+> **CRITICAL**: We've created a new `render_main:app` entry point that completely eliminates circular imports and resolves all path issues. This replaces both `main:app` and `render_app:app` with a more reliable solution.
 
 ### How It Works
 
-Our `render_app.py` entry point:
+Our `render_main.py` entry point:
 1. Sets up the Python path correctly before any imports
 2. Adds all necessary directories to the import path
 3. Creates any missing `__init__.py` files
-4. Verifies that key modules can be imported
-5. Only imports the main app after paths are fixed
-6. **NEW**: Dynamically creates missing critical modules if they don't exist
+4. Creates the FastAPI app directly without circular imports
+5. Includes all routers and sets up middleware properly
+6. Handles import paths that work in both environments
+7. Never imports from main.py, avoiding circular references
 
 This approach guarantees that all imports will work correctly regardless of Python's import behavior.
 
@@ -289,14 +290,16 @@ This solution works directly from your `main` branch - no need to create a separ
 
 We've made the following improvements to the deployment process:
 
-1. **Added Missing Logger Module**: Created a proper `utils/logger.py` module with the `get_logger` function
-2. **Made render_app.py Resilient**: Enhanced it to continue even if certain modules are missing by creating them dynamically
-3. **Improved Path Resolution**: Ensured all critical directories are properly added to Python's path
+1. **Created Standalone Entry Point**: The new `render_main.py` file creates the FastAPI app directly
+2. **Eliminated Circular Imports**: No more chain of imports between main.py and backend/main.py
+3. **Fixed Exception Issues**: Added missing exception classes that were causing errors
+4. **Implemented Import Fallbacks**: Updated key modules to try imports without the 'backend.' prefix first
+5. **Improved Path Resolution**: Ensured all critical directories are properly added to Python's path
 
 ### Troubleshooting Deployment
 
 If you encounter any issues with the updated deployment process:
 
 1. Check the Render logs for specific import errors
-2. Verify that the `utils/logger.py` module exists and contains the `get_logger` function
-3. Make sure your start command is correctly configured to use `render_app:app` 
+2. Verify that all necessary Python modules are installed in requirements.txt
+3. Make sure your start command is correctly configured to use `render_main:app` 
