@@ -6,10 +6,12 @@ import os
 import uuid
 import json
 import asyncio
+import shutil
+import mimetypes
 from datetime import datetime
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body
+from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, UUID4
 
@@ -23,8 +25,14 @@ try:
     from utils.exceptions import (
         FileNotFoundError, 
         ProcessingError,
-        DatabaseException
+        DatabaseException,
+        ValidationException,
+        FileProcessingException
     )
+    from utils.auth import get_current_user
+    from models import User, Template
+    from utils.supabase_helper import create_supabase_client, supabase_client_context
+    from utils.file_utils import secure_filename, safe_path_join
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from config import settings
@@ -34,8 +42,14 @@ except ImportError:
     from utils.exceptions import (
         FileNotFoundError, 
         ProcessingError,
-        DatabaseException
+        DatabaseException,
+        ValidationException,
+        FileProcessingException
     )
+    from utils.auth import get_current_user
+    from models import User, Template
+    from utils.supabase_helper import create_supabase_client, supabase_client_context
+    from utils.file_utils import secure_filename, safe_path_join
 
 # Create logger
 logger = get_logger(__name__)
