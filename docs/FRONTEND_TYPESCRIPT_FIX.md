@@ -28,6 +28,23 @@ The frontend codebase has been fully migrated to TypeScript for improved type sa
 - Enhanced Redux store with proper TypeScript types
 - Added type definitions for API responses and requests
 
+### 5. Fixed Import Paths After Directory Restructuring
+
+When moving components from `frontend/components` to `frontend/src/components`, import paths needed to be updated:
+
+- **Issue**: Components were using imports like `../src/services` which worked when they were in the root components directory
+- **Fix**: Updated all import paths in src/components files to use correct relative paths:
+  - Changed `../src/services` to `../services`
+  - Changed `../src/types` to `../types`
+  - Changed `../src/utils` to `../utils`
+
+This ensures components now correctly import from the right locations within the `src` directory structure.
+
+### 6. Resolved Duplicate Files
+
+- Removed duplicate JavaScript versions of API routes when both `.js` and `.ts` files existed
+- Specifically fixed: `pages/api/upload/documents.js` (kept only the `.ts` version)
+
 ## Benefits
 
 - **Improved Developer Experience**: Auto-completion and type checking
