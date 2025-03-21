@@ -15,6 +15,7 @@ import {
   setError,
   setActiveStep
 } from '../store/reportSlice';
+import { config } from '../../config';
 
 export default function ReportGenerator() {
   const dispatch = useAppDispatch();
@@ -53,7 +54,7 @@ export default function ReportGenerator() {
       }
       
       // Call the API to generate the report
-      const response = await fetch('/api/generate/generate', {
+      const response = await fetch(`${config.API_URL}/api/generate/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

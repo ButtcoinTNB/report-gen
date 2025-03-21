@@ -18,6 +18,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PreviewIcon from '@mui/icons-material/Preview';
+import { config } from '../../config';
 
 const ReportDownloader: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -44,7 +45,7 @@ const ReportDownloader: React.FC = () => {
       }));
       
       // Call the API to generate preview
-      const response = await fetch('/api/format/preview-file', {
+      const response = await fetch(`${config.API_URL}/api/format/preview-file`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -103,7 +104,7 @@ const ReportDownloader: React.FC = () => {
       }));
       
       // Call the API to format report
-      const response = await fetch('/api/format/final', {
+      const response = await fetch(`${config.API_URL}/api/format/final`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

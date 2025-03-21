@@ -10,6 +10,7 @@ import {
   setError,
   setActiveStep
 } from '../store/reportSlice';
+import { config } from '../../config';
 
 // This is a reusable file uploader component that uses Redux for state management
 const FileUploader: React.FC = () => {
@@ -41,7 +42,7 @@ const FileUploader: React.FC = () => {
       });
 
       // Call API to upload files
-      const response = await fetch('/api/upload/documents', {
+      const response = await fetch(`${config.API_URL}/api/upload/documents`, {
         method: 'POST',
         body: formData
       });
@@ -175,8 +176,7 @@ const FileUploader: React.FC = () => {
         disabled={loading.isLoading}
         onClick={(e) => {
           e.stopPropagation();
-          const fileInput = document.querySelector('input[type="file"]');
-          if (fileInput) fileInput.click();
+          (document.querySelector('input[type="file"]') as HTMLInputElement)?.click();
         }}
       >
         {loading.isLoading ? 'Uploading...' : 'Select Files'}

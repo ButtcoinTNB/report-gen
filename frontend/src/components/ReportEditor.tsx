@@ -16,6 +16,7 @@ import {
   setError,
   setActiveStep
 } from '../store/reportSlice';
+import { config } from '../../config';
 
 const ReportEditor: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -114,7 +115,7 @@ const ReportEditor: React.FC = () => {
       }));
       
       // Call the API to refine the report
-      const response = await fetch('/api/edit/ai-refine', {
+      const response = await fetch(`${config.API_URL}/api/edit/ai-refine`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

@@ -16,6 +16,7 @@ import {
   setActiveStep,
   setReportId
 } from '../store/reportSlice';
+import { config } from '../../config';
 
 const ReportGenerator: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -43,7 +44,11 @@ const ReportGenerator: React.FC = () => {
       }));
       
       // Prepare the request payload
-      const payload = {
+      const payload: {
+        document_ids: string[];
+        additional_info: string;
+        report_id?: string;
+      } = {
         document_ids: documentIds,
         additional_info: additionalInfo
       };
@@ -54,7 +59,7 @@ const ReportGenerator: React.FC = () => {
       }
       
       // Call the API to generate the report
-      const response = await fetch('/api/generate/generate', {
+      const response = await fetch(`${config.API_URL}/api/generate/generate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
