@@ -14,7 +14,7 @@ import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { downloadApi } from '../src/services';
+import { downloadApi } from '../services';
 
 interface Props {
   previewId?: string;  // UUID

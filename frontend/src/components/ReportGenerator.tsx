@@ -19,9 +19,9 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import SchemaIcon from '@mui/icons-material/Schema';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { generateApi } from '../src/services'; // Import the API adapter
-import { Report, ReportCamel, adaptReport } from '../src/types';
-import { logger } from '../src/utils/logger';
+import { generateApi } from '../services'; // Import the API adapter
+import { Report, ReportCamel, adaptReport } from '../types';
+import { logger } from '../utils/logger';
 
 // Define a subtle pulsing animation for the progress bar
 const pulse = keyframes`

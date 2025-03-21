@@ -25,11 +25,11 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
 import BackupIcon from '@mui/icons-material/Backup';
-import { uploadApi } from '../src/services'; // Updated import path
+import { uploadApi } from '../services'; // Updated import path
 import { useDropzone } from 'react-dropzone';
-import { UploadService, CHUNKED_UPLOAD_SIZE_THRESHOLD } from '../src/services/api/UploadService';
-import { adaptApiResponse } from '../src/utils/adapters';
-import { logger } from '../src/utils/logger';
+import { UploadService, CHUNKED_UPLOAD_SIZE_THRESHOLD } from '../services/api/UploadService';
+import { adaptApiResponse } from '../utils/adapters';
+import { logger } from '../utils/logger';
 
 interface Props {
   onUploadSuccess: (reportId: string) => void;  // UUID

@@ -19,9 +19,9 @@ import DownloadIcon from '@mui/icons-material/Download';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import DescriptionIcon from '@mui/icons-material/Description';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { downloadApi } from '../src/services';
+import { downloadApi } from '../services';
 import PDFPreview from './PDFPreview';
-import { logger } from '../src/utils/logger';
+import { logger } from '../utils/logger';
 
 interface DownloadReportProps {
   reportId: string | null;
