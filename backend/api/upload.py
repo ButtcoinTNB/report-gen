@@ -14,10 +14,10 @@ from fastapi.responses import JSONResponse
 
 # Use imports relative to the backend directory
 from backend.config import settings
-from backend.utils.file_processor import FileProcessor
-from backend.utils.logger import get_logger
-from backend.api.schemas import APIResponse, UploadQueryResult
-from backend.utils.exceptions import (
+from utils.file_processor import FileProcessor
+from utils.logger import get_logger
+from api.schemas import APIResponse, UploadQueryResult
+from utils.exceptions import (
     FileNotFoundError, 
     ProcessingError,
     DatabaseException

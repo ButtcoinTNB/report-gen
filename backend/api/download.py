@@ -10,22 +10,22 @@ from config import settings
 import traceback
 import hashlib
 from datetime import datetime
-from backend.utils.auth import get_current_user
-from backend.utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
-from backend.services.docx_service import docx_service
-from backend.utils.supabase_helper import create_supabase_client, supabase_client_context
+from utils.auth import get_current_user
+from utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
+from services.docx_service import docx_service
+from utils.supabase_helper import create_supabase_client, supabase_client_context
 from typing import Optional, Dict, Any, List
 from fastapi import status
-from backend.utils.error_handler import handle_exception, api_error_handler, logger
-from backend.utils.file_utils import safe_path_join
-from backend.api.schemas import APIResponse
-from backend.services.supabase_client import supabase_client_context
-from backend.utils.file_processor import FileProcessor
+from utils.error_handler import handle_exception, api_error_handler, logger
+from utils.file_utils import safe_path_join
+from api.schemas import APIResponse
+from services.supabase_client import supabase_client_context
+from utils.file_processor import FileProcessor
 
 # Import format functions to avoid circular imports later
 try:
-    from backend.api.format import format_final, update_report_file_path, get_reference_metadata
-    from backend.services.pdf_formatter import format_report_as_pdf
+    from api.format import format_final, update_report_file_path, get_reference_metadata
+    from services.pdf_formatter import format_report_as_pdf
 except ImportError:
     # This allows for cleaner error handling if imports fail
     logger.warning("Could not import formatting functions, will import when needed")
