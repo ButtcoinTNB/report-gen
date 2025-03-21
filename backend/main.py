@@ -5,36 +5,40 @@ Main application entrypoint for the Insurance Report Generator API
 # Import the path fixer before any other imports to ensure proper module resolution
 import os
 import sys
-try:
-    # Try to import fix_paths - this works when the current directory is backend/
-    from fix_paths import backend_dir
-    print("Successfully imported fix_paths")
-except ImportError:
-    print("Could not import fix_paths directly, adjusting path...")
-    # If running from a different directory, try to add the backend directory to the path
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
-        print(f"Added backend directory to path: {backend_dir}")
-    try:
-        from fix_paths import backend_dir
-        print("Successfully imported fix_paths after path adjustment")
-    except ImportError:
-        # If still cannot import, create __init__.py files manually
-        print("Failed to import fix_paths, creating __init__.py files manually")
-        for dir_name in ['api', 'utils', 'services', 'models']:
-            dir_path = os.path.join(backend_dir, dir_name)
-            if os.path.isdir(dir_path):
-                init_file = os.path.join(dir_path, '__init__.py')
-                if not os.path.exists(init_file):
-                    try:
-                        with open(init_file, 'w') as f:
-                            f.write('# Auto-generated __init__.py file\n')
-                        print(f"Created {init_file}")
-                    except Exception as e:
-                        print(f"Failed to create {init_file}: {str(e)}")
 
-# Now the rest of the imports should work correctly
+# First, ensure fix_paths.py is properly loaded
+try:
+    from fix_paths import fix_python_path
+    fix_python_path()  # This will add the parent directory to sys.path if needed
+except ImportError:
+    print("Could not import fix_paths directly, creating it inline...")
+    # Inline version of the fix_paths functionality in case the module isn't found
+    current_dir = os.getcwd()
+    print(f"Current working directory: {current_dir}")
+    
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    print(f"Backend directory: {backend_dir}")
+    
+    # Add parent directory to path if needed
+    parent_dir = os.path.dirname(backend_dir)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+        print(f"Python path fixed for deployment. sys.path: {sys.path}")
+    
+    # Create any necessary __init__.py files
+    for dir_name in ['api', 'utils', 'services', 'models']:
+        dir_path = os.path.join(backend_dir, dir_name)
+        if os.path.isdir(dir_path):
+            init_file = os.path.join(dir_path, '__init__.py')
+            if not os.path.exists(init_file):
+                try:
+                    with open(init_file, 'w') as f:
+                        f.write('# Auto-generated __init__.py file\n')
+                    print(f"Created {init_file}")
+                except Exception as e:
+                    print(f"Failed to create {init_file}: {str(e)}")
+
+# Now the rest of the imports should work correctly, regardless of how the app is started
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -45,16 +49,19 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Import API route modules
+# Import API route modules - use regular relative imports in main.py
+# since we're already ensuring the paths are correct above
 from api import upload, generate, format, edit, download
 from config import settings
-from backend.utils.file_utils import safe_path_join
-from backend.api.schemas import APIResponse
-from backend.utils.exceptions import BaseAPIException
-from backend.utils.error_handler import api_exception_handler
-from backend.utils.openapi import custom_openapi
-from backend.api.openapi_examples import ENDPOINT_EXAMPLES
-from backend.utils.middleware import setup_middleware
+
+# Other imports can use either style
+from utils.file_utils import safe_path_join
+from api.schemas import APIResponse
+from utils.exceptions import BaseAPIException
+from utils.error_handler import api_exception_handler
+from utils.openapi import custom_openapi
+from api.openapi_examples import ENDPOINT_EXAMPLES
+from utils.middleware import setup_middleware
 
 # Debug imports
 import traceback

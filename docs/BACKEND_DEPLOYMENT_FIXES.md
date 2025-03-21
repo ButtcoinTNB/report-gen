@@ -88,29 +88,67 @@ Before deploying to production:
 
 Remember to review the [Render Deployment Guide](./RENDER_DEPLOYMENT.md) for complete setup instructions.
 
-## Module Import Refactoring
+## Robust Import System for Any Environment
 
-To streamline the codebase and reduce unnecessary compatibility layers, we've implemented a gradual refactoring approach:
+To create a truly robust import system that works in both development and production environments, we've implemented a hybrid approach:
 
-1. **Direct FileProcessor Usage**: Instead of using the `file_handler.py` compatibility layer, modules should import directly from `FileProcessor`:
+### 1. Path Fixing on Startup
+
+The `fix_paths.py` module is imported at the start of `main.py` and dynamically adjusts the Python path based on the current environment:
 
 ```python
-# Before
-from utils.file_handler import save_uploaded_file, delete_uploaded_file, get_file_info
-
-# After
-from utils.file_processor import FileProcessor
-# Then use: FileProcessor.save_upload(), FileProcessor.delete_file(), FileProcessor.get_file_info()
+# In fix_paths.py
+def fix_python_path():
+    """Fix Python path to make imports work in both development and production."""
+    current_dir = os.getcwd()
+    
+    # Check if we're inside the backend directory
+    backend_dir = Path(current_dir)
+    if backend_dir.name == 'backend':
+        # Add parent directory to path if needed
+        parent_dir = str(backend_dir.parent)
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
 ```
 
-2. **Compatibility Mode**: The `file_handler.py` compatibility layer remains in place to prevent breaking changes but logs deprecation warnings. This enables a smooth transition without disrupting functionality.
+### 2. Environment-Aware Import Strategy
 
-3. **Refactoring Implementation**: We're applying this refactoring incrementally to minimize disruption:
-   - Modules directly using `FileProcessor` already are left unchanged
-   - Modules importing from `file_handler.py` but not using the imported functions are updated
-   - Modules actively using these functions will be refactored in future iterations
+We use a strategic approach for imports that varies based on the file's role:
 
-This approach ensures we can modernize the codebase while maintaining stability.
+1. **Main Application Entry Points**: Use relative imports for simplicity and reliability
+   ```python
+   # In main.py
+   from api import upload, generate, format, edit, download
+   from config import settings
+   ```
+
+2. **Core Modules**: Use absolute imports with the 'backend.' prefix for clarity
+   ```python
+   # In services/ai_service.py
+   from backend.utils.file_processor import FileProcessor
+   ```
+
+### 3. Deployment Import Fixer
+
+The `fix_imports_for_deployment.py` script automatically applies this strategy:
+
+```bash
+# Run before deployment
+python backend/scripts/fix_imports_for_deployment.py
+```
+
+This script:
+- Makes entry point files use relative imports
+- Makes other modules use absolute imports
+- Handles the conversion automatically
+
+### Best Practices
+
+1. **Use the fix_paths module** in main.py
+2. **Run the import fixer before deployment**
+3. **Run the pre-deployment check** to catch other issues
+
+This approach ensures maximum compatibility across all environments from local development to production deployment.
 
 ## Automated Import Fixes and Deployment Checks
 
