@@ -59,7 +59,7 @@ except ImportError:
 logger = get_logger(__name__)
 
 # Create router
-router = APIRouter(prefix="/upload", tags=["upload"])
+router = APIRouter(tags=["upload"])
 
 # Background tasks queue
 background_tasks = {}
