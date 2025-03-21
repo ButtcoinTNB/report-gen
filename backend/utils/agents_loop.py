@@ -120,7 +120,7 @@ class AIAgentLoop:
             === CONTENUTO UTENTE ===
             {user_content}
 
-            {f'=== FEEDBACK PRECEDENTE ===\n' + '\n'.join(["- " + s for s in feedback["suggestions"]]) if feedback["suggestions"] else ''}
+            {('=== FEEDBACK PRECEDENTE ===\n' + '\n'.join(['- ' + s for s in feedback['suggestions']])) if feedback['suggestions'] else ''}
             """
             
             draft = await self._call_model(writer_input, self.writer_prompt)
