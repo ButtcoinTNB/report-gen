@@ -64,4 +64,59 @@ TITOLO: Guida completa per la redazione automatica dei certificati di perizia
 8. MISSIONE
 - Lo scopo di ogni report è fornire un’analisi tecnica oggettiva, imparziale, documentata e in linea con le responsabilità di una società di consulenza e perizia di parte assicurativa.
 
+9. Guida alla Formattazione per i Report Generati dall'AI
+
+## 1. Formattazione Generale del Documento
+- **Font**: Times New Roman, **dimensione 12** per il testo principale.
+- **Margini**: **2,54 cm (1 pollice) su tutti i lati**.
+- **Interlinea**: **Singola** in tutto il documento.
+- **Giustificazione**: **Testo completamente giustificato**.
+- **Numerazione delle pagine**: In basso al centro, **a partire dalla pagina 1**.
+
+## 2. Intestazioni e Sezioni
+- **Titolo del report**: **Grassetto, centrato e maiuscolo**.
+- **Data e Luogo**: Allineati a destra.
+- **Informazioni del Destinatario**: Allineate a destra, con il nome dell'azienda in **grassetto**.
+- **Intestazioni delle sezioni principali** (es. "1 – DATI GENERALI"):
+  - **Corsivo e grassetto** (es. `1 – *DATI GENERALI*`).
+  - Numerate (1, 2, 3, ecc.).
+- **Intestazioni delle sottosezioni** (es. "Spedizione"):
+  - **Solo grassetto**.
+  - Allineate a sinistra.
+- **Intestazioni delle Tabelle**: **Grassetto**, con **sfondo grigio chiaro** quando presente.
+- **Descrizione Oggetto ("Oggetto")**: **Grassetto e racchiuso in una tabella con bordo**.
+
+## 3. Formattazione del Testo per Enfasi
+- **Grassetto**:
+  - Valori chiave nelle tabelle (es. `Lordo kg. 5.395,00`).
+  - Nomi aziendali alla **prima occorrenza**.
+  - Elementi chiave del report (es. `**QUANTIFICAZIONE DEL DANNO**`).
+- **Corsivo**:
+  - Terminologia speciale o numerazione sezioni (es. `*2 – DINAMICA DEGLI EVENTI ED ACCERTAMENTI*`).
+
+## 4. Formattazione delle Tabelle
+- **Bordi**: **Bordi neri sottili** intorno a tutte le celle della tabella.
+- **Allineamento colonne**:
+  - **Sinistra** per il testo.
+  - **Destra** per i valori numerici.
+- **Testo nelle tabelle**: **Font: Times New Roman, dimensione 12**.
+- Alcune tabelle **non mostrano linee visibili**, ma i testi sono allineati ai label con `:`.
+
+## 5. Liste e Punti Elenco
+- **Liste puntate**: Usare punti semplici (`•`).
+- **Liste numerate**: Numeri arabi (`1, 2, 3...`).
+- **Sotto-elenco**: Indentato con tabulazione.
+
+## 6. Pagina Finale
+- **Firma Aziendale**: Centrata e in **grassetto maiuscolo**.
+- **Allegati**:
+  - Elenco puntato dei documenti allegati.
+  - Titoli degli allegati in **grassetto**.
+
+## 7. Gestione di Numeri e Valute
+- **Valuta**: Sempre **con spazio prima dell'importo** (es. `€ 33.839,30`).
+- **Formato decimali**: Stile europeo (**virgola come separatore decimale**, es. `4.675,00`).
+- **Separatore delle migliaia**: **Punto (`.`) usato** (es. `35.000,00`).
+
+
 Questa guida deve essere usata da qualsiasi modello o agente AI incaricato della scrittura, revisione, controllo qualità o elaborazione dei certificati di perizia.
