@@ -10,6 +10,13 @@ import asyncio
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Safe defaults for environment variables
+OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")  # Empty string as fallback
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://report-gen-liard.vercel.app/")
+APP_NAME = os.getenv("APP_NAME", "Generatore di Perizie")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "google/gemini-2.0-pro-exp-02-05:free")
+
 class AIAgentLoop:
     def __init__(self, max_loops: int = 3):
         self.max_loops = max_loops
@@ -43,21 +50,24 @@ class AIAgentLoop:
         
     async def _call_model(self, prompt: str, system_prompt: str, retries: int = 2) -> str:
         """Make an API call to the configured model via OpenRouter with retries."""
+        if not OPENROUTER_API_KEY:
+            raise Exception("OPENROUTER_API_KEY environment variable is not set")
+            
         last_error = None
         
         for attempt in range(retries):
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
-                        os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions"),
+                        OPENROUTER_API_URL,
                         headers={
-                            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                             "Content-Type": "application/json",
-                            "HTTP-Referer": os.getenv("FRONTEND_URL", "http://localhost:3000"),
-                            "X-Title": os.getenv("APP_NAME", "Generatore di Perizie")
+                            "HTTP-Referer": FRONTEND_URL,
+                            "X-Title": APP_NAME
                         },
                         json={
-                            "model": os.getenv("DEFAULT_MODEL", "google/gemini-2.0-pro-exp-02-05:free"),
+                            "model": DEFAULT_MODEL,
                             "messages": [
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": prompt}
@@ -110,7 +120,7 @@ class AIAgentLoop:
             === CONTENUTO UTENTE ===
             {user_content}
 
-            {f'=== FEEDBACK PRECEDENTE ===\\n' + '\\n'.join(["- " + s for s in feedback["suggestions"]]) if feedback["suggestions"] else ''}
+            {f'=== FEEDBACK PRECEDENTE ===\n' + '\n'.join(["- " + s for s in feedback["suggestions"]]) if feedback["suggestions"] else ''}
             """
             
             draft = await self._call_model(writer_input, self.writer_prompt)
