@@ -14,7 +14,7 @@ import requests
 from datetime import datetime
 import base64
 
-from services.supabase_client import supabase_client_context
+from utils.supabase_helper import supabase_client_context
 from utils.file_processor import FileProcessor
 
 
