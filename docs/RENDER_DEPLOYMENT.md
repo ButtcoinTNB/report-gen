@@ -215,4 +215,42 @@ If you encounter issues during deployment, please refer to the [Backend Deployme
 
 3. **Path Resolution**: Ensure your start command includes `python -m` before `uvicorn` to properly resolve modules. See the [Backend Deployment Fixes](./BACKEND_DEPLOYMENT_FIXES.md#path-and-module-resolution) section.
 
-4. **Environment Variables**: Make sure all required environment variables are properly set in the Render dashboard. 
+4. **Environment Variables**: Make sure all required environment variables are properly set in the Render dashboard.
+
+## Streamlined Deployment Process
+
+We've created a streamlined preparation script that handles all the necessary steps for Render deployment:
+
+```bash
+python backend/scripts/prepare_for_render.py
+```
+
+This script:
+1. Fixes imports by removing `backend.` prefixes
+2. Ensures proper path resolution
+3. Verifies imports work correctly
+4. Provides instructions for committing and deploying
+
+### Deployment Workflow
+
+For a successful Render deployment:
+
+1. **Prepare the codebase**:
+   ```bash
+   python backend/scripts/prepare_for_render.py
+   ```
+
+2. **Commit changes to a deployment branch**:
+   ```bash
+   git checkout -b deploy-to-render
+   git add .
+   git commit -m "Prepare for Render deployment"
+   git push origin deploy-to-render
+   ```
+
+3. **Configure Render** using the deployment branch:
+   - Set the root directory to: `backend`
+   - Set the build command to: `pip install -r requirements.txt`
+   - Set the start command to: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT`
+
+This approach ensures your application deploys correctly while maintaining a clean development codebase. 
