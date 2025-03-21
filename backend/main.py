@@ -6,8 +6,8 @@ Main application entrypoint for the Insurance Report Generator API
 import os
 import sys
 try:
-    # Try to resolve paths for both development and production
-    from fix_paths import project_root, backend_dir
+    # Try to import fix_paths - this works when the current directory is backend/
+    from fix_paths import backend_dir
     print("Successfully imported fix_paths")
 except ImportError:
     print("Could not import fix_paths directly, adjusting path...")
@@ -17,14 +17,24 @@ except ImportError:
         sys.path.insert(0, backend_dir)
         print(f"Added backend directory to path: {backend_dir}")
     try:
-        from fix_paths import project_root, backend_dir
+        from fix_paths import backend_dir
         print("Successfully imported fix_paths after path adjustment")
     except ImportError:
-        # If still cannot import, just use rootpath as before
-        from rootpath import ensure_root_in_path
-        project_root, backend_dir = ensure_root_in_path()
-        print("Using fallback rootpath module for path resolution")
+        # If still cannot import, create __init__.py files manually
+        print("Failed to import fix_paths, creating __init__.py files manually")
+        for dir_name in ['api', 'utils', 'services', 'models']:
+            dir_path = os.path.join(backend_dir, dir_name)
+            if os.path.isdir(dir_path):
+                init_file = os.path.join(dir_path, '__init__.py')
+                if not os.path.exists(init_file):
+                    try:
+                        with open(init_file, 'w') as f:
+                            f.write('# Auto-generated __init__.py file\n')
+                        print(f"Created {init_file}")
+                    except Exception as e:
+                        print(f"Failed to create {init_file}: {str(e)}")
 
+# Now the rest of the imports should work correctly
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

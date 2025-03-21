@@ -1,211 +1,205 @@
-# Error Handling Guide
+# Error Handling Improvements
 
-This document outlines the standard error handling patterns used throughout the Insurance Report Generator application to ensure consistent, informative, and user-friendly error responses.
+This document outlines the enhanced error handling system implemented in the Insurance Report Generator application.
 
-## Table of Contents
+## Overview
 
-1. [Backend Error Handling](#backend-error-handling)
-   - [Standard Error Response Format](#standard-error-response-format)
-   - [Using the Error Handler Decorator](#using-the-error-handler-decorator)
-   - [Handling Specific Exceptions](#handling-specific-exceptions)
-   - [Retry Operations](#retry-operations)
-   
-2. [Frontend Error Handling](#frontend-error-handling)
-   - [Parsing Error Responses](#parsing-error-responses)
-   - [Displaying Errors to Users](#displaying-errors-to-users)
-   
-3. [Logging Best Practices](#logging-best-practices)
-   - [Log Levels](#log-levels)
-   - [What to Log](#what-to-log)
-   - [Development vs Production Logging](#development-vs-production-logging)
+We've implemented a standardized error handling system that ensures consistent error responses across all API endpoints. The system is built on a hierarchy of custom exceptions and includes mechanisms for logging, reporting, and properly formatting error responses.
 
-## Backend Error Handling
+## Custom Exception Hierarchy
 
-### Standard Error Response Format
-
-All API errors follow this standard format:
+All exceptions inherit from `BaseAPIException`, which standardizes the error response format:
 
 ```json
 {
   "status": "error",
-  "error_type": "validation_error",
-  "message": "User-friendly error message",
-  "operation": "Description of the operation that failed"
+  "code": "ERROR_CODE",
+  "message": "Human-readable error message",
+  "details": { 
+    // Optional additional information about the error
+  }
 }
 ```
 
-In development mode, an additional field `traceback` may be included.
+### Exception Classes
 
-### Using the Error Handler Decorator
+The system includes the following exception types:
 
-For FastAPI endpoints, use the `api_error_handler` decorator:
+#### Client Error Exceptions (4xx)
+- `NotFoundException` (404) - Resource not found
+- `ValidationException` (422) - Invalid input data
+- `BadRequestException` (400) - Malformed request
+- `AuthenticationException` (401) - Authentication required
+- `AuthorizationException` (403) - Permission denied
+- `ConflictException` (409) - Resource conflict
+- `RateLimitException` (429) - Too many requests
+
+#### Server Error Exceptions (5xx)
+- `InternalServerException` (500) - Unexpected server error
+- `ServiceUnavailableException` (503) - Service temporarily unavailable
+- `FileProcessingException` (500) - File processing error
+- `AIServiceException` (500) - AI service error
+- `DatabaseException` (500) - Database error
+
+## Error Handler Decorator
+
+The `@api_error_handler` decorator standardizes error handling across all API endpoints:
 
 ```python
-from utils.error_handler import api_error_handler
-
 @router.post("/endpoint")
-@api_error_handler  # Always place after the FastAPI router decorator
+@api_error_handler
 async def my_endpoint():
-    # Function code here
+    # If an exception is raised here, it will be properly handled
+    # and converted to the standard error response format
     pass
 ```
 
-This decorator automatically catches exceptions and returns standardized error responses.
+This decorator:
+1. Catches all exceptions
+2. Logs the error with appropriate severity
+3. Converts standard exceptions to our custom exceptions
+4. Returns a properly formatted error response
 
-### Handling Specific Exceptions
+## Recent Improvements
 
-For fine-grained control, use the `handle_exception` function:
+### 1. Enhanced FileProcessor Exception Handling
 
-```python
-from utils.error_handler import handle_exception
+The `FileProcessor` utility class now uses our custom exception hierarchy instead of generic Python exceptions:
 
-try:
-    # Your code here
-except ValueError as e:
-    handle_exception(e, "validating user input", default_status_code=400)
-except FileNotFoundError as e:
-    handle_exception(e, "retrieving file", default_status_code=404)
-```
+- Replaced generic `ValueError` with specific exceptions like `NotFoundException` and `ValidationException`
+- Added proper exception handling with detailed error messages and context
+- Improved logging for debug and troubleshooting
+- Added detailed error information in exception payloads
 
-Common error types mapped to status codes:
-- `ValidationError`: 422 (Unprocessable Entity)
-- `ValueError`: 400 (Bad Request)
-- `KeyError`: 400 (Bad Request)
-- `FileNotFoundError`: 404 (Not Found)
-- `PermissionError`: 403 (Forbidden)
-- `NotImplementedError`: 501 (Not Implemented)
-- `TimeoutError`: 504 (Gateway Timeout)
-- `ConnectionError`: 503 (Service Unavailable)
-
-### Retry Operations
-
-For operations that might fail temporarily (e.g., network calls), use the retry utility:
+Example:
 
 ```python
-from utils.error_handler import retry_operation
+# Before
+if upload_id not in FileProcessor._chunked_uploads:
+    raise ValueError(f"Upload ID {upload_id} not found")
 
-def my_operation():
-    # Code that might fail temporarily
-
-result = retry_operation(
-    my_operation,
-    max_retries=3,
-    operation_name="fetching external data",
-    retry_exceptions=(ConnectionError, TimeoutError)
-)
+# After
+if upload_id not in FileProcessor._chunked_uploads:
+    raise NotFoundException(
+        message=f"Upload ID {upload_id} not found",
+        details={"upload_id": upload_id}
+    )
 ```
 
-## Frontend Error Handling
+### 2. Error Detail Enhancement
 
-### Parsing Error Responses
+All exceptions now include more detailed information to help with debugging:
 
-Use the `formatApiError` and `handleApiError` functions from `utils/errorHandler.js`:
+- Added relevant context to the `details` field
+- Ensured consistent error codes across the application
+- Improved error messages to be more descriptive and helpful
 
-```javascript
-import { handleApiError } from "../utils/errorHandler";
+## Best Practices for Error Handling
 
-try {
-  const response = await api.someRequest();
-  return response.data;
-} catch (error) {
-  return handleApiError(error, "operation description");
-}
-```
+When adding new code to the application, follow these guidelines:
 
-### Displaying Errors to Users
+1. Use the appropriate custom exception from `utils.exceptions` rather than generic Python exceptions
+2. Include helpful error messages that explain what went wrong
+3. Add relevant context in the `details` field
+4. Apply the `@api_error_handler` decorator to all API endpoints
+5. Log appropriate information before raising exceptions
+6. Handle expected exceptions at appropriate levels
+7. Never expose raw exception details or stack traces to clients
 
-For UI components, use the formatted error messages:
-
-```javascript
-import { formatApiError } from "../utils/errorHandler";
-
-// In a component's error handler
-const errorMessage = formatApiError(error);
-setErrorState(errorMessage);
-```
-
-The frontend error handler will automatically parse the standardized backend error format and display appropriate messages.
-
-## Logging Best Practices
-
-### Log Levels
-
-Use appropriate log levels:
-
-- `logger.debug`: Detailed information for debugging
-- `logger.info`: Confirmation that things are working as expected
-- `logger.warning`: Something unexpected happened, but the application can continue
-- `logger.error`: Something failed, but the application can recover
-- `logger.critical`: The application cannot continue
-
-### What to Log
-
-1. **Context**: Always include operation context in logs
-2. **Input validation**: Log invalid inputs (without sensitive data)
-3. **Exceptions**: Log full exception details including stack traces
-4. **State changes**: Log important application state changes
-5. **Performance**: Log timing for slow operations
-
-### Development vs Production Logging
-
-- **Development**: Verbose logging with stack traces
-- **Production**: Concise, actionable messages without sensitive data
-
-In production, use the `include_traceback=False` parameter with `handle_exception` to avoid exposing sensitive stack traces.
-
-## Examples
-
-### Complete Backend Example
+## Example Implementation
 
 ```python
-from fastapi import APIRouter
-from utils.error_handler import api_error_handler, handle_exception, logger
+from utils.exceptions import NotFoundException, ValidationException
+from utils.error_handler import api_error_handler
 
-router = APIRouter()
-
-@router.post("/documents")
+@router.get("/documents/{document_id}")
 @api_error_handler
-async def upload_documents(files):
-    # This will automatically handle exceptions
-    # and return standardized error responses
+async def get_document(document_id: str):
+    # Look up document
+    document = await document_service.get_document(document_id)
     
-    if not files:
-        handle_exception(
-            ValueError("No files provided"),
-            "validating upload request",
-            default_status_code=400
+    # Use custom exceptions with detailed error information
+    if not document:
+        raise NotFoundException(
+            message=f"Document with ID {document_id} not found",
+            details={"document_id": document_id}
+        )
+        
+    # Validate document state
+    if document.status != "processed":
+        raise ValidationException(
+            message="Document is not ready for viewing",
+            details={
+                "document_id": document_id,
+                "current_status": document.status,
+                "required_status": "processed"
+            }
         )
     
-    logger.info(f"Processing {len(files)} files")
-    
-    # Rest of the function...
+    return document
 ```
 
-### Complete Frontend Example
+## Testing Error Handling
 
-```javascript
-import axios from "axios";
-import { handleApiError } from "../utils/errorHandler";
+We've implemented a comprehensive testing infrastructure to ensure our error handling works correctly across the application.
 
-export async function uploadFile(files) {
-  try {
-    const formData = new FormData();
-    
-    // Add files to form data
-    files.forEach(file => formData.append("files", file));
-    
-    // Log request details
-    console.log(`Uploading ${files.length} files`);
-    
-    const response = await axios.post("/api/upload/documents", formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    });
-    
-    return response.data;
-  } catch (error) {
-    // This will log details, format the error message,
-    // and throw a new error with the formatted message
-    return handleApiError(error, "file upload");
-  }
-}
-``` 
+### Test Infrastructure
+
+1. **Dedicated Test Module**: The `backend/tests/test_error_handling.py` file contains tests specifically for error handling scenarios.
+
+2. **Consolidated Test Script**: The `test_error_handling.py` script in the project root runs all error handling tests and provides a concise summary.
+
+3. **Virtual Environment Support**: Tests can be run in an isolated virtual environment to ensure consistent test results.
+
+### Running Error Handling Tests
+
+You can run the error handling tests in several ways:
+
+#### Using the Consolidated Test Script:
+
+```bash
+# Activate the virtual environment first
+source venv/bin/activate
+
+# Run the consolidated test script
+python test_error_handling.py
+```
+
+#### Using the Test Runner:
+
+```bash
+# The run_tests.sh script handles setting up the virtual environment
+./run_tests.sh
+```
+
+#### Running Individual Test Modules:
+
+```bash
+# Activate the virtual environment first
+source venv/bin/activate
+
+# Run specific test modules
+python -m backend.tests.test_error_handling
+python -m backend.tests.test_chunked_upload  # Also tests error handling for chunked uploads
+```
+
+### Test Cases
+
+The error handling tests verify:
+
+1. **Exception Hierarchy**: Proper inheritance and structure of custom exceptions
+2. **Error Conversion**: Correct conversion of standard exceptions to custom exceptions
+3. **Response Format**: Proper formatting of error responses
+4. **Context Preservation**: Error details are maintained throughout the exception chain
+5. **Recovery Mechanisms**: Error recovery functions like retries work as expected
+
+### Adding New Tests
+
+When adding new functionality, include appropriate error handling tests:
+
+1. Verify that appropriate exceptions are raised for error conditions
+2. Test that exception details include relevant context
+3. Ensure that recovery mechanisms work as expected
+4. Test boundary conditions and edge cases
+
+By maintaining comprehensive test coverage for error handling, we ensure that the application remains robust and provides clear error information to clients. 

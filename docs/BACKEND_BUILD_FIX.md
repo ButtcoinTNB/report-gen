@@ -128,9 +128,20 @@ Check your Python code for circular imports, which can cause issues during start
 
 ### 9. Fix Import Path Issues
 
-If you encounter import errors like `ModuleNotFoundError: No module named 'backend.utils.file_handler'`, this indicates a Python path resolution issue. We've implemented a comprehensive solution:
+If you encounter import errors like `ModuleNotFoundError: No module named 'backend.utils.file_handler'` or `ModuleNotFoundError: No module named 'utils.file_handler'`, this indicates a Python path resolution issue. We've implemented a comprehensive solution:
 
-#### Automatic Path Resolution with fix_paths.py
+#### Solution 1: Ensure __init__.py Files Exist in All Directories
+
+Missing `__init__.py` files is a common cause of import errors. We've created a script to automatically fix this:
+
+```bash
+# Run from the project root
+python backend/scripts/ensure_init_files.py
+```
+
+This script checks all directories in the backend and creates any missing `__init__.py` files to ensure they're recognized as proper Python packages.
+
+#### Solution 2: Automatic Path Resolution with fix_paths.py
 
 We've added a path fixing module that handles both relative and absolute imports automatically:
 
@@ -143,6 +154,8 @@ Fix Python import paths for Render deployment
 
 import os
 import sys
+import importlib
+import types
 
 def fix_python_path():
     """
@@ -169,13 +182,40 @@ def fix_python_path():
         sys.path.insert(0, backend_dir)
         print(f"Added backend directory to Python path: {backend_dir}")
     
-    # Create a 'backend' directory in sys.modules if it doesn't exist
-    # This allows 'from backend.X import Y' to work as if importing from the actual backend directory
+    # Special handling for the 'backend' module to help with backend.X imports
     if 'backend' not in sys.modules:
-        import types
+        # Create a backend module
         backend_module = types.ModuleType('backend')
         sys.modules['backend'] = backend_module
         print("Created 'backend' module in sys.modules")
+        
+        # Add key submodules to the backend module
+        # This helps with direct imports from backend.X
+        for submodule_name in ['utils', 'api', 'services', 'models', 'config']:
+            # Create the full module name
+            full_module_name = f'backend.{submodule_name}'
+            
+            # Create a new module object
+            submodule = types.ModuleType(full_module_name)
+            
+            # Add it to sys.modules
+            sys.modules[full_module_name] = submodule
+            
+            # Set it as an attribute of the parent module
+            setattr(backend_module, submodule_name, submodule)
+            
+            print(f"Created '{full_module_name}' module in sys.modules")
+            
+            # Create subdirectory __init__.py files if they don't exist
+            subdir_path = os.path.join(backend_dir, submodule_name)
+            init_file = os.path.join(subdir_path, '__init__.py')
+            if os.path.isdir(subdir_path) and not os.path.exists(init_file):
+                try:
+                    with open(init_file, 'w') as f:
+                        f.write('# Auto-generated __init__.py file for module imports\n')
+                    print(f"Created missing __init__.py file in {subdir_path}")
+                except:
+                    print(f"Could not create __init__.py in {subdir_path} - check permissions")
     
     # Return the paths so they can be used elsewhere
     return project_root, backend_dir
@@ -211,19 +251,35 @@ except ImportError:
         print("Using fallback rootpath module for path resolution")
 ```
 
-#### Alternative: Update Import Statements
+#### Solution 3: Use Consistent Import Patterns
 
-As a fallback option, you can modify import statements in problematic files:
+Make sure you're using the same import style throughout your application:
 
-```python
-# Change FROM this (problematic in production):
-from backend.utils.file_handler import save_uploaded_file
+1. Either use **absolute imports** from the project root (recommended):
+   ```python
+   from backend.utils.file_handler import save_uploaded_file
+   ```
 
-# TO this (works in both environments):
-from utils.file_handler import save_uploaded_file
+2. Or use **relative imports** from the backend directory:
+   ```python
+   from utils.file_handler import save_uploaded_file
+   ```
+
+Do not mix these approaches within a single module, as it can lead to circular import errors.
+
+#### Solution 4: Update Start Command
+
+Make sure your start command in Render includes these elements:
+
+```
+python -c "import os; [open(os.path.join(root, '__init__.py'), 'a').close() for root, dirs, files in os.walk('.') if os.path.isdir(root) and not root.startswith('./.') and not os.path.exists(os.path.join(root, '__init__.py'))]" && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-This approach requires changing imports in multiple files but can work if you prefer to avoid modifying system path settings.
+This command:
+1. Creates missing __init__.py files in all subdirectories
+2. Runs uvicorn with proper module resolution
+
+> **IMPORTANT**: Since your Root Directory setting in Render is set to `/backend`, do not include `cd backend` in your start command. This would cause deployment errors by looking for a nested backend directory that doesn't exist.
 
 ## Testing Locally Before Deployment
 

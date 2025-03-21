@@ -62,7 +62,14 @@ If you encounter import errors related to the `backend` prefix, we've implemente
    - It adds the necessary directories to the Python path
    - It creates a mock 'backend' module in `sys.modules` to handle imports with the 'backend' prefix
 
-2. **Update Import Statements**: As a fallback solution, you can also update import statements:
+2. **Ensure __init__.py Files**: Run our helper script before deployment
+   ```bash
+   # Run from the project root
+   python backend/scripts/ensure_init_files.py
+   ```
+   This script creates missing `__init__.py` files in all subdirectories, ensuring Python correctly recognizes them as packages.
+
+3. **Update Import Statements**: As a fallback solution, you can also update import statements:
    ```python
    # Change FROM this (problematic in production):
    from backend.utils.file_handler import save_uploaded_file
@@ -76,10 +83,16 @@ If you encounter import errors related to the `backend` prefix, we've implemente
 Make sure your start command in Render is set to:
 
 ```
-cd backend && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+python -c "import os; [open(os.path.join(root, '__init__.py'), 'a').close() for root, dirs, files in os.walk('.') if os.path.isdir(root) and not root.startswith('./.') and not os.path.exists(os.path.join(root, '__init__.py'))]" && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-The `python -m` prefix is critical as it ensures proper module resolution regardless of the current working directory.
+This start command does two important things:
+1. Creates missing `__init__.py` files in all subdirectories to ensure proper package resolution 
+2. Starts uvicorn with the `-m` flag to ensure proper module resolution
+
+The `-m` prefix is critical as it ensures proper module resolution regardless of the current working directory.
+
+> **NOTE**: Since your Root Directory setting in Render is already set to `/backend`, do not include `cd backend` in your start command as this would cause it to look for a nested backend directory that doesn't exist.
 
 ### UploadQueryResult Import Error
 
