@@ -440,4 +440,97 @@ We've implemented multiple fixes to ensure reliable deployments on Render:
    - Removed circular dependency between `main.py` and `backend/main.py`
    - Created standalone entry point that imports modules directly
 
-This comprehensive approach ensures that deployments are reliable and don't require separate deployment branches or manual fixes. The same codebase now works correctly in both development and production environments. 
+This comprehensive approach ensures that deployments are reliable and don't require separate deployment branches or manual fixes. The same codebase now works correctly in both development and production environments.
+
+## Pre-Deployment Import Verification and Standardization
+
+To help prevent import-related issues and ensure consistent import patterns across all modules, we've created a set of powerful tools that can be run before deployment:
+
+### Import Verification Tool
+
+The import verification tool scans your codebase for missing imports and provides detailed reports:
+
+```bash
+# Run in check mode (no changes)
+python -m backend.scripts.verify_imports
+
+# Run with automatic fixing
+python -m backend.scripts.verify_imports --fix
+
+# Show detailed information
+python -m backend.scripts.verify_imports --verbose
+```
+
+This tool:
+- Identifies missing imports based on code analysis
+- Detects potential circular import issues
+- Verifies that all modules use the hybrid import pattern
+- Automatically adds missing imports when run with `--fix`
+
+### Import Standardization Tool
+
+The import standardization tool applies the hybrid import pattern to all API modules:
+
+```bash
+# Run in dry-run mode (shows changes without applying them)
+python -m backend.scripts.standardize_imports --dry-run
+
+# Apply changes to all API modules
+python -m backend.scripts.standardize_imports
+
+# Process a specific module only
+python -m backend.scripts.standardize_imports --module=upload
+```
+
+This tool:
+- Detects modules that don't use the hybrid import pattern
+- Extracts existing imports and converts them to the hybrid pattern
+- Preserves all existing functionality while ensuring compatibility
+- Is safe to run multiple times (idempotent operation)
+
+### Complete Pre-Deployment Preparation
+
+For a complete pre-deployment preparation, run the combined tool:
+
+```bash
+# Check for issues without making changes
+python -m backend.scripts.prepare_for_production --check-only
+
+# Apply all fixes and prepare for deployment
+python -m backend.scripts.prepare_for_production
+```
+
+This script combines all the preparation steps:
+1. Standardizes imports across all API modules
+2. Verifies and fixes any missing imports
+3. Ensures all necessary `__init__.py` files are present
+
+Running this script before deployment ensures that your codebase will work correctly in both development and production environments without manual intervention.
+
+## Integrating With CI/CD
+
+To integrate these tools with your CI/CD pipeline:
+
+1. **Add a verification step** to your CI workflow:
+   ```yaml
+   - name: Verify imports
+     run: python -m backend.scripts.verify_imports
+   ```
+
+2. **Add a pre-deployment step** to your deployment workflow:
+   ```yaml
+   - name: Prepare for deployment
+     run: python -m backend.scripts.prepare_for_production
+   ```
+
+3. **Commit changes** if any fixes were applied:
+   ```yaml
+   - name: Commit import fixes
+     run: |
+       git config --local user.email "ci@example.com"
+       git config --local user.name "CI Bot"
+       git add .
+       git commit -m "Fix: Apply import standardization" || echo "No changes to commit"
+   ```
+
+This ensures that your deployment always uses properly structured imports that work in all environments. 
