@@ -7,7 +7,7 @@ import uuid
 import json
 import asyncio
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from fastapi import APIRouter, UploadFile, Form, HTTPException, BackgroundTasks, Query, Body
 from fastapi.responses import JSONResponse
