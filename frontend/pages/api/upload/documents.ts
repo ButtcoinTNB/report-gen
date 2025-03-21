@@ -9,6 +9,17 @@ export default async function handler(
   req: NextApiRequest, 
   res: NextApiResponse
 ) {
+  // Handle OPTIONS requests for CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+    return res.status(200).end();
+  }
+
   // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ status: 'error', message: 'Method not allowed' });
@@ -35,11 +46,29 @@ export default async function handler(
     const response = await fetch(backendUrl, {
       method: 'POST',
       body: req.body,
-      headers: forwardHeaders
+      headers: {
+        ...forwardHeaders,
+        'Origin': req.headers.origin || '',
+      },
+      credentials: 'include'
     });
+
+    // Copy CORS headers from backend response
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': req.headers.origin || '*',
+      'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': '*',
+      'Access-Control-Expose-Headers': 'Content-Disposition'
+    };
 
     // Get the response data
     const data = await response.json();
+
+    // Set CORS headers and return the response
+    Object.entries(corsHeaders).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
 
     // Return the response from the backend
     return res.status(response.status).json(data);

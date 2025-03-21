@@ -24,6 +24,10 @@ export interface ApiRequestOptions {
   };
   /** Whether to skip automatic conversion of request/response data */
   skipConversion?: boolean;
+  /** Request credentials mode */
+  credentials?: 'include' | 'same-origin' | 'omit';
+  /** Additional headers to include in the request */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -226,15 +230,18 @@ export class ApiClient {
    * @returns Axios request configuration
    */
   private createRequestConfig(options: ApiRequestOptions): AxiosRequestConfig {
-    const { isMultipart, timeout, onUploadProgress } = options;
+    const { isMultipart, timeout, onUploadProgress, credentials, headers: customHeaders } = options;
     
-    const headers = isMultipart 
-      ? { 'Content-Type': 'multipart/form-data', 'Accept': 'application/json' }
-      : { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    const headers = {
+      'Accept': 'application/json',
+      'Content-Type': isMultipart ? 'multipart/form-data' : 'application/json',
+      ...customHeaders
+    };
     
     const config: AxiosRequestConfig = {
       headers,
       timeout: timeout || this.defaultOptions.timeout,
+      withCredentials: credentials === 'include'
     };
     
     if (isMultipart && onUploadProgress) {
@@ -336,7 +343,7 @@ export function createApiClient(
   else {
     // Add explicit type check to ensure endpoint is a valid key in config.endpoints
     const endpointUrl = config.endpoints && typeof config.endpoints === 'object' && endpoint in config.endpoints
-      ? (config.endpoints as Record<string, string>)[endpoint]
+      ? (config.endpoints as unknown as Record<string, string>)[endpoint]
       : null;
     
     if (endpointUrl) {

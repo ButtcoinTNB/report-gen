@@ -141,7 +141,9 @@ class Settings(BaseSettings):
         default=[
             "https://report-gen-liard.vercel.app",
             "https://report-gen.vercel.app",
-            "https://report-gen-5wtl.onrender.com"
+            "https://report-gen-5wtl.onrender.com",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
         ],
         description="Additional allowed origins for CORS"
     )
@@ -153,7 +155,17 @@ class Settings(BaseSettings):
         if os.getenv("CORS_ALLOW_ALL", "").lower() in ("true", "1", "yes"):
             return ["*"]
             
-        return self.FRONTEND_URL + self.ADDITIONAL_ALLOWED_ORIGINS
+        # Get frontend URLs as a list
+        frontend_urls = self.FRONTEND_URL if isinstance(self.FRONTEND_URL, list) else [self.FRONTEND_URL]
+        
+        # Combine and deduplicate URLs
+        all_origins = list(set(frontend_urls + self.ADDITIONAL_ALLOWED_ORIGINS))
+        
+        # Log the allowed origins in development
+        if not IS_PRODUCTION:
+            logger.info(f"CORS allowed origins: {all_origins}")
+            
+        return all_origins
 
     # Validators for critical settings
     @validator('OPENROUTER_API_KEY')

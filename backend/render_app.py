@@ -32,8 +32,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Explicitly list allowed methods
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],  # For file downloads
+    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
 # Include API routes

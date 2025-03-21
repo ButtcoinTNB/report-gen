@@ -78,10 +78,12 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
+    max_age=86400,
 )
 
 # Add custom middleware

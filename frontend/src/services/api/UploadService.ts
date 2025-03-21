@@ -208,6 +208,10 @@ export class UploadService extends ApiClient {
 
       const response = await this.post<ReportResponse>('/documents', formData, {
         isMultipart: true,
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+        },
         onUploadProgress: event => {
           if (onProgress && event.total) {
             const progress = Math.round((event.loaded * 100) / event.total);
