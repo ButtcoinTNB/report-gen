@@ -15,8 +15,8 @@ services:
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11
-      - key: ENVIRONMENT
+        value: 3.11.0
+      - key: NODE_ENV
         value: production
     # Add your other environment variables from your Render dashboard
     # - key: DATABASE_URL
