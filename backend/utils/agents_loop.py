@@ -6,6 +6,8 @@ from typing import Dict, List, Tuple
 from pathlib import Path
 import logging
 import asyncio
+import time
+from hashlib import md5
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +25,9 @@ class AIAgentLoop:
         self.brand_guide = self._load_brand_guide()
         self.reference_examples = self._load_references()
         self.writer_prompt, self.reviewer_prompt = self._load_prompts()
+        # Cache for similar refinements
+        self.refinement_cache = {}
+        self.cache_max_size = 50  # Maximum cache entries
         
     def _load_brand_guide(self) -> str:
         """Load the brand guide from the data directory."""
@@ -101,6 +106,25 @@ class AIAgentLoop:
                     continue
                 raise last_error
             
+    def _get_instruction_hash(self, instruction_text: str) -> str:
+        """Generate a simplified hash for similar instructions."""
+        # Normalize text by removing punctuation and converting to lowercase
+        import re
+        from hashlib import md5
+        
+        # Normalize text
+        normalized = re.sub(r'[^\w\s]', '', instruction_text.lower())
+        words = normalized.split()
+        
+        # Sort words to make order-independent
+        words.sort()
+        
+        # Take only the first 10 words for similarity
+        key_words = ' '.join(words[:10])
+        
+        # Generate MD5 hash
+        return md5(key_words.encode()).hexdigest()
+        
     async def generate_report(self, user_content: str) -> Dict:
         """Run the AI agent loop to generate and refine the report."""
         draft = ""
@@ -182,7 +206,7 @@ class AIAgentLoop:
             "iterations": i + 1
         }
 
-    async def refine_report(self, refinement_prompt: str) -> Dict:
+    async def refine_report(self, refinement_prompt: str, progress_callback=None) -> Dict:
         """
         Run a special refinement loop based on user instructions.
         
@@ -191,82 +215,154 @@ class AIAgentLoop:
         
         Args:
             refinement_prompt: A formatted prompt with the current content and refinement instructions
+            progress_callback: Optional callback for progress reporting
             
         Returns:
             Dict with draft, feedback and iterations
         """
+        # Extract content and instructions from the refinement prompt
+        content_start = refinement_prompt.find("CONTENUTO ATTUALE DEL REPORT:")
+        instructions_start = refinement_prompt.find("ISTRUZIONI PER IL MIGLIORAMENTO:")
+        
+        if content_start > -1 and instructions_start > -1:
+            content = refinement_prompt[content_start + len("CONTENUTO ATTUALE DEL REPORT:"):instructions_start].strip()
+            instructions = refinement_prompt[instructions_start + len("ISTRUZIONI PER IL MIGLIORAMENTO:"):].strip()
+        else:
+            # Fallback if the format is different
+            content = refinement_prompt
+            instructions = "Migliora il report mantenendo lo stesso stile e struttura."
+        
+        # Notify progress
+        if progress_callback:
+            progress_callback(0.05, "Analyzing instructions and content")
+        
+        # Check cache for similar instructions
+        instruction_hash = self._get_instruction_hash(instructions)
+        cache_key = f"{instruction_hash}_{len(content) % 1000}"  # Include content length signature
+        
+        # Only use cache for relatively simple instructions to avoid confusion
+        if len(instructions.split()) < 20 and cache_key in self.refinement_cache:
+            cached_result = self.refinement_cache[cache_key]
+            logger.info(f"Using cached refinement pattern (hash: {instruction_hash[:8]})")
+            
+            # Update the cached entry's usage timestamp
+            cached_result["last_used"] = time.time()
+            
+            if progress_callback:
+                progress_callback(0.3, "Using cached refinement pattern")
+            
+            # For cached results, we still need to run the model once to apply to this content
+            # but we can skip the review phase and multiple iterations
+            writer_input = f"""
+            === ISTRUZIONI ===
+            Applica il seguente pattern di raffinamento al testo fornito:
+            {instructions}
+            
+            === PATTERN ESEMPIO ===
+            {cached_result['pattern']}
+            
+            === DOCUMENTO ATTUALE ===
+            {content}
+            """
+            
+            draft = await self._call_model(writer_input, self.writer_prompt)
+            
+            if progress_callback:
+                progress_callback(0.9, "Cached pattern applied successfully")
+            
+            # Return with cached feedback but mark as from cache
+            return {
+                "draft": draft,
+                "feedback": cached_result["feedback"],
+                "iterations": 1,  # Only one iteration when using cache
+                "from_cache": True
+            }
+            
+        # Normal processing if no cache hit
         draft = ""
         feedback = {"score": 0, "suggestions": []}
         
-        # Format reference examples for prompts
+        # Analyze content to detect sections and structure
+        content_lines = content.split('\n')
+        content_word_count = len(' '.join(content_lines).split())
+        has_sections = any(line.strip().startswith('#') for line in content_lines)
+        
+        if progress_callback:
+            progress_callback(0.1, "Preparing refinement strategy")
+        
+        # Optimize references - only use 2 examples for refinement to save tokens
+        subset_count = min(2, len(self.reference_examples))
+        selected_examples = random.sample(self.reference_examples, subset_count)
         style_examples = "\n".join([
-            f"=== ESEMPIO {i+1} ===\nInput:\n{ex['messages'][0]['content']}\n\nOutput:\n{ex['messages'][1]['content']}\n"
-            for i, ex in enumerate(self.reference_examples)
+            f"=== ESEMPIO {i+1} ===\nOutput:\n{ex['messages'][1]['content']}"
+            for i, ex in enumerate(selected_examples)
         ])
         
         # Refinement usually needs fewer iterations
         max_refinement_loops = 2
         
-        # Extract potential refinement types from instructions for better handling
-        refinement_types = {
-            "aggiunta": "aggiungere nuove informazioni o sezioni",
-            "correzione": "correggere errori fattuali o calcoli",
-            "riorganizzazione": "ristrutturare o riorganizzare i contenuti",
-            "linguaggio": "migliorare il tono, lo stile o la chiarezza",
-            "dettagli": "aggiungere maggiori dettagli a sezioni esistenti",
-            "formato": "migliorare la formattazione o la struttura del documento"
-        }
+        # Create a compressed version of the brand guide to save tokens
+        compressed_brand_guide = "\n".join([
+            line for line in self.brand_guide.split('\n')
+            if line.strip() and not line.strip().startswith('#')
+        ])
         
         for i in range(max_refinement_loops):
             logger.info(f"Starting refinement iteration {i + 1}/{max_refinement_loops}")
             
-            # Writer agent refines the report with focus on the specific instructions
-            writer_input = f"""
-            === GUIDA BRAND ===
-            {self.brand_guide}
-
-            === RIFERIMENTI STILISTICI ===
-            {style_examples}
-
-            === ISTRUZIONI PER RAFFINAMENTO ===
-            {refinement_prompt}
+            # Report progress at each iteration
+            if progress_callback:
+                iteration_progress = 0.1 + (i / max_refinement_loops) * 0.7
+                progress_callback(iteration_progress, f"Refinement iteration {i + 1}/{max_refinement_loops}")
             
-            === GUIDA TECNICA AL RAFFINAMENTO ===
-            1. Mantieni la struttura e lo stile generale del report originale.
-            2. Implementa con precisione le modifiche richieste dall'utente.
-            3. Non aggiungere informazioni inventate o non presenti nell'input originale.
-            4. Conserva tutti gli elementi strutturali come intestazioni, tabelle, elenchi.
-            5. Se le istruzioni riguardano una specifica sezione, modifica solo quella.
-            6. Non abbreviare o rimuovere sezioni che non sono menzionate nelle istruzioni.
-            7. Assicurati che il tono sia coerente in tutto il documento anche dopo le modifiche.
+            # Optimize prompt length based on content size
+            if content_word_count > 1000:
+                # For larger documents, focus only on the required information
+                writer_input = f"""
+                MODIFICA REPORT: Segui precisamente queste istruzioni per migliorare il report.
+                
+                STILE RICHIESTO: Formale, chiaro, professionale. Mantieni la struttura attuale.
+                
+                ISTRUZIONI: {instructions}
+                
+                DOCUMENTO:
+                {content}
+                """
+            else:
+                # For smaller documents, include more context
+                writer_input = f"""
+                === GUIDA STILE ===
+                {compressed_brand_guide}
+
+                === ISTRUZIONI ===
+                {instructions}
+                
+                === DOCUMENTO ATTUALE ===
+                {content}
+                
+                IMPORTANTE: Implementa le modifiche richieste mantenendo struttura e informazioni esistenti.
+                """
             
-            INDICAZIONI IMPORTANTI:
-            - Leggi attentamente il contenuto attuale e le istruzioni di raffinamento
-            - Identifica esattamente quali parti devono essere modificate
-            - Apporta solo le modifiche specificate nelle istruzioni
-            - Mantieni intatto il resto del documento
-            - Verifica la coerenza e la fluidità del testo dopo le modifiche
-            """
+            if progress_callback:
+                progress_callback(iteration_progress + 0.15, "Generating refined content")
             
             draft = await self._call_model(writer_input, self.writer_prompt)
             
-            # Reviewer agent analyzes the refined draft
+            if progress_callback:
+                progress_callback(iteration_progress + 0.25, "Evaluating refinement quality")
+            
+            # Optimized reviewer prompt
             reviewer_input = f"""
-            === GUIDA BRAND ===
-            {self.brand_guide}
-
-            === ISTRUZIONI PER RAFFINAMENTO ===
-            {refinement_prompt}
-
-            === TESTO RAFFINATO ===
+            === REVISIONE ===
+            Valuta queste modifiche:
+            
+            ISTRUZIONI: {instructions}
+            
+            TESTO MODIFICATO:
             {draft}
             
-            === FOCUS DI REVISIONE ===
-            1. Verifica che tutte le modifiche richieste siano state implementate correttamente
-            2. Controlla che non siano state introdotte incongruenze o errori
-            3. Valuta la coerenza del testo dopo le modifiche
-            4. Assicurati che il tono e lo stile siano mantenuti in tutto il documento
-            5. Verifica che non siano state perse o alterate informazioni importanti
+            Rispondi SOLO con un JSON nel formato: {{"score": float, "suggestions": []}}
+            Score: 0-1 (0.9+ se le modifiche rispettano perfettamente le istruzioni)
             """
             
             review_result = await self._call_model(reviewer_input, self.reviewer_prompt)
@@ -277,7 +373,7 @@ class AIAgentLoop:
             except json.JSONDecodeError:
                 logger.warning("Failed to parse reviewer feedback JSON, retrying with explicit JSON instruction")
                 review_result = await self._call_model(
-                    reviewer_input + "\n\nIMPORTANTE: Rispondi SOLO con un oggetto JSON valido nel formato specificato.",
+                    reviewer_input + "\n\nIMPORTANTE: RISPONDI SOLO CON JSON VALIDO {\"score\": 0.X, \"suggestions\": []}",
                     self.reviewer_prompt
                 )
                 try:
@@ -285,12 +381,47 @@ class AIAgentLoop:
                 except json.JSONDecodeError:
                     feedback = {"score": 0, "suggestions": ["Errore nel formato del feedback"]}
                     logger.error("Failed to parse reviewer feedback JSON even after retry")
-                
-            # Exit if quality is high enough
-            if feedback["score"] > 0.9:
+            
+            # Exit early if quality is high enough to save resources
+            if feedback["score"] > 0.8:
                 logger.info(f"Quality threshold met at refinement iteration {i + 1}")
                 break
-                
+        
+        if progress_callback:
+            progress_callback(0.85, "Finalizing refinement results")
+        
+        # Store successful refinements in cache if they meet quality threshold
+        if feedback["score"] > 0.8 and len(instructions.split()) < 20:
+            # Extract a pattern from the refinement for future use
+            pattern = f"""
+            PRIMA:
+            {content[:min(500, len(content))]}
+            ...
+            
+            DOPO:
+            {draft[:min(500, len(draft))]}
+            ...
+            """
+            
+            # Store in cache
+            self.refinement_cache[cache_key] = {
+                "pattern": pattern,
+                "feedback": feedback,
+                "last_used": time.time()
+            }
+            
+            # Prune cache if it exceeds maximum size
+            if len(self.refinement_cache) > self.cache_max_size:
+                # Remove oldest entries based on last_used timestamp
+                oldest = sorted(self.refinement_cache.items(), key=lambda x: x[1]["last_used"])
+                for key, _ in oldest[:len(self.refinement_cache) - self.cache_max_size]:
+                    del self.refinement_cache[key]
+                    
+            logger.info(f"Added refinement pattern to cache (hash: {instruction_hash[:8]})")
+        
+        if progress_callback:
+            progress_callback(1.0, "Refinement completed")
+        
         return {
             "draft": draft,
             "feedback": feedback,

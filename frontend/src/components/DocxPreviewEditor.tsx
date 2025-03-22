@@ -10,7 +10,8 @@ import {
   Snackbar,
   Typography,
   Divider,
-  Paper
+  Paper,
+  LinearProgress
 } from '@mui/material';
 import { Download as DownloadIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { logger } from '../utils/logger';
@@ -39,6 +40,8 @@ export function DocxPreviewEditor({
   const [refinementInstructions, setRefinementInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
+  const [refinementProgress, setRefinementProgress] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -85,12 +88,15 @@ export function DocxPreviewEditor({
     }
 
     setIsRefining(true);
+    setRefinementProgress(0);
+    setProgressMessage('Inizializzazione...');
     setError(null);
 
     try {
-      logger.info('Refining report with AI...');
+      logger.info('Submitting refinement request...');
 
-      const response = await fetch('/api/agent-loop/refine-report', {
+      // Start the refinement task in the background
+      const startResponse = await fetch('/api/agent-loop/refine-report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -102,22 +108,32 @@ export function DocxPreviewEditor({
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to refine report');
+      if (!startResponse.ok) {
+        const errorData = await startResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to start refinement');
       }
 
-      const data = await response.json();
+      const { task_id } = await startResponse.json();
       
-      if (data.draft) {
-        setContent(data.draft);
+      // Connect to SSE endpoint for real-time updates
+      const result = await subscribeToTaskEvents(task_id);
+      
+      if (result.draft) {
+        setContent(result.draft);
         setRefinementInstructions('');
         setSuccessMessage('Report migliorato con successo!');
         setShowSuccess(true);
-        setRefinementFeedback(data.feedback || null);
+        setRefinementFeedback(result.feedback || null);
         
         if (onRefinementComplete) {
-          onRefinementComplete(data);
+          onRefinementComplete(result);
+        }
+        
+        // Show "from cache" indicator if the result was cached
+        if (result.from_cache) {
+          setProgressMessage('Miglioramento veloce (pattern in cache)');
+        } else {
+          setProgressMessage('');
         }
         
         logger.info('Report refined successfully');
@@ -127,9 +143,75 @@ export function DocxPreviewEditor({
     } catch (error) {
       logger.error('Error refining report:', error);
       setError(error instanceof Error ? error.message : 'Failed to refine report. Please try again.');
+      setProgressMessage('');
     } finally {
       setIsRefining(false);
     }
+  };
+
+  // Use Server-Sent Events for real-time progress updates
+  const subscribeToTaskEvents = (taskId: string): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      try {
+        // Open SSE connection
+        const eventSource = new EventSource(`/api/agent-loop/task-events/${taskId}`);
+        
+        // Handle updates
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            // Update progress in UI
+            if (data.progress !== undefined) {
+              setRefinementProgress(data.progress * 100);
+            }
+            
+            // Update status message
+            if (data.message) {
+              setProgressMessage(data.message);
+            }
+            
+            // Handle task completion
+            if (data.status === 'completed' && data.result) {
+              eventSource.close();
+              resolve(data.result);
+            } 
+            // Handle task failure
+            else if (data.status === 'failed') {
+              eventSource.close();
+              reject(new Error(data.error || 'Task failed'));
+            }
+            // Handle expired tasks
+            else if (data.status === 'expired') {
+              eventSource.close();
+              reject(new Error('Task expired or was removed'));
+            }
+          } catch (err) {
+            logger.error('Error parsing event data:', err);
+          }
+        };
+        
+        // Handle connection errors
+        eventSource.onerror = (error) => {
+          eventSource.close();
+          reject(new Error('Connection to event source failed'));
+        };
+        
+        // Safety timeout (10 minutes)
+        const timeout = setTimeout(() => {
+          eventSource.close();
+          reject(new Error('Task timed out after 10 minutes'));
+        }, 10 * 60 * 1000);
+        
+        // Clean up timeout on completion
+        eventSource.addEventListener('close', () => {
+          clearTimeout(timeout);
+        });
+        
+      } catch (error) {
+        reject(error);
+      }
+    });
   };
 
   return (
@@ -244,10 +326,27 @@ export function DocxPreviewEditor({
               disabled={isRefining || refinementInstructions.trim().length === 0}
               startIcon={isRefining ? <CircularProgress size={20} /> : <RefreshIcon />}
             >
-              {isRefining ? 'Miglioramento in corso...' : 'Migliora Report'}
+              {isRefining ? 
+                refinementProgress > 0 ? 
+                  `Miglioramento in corso... ${Math.round(refinementProgress)}%` : 
+                  'Miglioramento in corso...' 
+                : 'Migliora Report'}
             </Button>
           </Box>
         </Paper>
+      )}
+      
+      {isRefining && (
+        <Box sx={{ width: '100%', mt: 2 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            {progressMessage || 'Elaborazione in corso...'}
+          </Typography>
+          <LinearProgress 
+            variant="determinate" 
+            value={refinementProgress} 
+            sx={{ height: 8, borderRadius: 4 }}
+          />
+        </Box>
       )}
       
       <Divider sx={{ mb: 3 }} />
