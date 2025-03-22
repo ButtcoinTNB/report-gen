@@ -2,6 +2,8 @@ import { ApiClient, ApiRequestOptions, createApiClient } from './ApiClient';
 import { config } from '../../../config';
 import { logger } from '../../utils/logger';
 import { adaptApiRequest, adaptApiResponse } from '../../utils/adapters';
+import { processUploadError } from '../../utils/errorHandler';
+import { throttle } from '../../utils/throttle';
 
 /**
  * Response for a report creation or update
@@ -82,7 +84,7 @@ export interface ChunkedUploadConfig {
 }
 
 // The size threshold above which to use chunked uploads
-export const CHUNKED_UPLOAD_SIZE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
+export const CHUNKED_UPLOAD_SIZE_THRESHOLD = 10 * 1024 * 1024; // 10MB
 // Default chunk size for chunked uploads
 export const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -238,6 +240,9 @@ export class UploadService extends ApiClient {
         formData.append('report_id', snakeCaseRequest.report_id);
       }
 
+      // Create a throttled version of the progress callback
+      const throttledProgress = onProgress ? throttle(onProgress, 250) : undefined;
+
       const response = await this.post<ReportResponse>('/documents', formData, {
         isMultipart: true,
         credentials: 'include',
@@ -245,9 +250,9 @@ export class UploadService extends ApiClient {
           'Accept': 'application/json',
         },
         onUploadProgress: event => {
-          if (onProgress && event.total) {
+          if (throttledProgress && event.total) {
             const progress = Math.round((event.loaded * 100) / event.total);
-            onProgress(progress);
+            throttledProgress(progress);
           }
         },
         retryOptions: {
@@ -263,7 +268,15 @@ export class UploadService extends ApiClient {
       return adaptApiResponse<ReportResponseCamel>(response.data);
     } catch (error) {
       logger.error('Error uploading file:', error);
-      throw error;
+      // Process error for better user feedback
+      const structuredError = processUploadError(error);
+      // Preserve the original error's structure but augment with structured info
+      const enhancedError = new Error(structuredError.message);
+      (enhancedError as any).category = structuredError.category;
+      (enhancedError as any).userGuidance = structuredError.userGuidance;
+      (enhancedError as any).retryable = structuredError.retryable;
+      (enhancedError as any).originalError = error;
+      throw enhancedError;
     }
   }
 
@@ -287,8 +300,12 @@ export class UploadService extends ApiClient {
       
       // Keep track of overall progress
       let totalProgress = 0;
+      
+      // Create a throttled progress callback
+      const throttledProgress = onProgress ? throttle(onProgress, 250) : undefined;
+      
       const updateProgress = (fileProgress: number, fileIndex: number, fileCount: number) => {
-        if (!onProgress) return;
+        if (!throttledProgress) return;
         
         // Calculate weighted progress for this file
         const fileWeight = 1 / fileCount;
@@ -296,7 +313,7 @@ export class UploadService extends ApiClient {
         
         // Update total progress by adding the weighted progress of the current file
         totalProgress = (fileIndex * fileWeight * 100) + weightedProgress;
-        onProgress(Math.floor(totalProgress));
+        throttledProgress(Math.floor(totalProgress));
       };
       
       // Handle small files first with regular upload
@@ -313,14 +330,14 @@ export class UploadService extends ApiClient {
         await this.post<ReportResponse>('/documents', formData, {
           isMultipart: true,
           onUploadProgress: event => {
-            if (onProgress && event.total) {
+            if (throttledProgress && event.total) {
               const smallFilesProgress = Math.round((event.loaded * 100) / event.total);
               // If we have large files too, small files are only part of the total progress
               if (largeFiles.length > 0) {
                 const smallFilesWeight = smallFiles.length / files.length;
-                onProgress(Math.floor(smallFilesProgress * smallFilesWeight));
+                throttledProgress(Math.floor(smallFilesProgress * smallFilesWeight));
               } else {
-                onProgress(smallFilesProgress);
+                throttledProgress(smallFilesProgress);
               }
             }
           },

@@ -84,6 +84,44 @@ async def generate_report(request: AgentLoopRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/cancel-task/{task_id}")
+async def cancel_task(task_id: str):
+    """Cancel an ongoing agent loop task"""
+    if task_id not in tasks_cache:
+        raise HTTPException(status_code=404, detail="Task not found")
+        
+    task_data = tasks_cache[task_id]
+    
+    # Only cancel tasks that are in progress
+    if task_data["status"] not in ["pending", "processing"]:
+        return {
+            "status": "error",
+            "message": f"Cannot cancel task with status: {task_data['status']}"
+        }
+    
+    # Mark the task as cancelled in the cache
+    tasks_cache[task_id]["status"] = "failed"
+    tasks_cache[task_id]["error"] = "Task cancelled by user"
+    
+    # Notify any subscribers about the cancellation
+    if task_id in event_subscribers:
+        cancelled_event = {
+            "task_id": task_id,
+            "status": "failed",
+            "error": "Task cancelled by user"
+        }
+        for queue in event_subscribers[task_id]:
+            await queue.put(cancelled_event)
+    
+    # Clean up any resources related to this task
+    # (This is implementation specific based on how tasks are executed)
+    # For example, if there's a background process, signal it to stop
+    
+    return {
+        "status": "success",
+        "message": "Task cancelled successfully"
+    }
+
 @router.post("/refine-report", response_model=Dict[str, str])
 async def refine_report(request: RefineReportRequest, background_tasks: BackgroundTasks):
     try:
@@ -249,39 +287,55 @@ async def process_refinement(task_id: str, report_id: str, content: str, instruc
                 "suggestions": result.get("feedback", {}).get("suggestions", [])
             },
             "iterations": result.get("iterations", 1),
-            "docx_url": f"/download/{os.path.basename(docx_path)}",
-            "from_cache": result.get("from_cache", False)
+            "docx_url": f"/download/{os.path.basename(docx_path)}"
         }
         
-        # Mark as completed
-        update_task_status(task_id, "completed", 1.0, "Refinement completed successfully")
+        # Mark task as completed
+        update_task_status(task_id, "completed", 1.0, "Refinement complete")
         
     except Exception as e:
-        # Update task as failed
-        update_task_status(task_id, "failed", None, str(e))
+        # Log the error
+        print(f"Error in refinement task {task_id}: {str(e)}")
         
-    # Set task to expire after 1 hour
-    tasks_cache[task_id]["expires_at"] = time.time() + 3600
-
+        # Check if task was cancelled
+        if task_id in tasks_cache and tasks_cache[task_id].get("status") == "failed" and tasks_cache[task_id].get("error") == "Task cancelled by user":
+            # Task was already cancelled, don't overwrite the error
+            pass
+        else:
+            # Some other error occurred, update status
+            update_task_status(task_id, "failed", None, f"Error: {str(e)}")
+            tasks_cache[task_id]["error"] = str(e)
+        
 def update_task_status(task_id: str, status: str, progress: Optional[float] = None, message: Optional[str] = None):
-    """Update task status and notify subscribers."""
-    if task_id in tasks_cache:
-        tasks_cache[task_id]["status"] = status
+    """Update task status in cache and notify subscribers"""
+    if task_id not in tasks_cache:
+        return
         
-        if progress is not None:
-            tasks_cache[task_id]["progress"] = progress
-            
-        if message:
-            tasks_cache[task_id]["message"] = message
-            
-        # Notify subscribers
+    # Skip updates for cancelled tasks
+    if tasks_cache[task_id].get("status") == "failed" and tasks_cache[task_id].get("error") == "Task cancelled by user":
+        return
+        
+    # Update task cache
+    task_data = tasks_cache[task_id]
+    task_data["status"] = status
+    
+    if progress is not None:
+        task_data["progress"] = progress
+        
+    if message:
+        task_data["message"] = message
+        
+    # Notify subscribers if there are any
+    if task_id in event_subscribers:
         update = {
             "task_id": task_id,
             "status": status,
-            "progress": progress,
-            "message": message
+            "progress": progress
         }
         
-        if task_id in event_subscribers:
-            for queue in event_subscribers[task_id]:
-                queue.put_nowait(update) 
+        if message:
+            update["message"] = message
+            
+        # Use asyncio.create_task to avoid blocking
+        for queue in event_subscribers[task_id]:
+            asyncio.create_task(queue.put(update)) 

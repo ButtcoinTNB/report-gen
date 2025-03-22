@@ -1,4 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { ErrorCategory } from '../utils/errorHandler';
 
 export interface LoadingState {
   isLoading: boolean;
@@ -7,16 +8,39 @@ export interface LoadingState {
   message: string;
 }
 
+export interface ErrorDetails {
+  category?: ErrorCategory;
+  userGuidance?: string;
+  technicalDetails?: string;
+  retryable?: boolean;
+}
+
 export interface BackgroundUploadState {
   isUploading: boolean;
   totalFiles: number;
   uploadedFiles: number;
   progress: number;
   error: string | null;
+  errorDetails?: ErrorDetails;
   shouldCleanup?: boolean;
   cleanupReportId?: string;
   uploadStartTime?: number;
   uploadSessionId?: string;
+}
+
+export interface AgentLoopState {
+  taskId: string | null;
+  isInitializing: boolean;
+  isRunning: boolean;
+  progress: number;
+  stage: 'idle' | 'initializing' | 'writing' | 'reviewing' | 'complete' | 'error';
+  currentIteration: number;
+  totalIterations: number;
+  message: string;
+  error: string | null;
+  canCancel: boolean;
+  estimatedTimeRemaining: number | null;
+  startTime: number | null;
 }
 
 export interface ReportState {
@@ -29,6 +53,7 @@ export interface ReportState {
   additionalInfo: string;
   error: string | null;
   backgroundUpload: BackgroundUploadState;
+  agentLoop: AgentLoopState;
   sessionTimeout: number; // Session timeout in minutes
   lastActivityTime: number; // Last user activity timestamp
 }
@@ -56,6 +81,20 @@ const initialState: ReportState = {
     error: null,
     uploadStartTime: Date.now(),
     uploadSessionId: crypto.randomUUID?.() || `session-${Date.now()}`
+  },
+  agentLoop: {
+    taskId: null,
+    isInitializing: false,
+    isRunning: false,
+    progress: 0,
+    stage: 'idle',
+    currentIteration: 0,
+    totalIterations: 3, // Default to 3 iterations
+    message: '',
+    error: null,
+    canCancel: false,
+    estimatedTimeRemaining: null,
+    startTime: null
   },
   sessionTimeout: 30, // 30 minutes session timeout by default
   lastActivityTime: Date.now(),
@@ -127,6 +166,122 @@ export const reportSlice = createSlice({
       
       state.lastActivityTime = Date.now(); // Update activity time
     },
+    initAgentLoop: (state, action: PayloadAction<{ taskId?: string }>) => {
+      // Initialize the agent loop state
+      const taskId = action.payload.taskId || crypto.randomUUID?.() || `task-${Date.now()}`;
+      state.agentLoop = {
+        ...state.agentLoop,
+        taskId,
+        isInitializing: true,
+        isRunning: false,
+        progress: 0,
+        stage: 'initializing',
+        message: 'Inizializzazione in corso...',
+        error: null,
+        canCancel: true,
+        startTime: Date.now()
+      };
+      state.lastActivityTime = Date.now();
+    },
+    updateAgentLoopProgress: (state, action: PayloadAction<{ 
+      progress: number; 
+      message: string; 
+      stage?: AgentLoopState['stage'];
+      estimatedTimeRemaining?: number | null;
+    }>) => {
+      const { progress, message, stage, estimatedTimeRemaining } = action.payload;
+      
+      // If the agent loop is initializing and progress >= 20, transition to running
+      const isRunning = progress >= 20 || state.agentLoop.isRunning;
+      const isInitializing = progress < 20 && state.agentLoop.isInitializing;
+      
+      // Determine the appropriate stage
+      const newStage = stage || (
+        isInitializing ? 'initializing' : 
+        progress >= 100 ? 'complete' : 
+        isRunning ? (state.agentLoop.stage === 'writing' ? 'reviewing' : 'writing') : 
+        state.agentLoop.stage
+      );
+      
+      // Update the state
+      state.agentLoop = {
+        ...state.agentLoop,
+        isInitializing,
+        isRunning,
+        progress,
+        stage: newStage,
+        message,
+        estimatedTimeRemaining: estimatedTimeRemaining ?? state.agentLoop.estimatedTimeRemaining
+      };
+      
+      // For writing or reviewing stages, update the current iteration
+      if (newStage === 'writing' && state.agentLoop.stage !== 'writing') {
+        // Starting a new iteration when transitioning to writing
+        state.agentLoop.currentIteration = Math.min(
+          state.agentLoop.currentIteration + 1, 
+          state.agentLoop.totalIterations
+        );
+      }
+      
+      state.lastActivityTime = Date.now();
+    },
+    completeAgentLoop: (state, action: PayloadAction<{
+      content?: string;
+      previewUrl?: string;
+      iterations?: number;
+    }>) => {
+      const { content, previewUrl, iterations } = action.payload;
+      
+      // Update report content if provided
+      if (content) {
+        state.content = content;
+      }
+      
+      // Update preview URL if provided
+      if (previewUrl) {
+        state.previewUrl = previewUrl;
+      }
+      
+      // Update agent loop state
+      state.agentLoop = {
+        ...state.agentLoop,
+        isInitializing: false,
+        isRunning: false,
+        progress: 100,
+        stage: 'complete',
+        message: 'Generazione completata con successo',
+        error: null,
+        canCancel: false,
+        currentIteration: iterations || state.agentLoop.currentIteration,
+        totalIterations: iterations || state.agentLoop.totalIterations
+      };
+      
+      state.lastActivityTime = Date.now();
+    },
+    failAgentLoop: (state, action: PayloadAction<string>) => {
+      state.agentLoop = {
+        ...state.agentLoop,
+        isInitializing: false,
+        isRunning: false,
+        stage: 'error',
+        message: 'Si è verificato un errore durante la generazione del report',
+        error: action.payload,
+        canCancel: false,
+      };
+      state.error = action.payload;
+      state.lastActivityTime = Date.now();
+    },
+    cancelAgentLoop: (state) => {
+      // Mark the agent loop as cancelled without losing the task ID
+      const taskId = state.agentLoop.taskId;
+      state.agentLoop = {
+        ...initialState.agentLoop,
+        taskId,
+        message: 'Generazione annullata dall\'utente',
+        stage: 'idle'
+      };
+      state.lastActivityTime = Date.now();
+    },
     resetState: (state) => {
       // Reset to initial state but preserve session timeout settings
       const sessionTimeout = state.sessionTimeout;
@@ -137,6 +292,11 @@ export const reportSlice = createSlice({
     resetUpload: (state) => {
       // Reset just the upload portion
       state.backgroundUpload = initialState.backgroundUpload;
+      state.lastActivityTime = Date.now();
+    },
+    resetAgentLoop: (state) => {
+      // Reset just the agent loop portion
+      state.agentLoop = initialState.agentLoop;
       state.lastActivityTime = Date.now();
     },
     setSessionTimeout: (state, action: PayloadAction<number>) => {
@@ -156,6 +316,15 @@ export const reportSlice = createSlice({
           // Set shouldCleanup flag to true to trigger cleanup middleware
           state.backgroundUpload.shouldCleanup = true;
           state.backgroundUpload.cleanupReportId = state.reportId || undefined;
+        }
+        
+        // If agent loop is running, mark it for cancellation
+        if (state.agentLoop.isRunning || state.agentLoop.isInitializing) {
+          // The middleware will handle the actual API call for cancellation
+          state.agentLoop.canCancel = false;
+          state.agentLoop.message = 'Sessione scaduta, generazione annullata';
+          state.agentLoop.stage = 'error';
+          state.agentLoop.error = 'La sessione è scaduta per inattività';
         }
         
         // Reset state
@@ -178,8 +347,14 @@ export const {
   setAdditionalInfo,
   setError,
   setBackgroundUpload,
+  initAgentLoop,
+  updateAgentLoopProgress,
+  completeAgentLoop,
+  failAgentLoop,
+  cancelAgentLoop,
   resetState,
   resetUpload,
+  resetAgentLoop,
   setSessionTimeout,
   updateLastActivityTime,
   checkSessionTimeout,

@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { config } from '../../../config';
 import { logger } from '../../utils/logger';
 import { adaptApiRequest, adaptApiResponse, camelToSnakeObject, snakeToCamelObject } from '../../utils/adapters';
@@ -21,6 +21,8 @@ export interface ApiRequestOptions {
     retryDelay?: number;
     /** Function called when a retry is attempted */
     onRetry?: (attempt: number, maxRetries: number) => void;
+    /** Function to determine if an error is retryable */
+    shouldRetry?: (error: AxiosError) => boolean;
   };
   /** Whether to skip automatic conversion of request/response data */
   skipConversion?: boolean;
@@ -55,12 +57,92 @@ export interface ApiClientConfigCamel {
 }
 
 /**
+ * Error types for more granular error handling
+ */
+export enum ApiErrorType {
+  NETWORK = 'NETWORK',
+  SERVER = 'SERVER',
+  CLIENT = 'CLIENT',
+  AUTH = 'AUTH',
+  TIMEOUT = 'TIMEOUT',
+  UNKNOWN = 'UNKNOWN'
+}
+
+/**
+ * Enhanced API error with additional info
+ */
+export class ApiError extends Error {
+  public readonly type: ApiErrorType;
+  public readonly status?: number;
+  public readonly data?: any;
+  public readonly isRetryable: boolean;
+
+  constructor(
+    message: string,
+    type: ApiErrorType = ApiErrorType.UNKNOWN,
+    status?: number,
+    data?: any,
+    isRetryable: boolean = false
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.type = type;
+    this.status = status;
+    this.data = data;
+    this.isRetryable = isRetryable;
+  }
+
+  /**
+   * Create ApiError from AxiosError
+   */
+  static fromAxiosError(error: AxiosError): ApiError {
+    let type = ApiErrorType.UNKNOWN;
+    let isRetryable = false;
+    const status = error.response?.status;
+    const data = error.response?.data;
+    
+    // Determine error type and if it's retryable
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      type = ApiErrorType.TIMEOUT;
+      isRetryable = true;
+    } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
+      type = ApiErrorType.NETWORK;
+      isRetryable = true;
+    } else if (status) {
+      // Handle based on status code
+      if (status >= 500) {
+        type = ApiErrorType.SERVER;
+        isRetryable = true;
+      } else if (status === 401 || status === 403) {
+        type = ApiErrorType.AUTH;
+        isRetryable = false;
+      } else if (status >= 400) {
+        type = ApiErrorType.CLIENT;
+        // 429 Too Many Requests can be retried
+        isRetryable = status === 429;
+      }
+    }
+    
+    // Safely extract message from various error sources
+    let message = 'Unknown API error';
+    if (error.message) {
+      message = error.message;
+    }
+    if (error.response?.data && typeof error.response.data === 'object' && error.response.data !== null) {
+      message = (error.response.data as any).message || message;
+    }
+    
+    return new ApiError(message, type, status, data, isRetryable);
+  }
+}
+
+/**
  * Base class for all API service clients
  * Provides common functionality for API requests with retry capabilities
  * Automatically converts between snake_case (backend) and camelCase (frontend)
  */
 export class ApiClient {
-  protected axios: AxiosInstance;
+  protected client: AxiosInstance;
   protected baseUrl: string;
   protected defaultOptions: {
     timeout: number;
@@ -80,12 +162,12 @@ export class ApiClient {
       retryDelay: clientConfig.defaultRetryDelay || 1000
     };
 
-    this.axios = axios.create({
+    this.client = axios.create({
       baseURL: this.baseUrl
     });
 
     // Add request interceptor to convert camelCase to snake_case
-    this.axios.interceptors.request.use((config) => {
+    this.client.interceptors.request.use((config) => {
       // Skip conversion for multipart/form-data requests
       if (config.headers?.['Content-Type'] === 'multipart/form-data') {
         return config;
@@ -100,7 +182,7 @@ export class ApiClient {
     });
 
     // Add response interceptor to convert snake_case to camelCase
-    this.axios.interceptors.response.use((response) => {
+    this.client.interceptors.response.use((response) => {
       // Skip conversion if requested
       if ((response.config as any).skipConversion) {
         return response;
@@ -127,7 +209,7 @@ export class ApiClient {
     
     const config = this.createRequestConfig(requestOptions);
     
-    const response = await this.withRetry<R>(() => this.axios.get<R>(url, config), retryOptions);
+    const response = await this.withRetry<R>(() => this.client.get<R>(url, config), retryOptions);
     
     // If skipConversion is true, return response as is
     if (options.skipConversion) {
@@ -161,7 +243,7 @@ export class ApiClient {
     // Convert request data if needed
     const requestData = options.skipConversion ? data : adaptApiRequest(data);
     
-    const response = await this.withRetry<R>(() => this.axios.post<R>(url, requestData, config), retryOptions);
+    const response = await this.withRetry<R>(() => this.client.post<R>(url, requestData, config), retryOptions);
     
     // If skipConversion is true, return response as is
     if (options.skipConversion) {
@@ -195,7 +277,7 @@ export class ApiClient {
     // Convert request data if needed
     const requestData = options.skipConversion ? data : adaptApiRequest(data);
     
-    const response = await this.withRetry<R>(() => this.axios.put<R>(url, requestData, config), retryOptions);
+    const response = await this.withRetry<R>(() => this.client.put<R>(url, requestData, config), retryOptions);
     
     // If skipConversion is true, return response as is
     if (options.skipConversion) {
@@ -221,7 +303,7 @@ export class ApiClient {
     
     const config = this.createRequestConfig(requestOptions);
     
-    return this.withRetry<T>(() => this.axios.delete<T>(url, config), retryOptions);
+    return this.withRetry<T>(() => this.client.delete<T>(url, config), retryOptions);
   }
 
   /**
@@ -264,43 +346,43 @@ export class ApiClient {
     const maxRetries = options?.maxRetries ?? this.defaultOptions.retries;
     const retryDelay = options?.retryDelay ?? this.defaultOptions.retryDelay;
     const onRetry = options?.onRetry;
+    const shouldRetry = options?.shouldRetry || ((error: AxiosError) => {
+      const apiError = ApiError.fromAxiosError(error);
+      return apiError.isRetryable;
+    });
     
-    let lastError: any;
+    let lastError: AxiosError | null = null;
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        // On first attempt or subsequent retries
+        // Execute the request
         return await requestFn();
-      } catch (error: any) {
-        lastError = error;
+      } catch (error) {
+        lastError = error as AxiosError;
         
-        // Only retry on network errors or 5xx errors, not on 4xx client errors
-        const shouldRetry = (
-          error.code === 'ECONNABORTED' || 
-          error.code === 'ERR_NETWORK' ||
-          (error.response && error.response.status >= 500 && error.response.status < 600)
-        );
-        
-        // If we've reached max retries or shouldn't retry this error, throw
-        if (attempt >= maxRetries || !shouldRetry) {
-          throw error;
+        // Check if we should retry
+        if (attempt < maxRetries && shouldRetry(lastError)) {
+          // Calculate delay with exponential backoff
+          const delay = retryDelay * Math.pow(2, attempt);
+          
+          // Call retry callback if provided
+          if (onRetry) {
+            onRetry(attempt + 1, maxRetries);
+          }
+          
+          logger.info(`Retrying request (${attempt + 1}/${maxRetries}): ${lastError.config?.method?.toUpperCase()} ${lastError.config?.url}`);
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          // No more retries, convert to enhanced error and throw
+          throw ApiError.fromAxiosError(lastError);
         }
-        
-        // Log retry attempt
-        logger.api(this.baseUrl, `Request failed, retrying (${attempt + 1}/${maxRetries})...`, error);
-        
-        // Call onRetry callback if provided
-        if (onRetry) {
-          onRetry(attempt + 1, maxRetries);
-        }
-        
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, retryDelay * (attempt + 1)));
       }
     }
     
-    // This should never be reached due to the throw in the loop
-    throw lastError;
+    // This code should never execute, but TypeScript requires a return statement
+    throw new Error('Unexpected execution path in withRetry');
   }
 }
 
@@ -364,4 +446,9 @@ export function createApiClient(
   };
   
   return new ApiClient(clientConfig);
-} 
+}
+
+/**
+ * Default API client instance
+ */
+export const apiClient = createApiClient(config.API_BASE_URL); 

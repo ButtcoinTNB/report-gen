@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { 
   Box, 
   Button, 
@@ -18,7 +18,19 @@ import {
 import { Upload as UploadIcon, Info as InfoIcon } from '@mui/icons-material';
 import { DocxPreviewEditor } from './DocxPreviewEditor';
 import { AgentProgressStep } from './AgentProgressStep';
+import AgentInitializationTracker from './AgentInitializationTracker';
 import { logger } from '../utils/logger';
+import { reportService } from '../services/api/ReportService';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { 
+  initAgentLoop, 
+  updateAgentLoopProgress, 
+  completeAgentLoop, 
+  failAgentLoop, 
+  setError, 
+  setPreviewUrl, 
+  setContent
+} from '../store/reportSlice';
 
 type AgentStep = "writer" | "reviewer";
 
@@ -28,289 +40,268 @@ interface AgentLoopRunnerProps {
 }
 
 export function AgentLoopRunner({ reportId, onComplete }: AgentLoopRunnerProps) {
+  const dispatch = useAppDispatch();
+  const { additionalInfo, agentLoop, documentIds } = useAppSelector(state => state.report);
   const [files, setFiles] = useState<File[]>([]);
-  const [additionalInfo, setAdditionalInfo] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [preview, setPreview] = useState('');
+  const [localAdditionalInfo, setLocalAdditionalInfo] = useState('');
   const [feedback, setFeedback] = useState<{score: number; suggestions: string[]}>();
-  const [downloadUrl, setDownloadUrl] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [currentStep, setCurrentStep] = useState<AgentStep>("writer");
-  const [currentLoop, setCurrentLoop] = useState(0);
-  const [totalIterations, setTotalIterations] = useState(0);
   const [refinementCount, setRefinementCount] = useState(0);
-  const [analysis, setAnalysis] = useState<{
-    findings: Record<string, any>;
-    suggestions: string[];
-    extracted_variables: Record<string, any>;
-  } | null>(null);
-  const totalLoops = 3;
-
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
-    setPreview('');
-    setFeedback(undefined);
-    setDownloadUrl('');
-    setCurrentLoop(1);
-    setCurrentStep("writer");
-    setTotalIterations(0);
-    setRefinementCount(0);
-
+  
+  // Initialize local state from Redux store
+  useEffect(() => {
+    setLocalAdditionalInfo(additionalInfo);
+  }, [additionalInfo]);
+  
+  // Handle starting the agent loop
+  const handleStartAgentLoop = useCallback(async () => {
+    // Validate inputs
+    if (documentIds.length === 0 && files.length === 0) {
+      dispatch(setError('Devi caricare almeno un documento per generare il report'));
+      return;
+    }
+    
     try {
-      if (!files.length) {
-        throw new Error('Please select at least one file to analyze');
-      }
-
-      logger.info('Submitting files for analysis:', files.map(f => f.name));
-
+      // Initialize agent loop in Redux
+      dispatch(initAgentLoop({}));
+      
+      // Start agent loop initialization with progress updates
+      const result = await reportService.initializeAgentLoop(
+        {
+          reportId,
+          additionalInfo: localAdditionalInfo
+        },
+        (progress, message) => {
+          dispatch(updateAgentLoopProgress({ progress, message }));
+        }
+      );
+      
+      // Update feedback state
+      setFeedback(result.feedback);
+      
+      // Complete the agent loop with the result
+      dispatch(completeAgentLoop({
+        content: result.draft,
+        previewUrl: result.docxUrl,
+        iterations: result.iterations
+      }));
+      
+      // Notify parent component about completion
+      onComplete({ previewUrl: result.docxUrl });
+      
+      logger.info('Report generated successfully after', result.iterations, 'iterations');
+    } catch (error) {
+      logger.error('Error generating report:', error);
+      
+      const errorMessage = error instanceof Error ? error.message : 'Failed to generate report. Please try again.';
+      dispatch(failAgentLoop(errorMessage));
+      dispatch(setError(errorMessage));
+    }
+  }, [dispatch, reportId, localAdditionalInfo, documentIds, files, onComplete]);
+  
+  // Handle file selection
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setFiles(Array.from(e.target.files));
+    }
+  };
+  
+  // Handle manual file upload (for documents that haven't been uploaded via the FileUploader)
+  const handleUploadFiles = async () => {
+    if (!files.length) return;
+    
+    try {
+      dispatch(updateAgentLoopProgress({ 
+        progress: 5, 
+        message: 'Caricamento documenti in corso...' 
+      }));
+      
       const formData = new FormData();
       files.forEach(file => formData.append('files', file));
-      formData.append('additional_info', additionalInfo);
       formData.append('report_id', reportId);
-
-      setCurrentStep("writer");
-      logger.info('Uploading files...');
       
       const response = await fetch('/api/upload/files', {
         method: 'POST',
         body: formData
       });
-
+      
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Failed to upload files');
       }
-
-      const uploadData = await response.json();
-      logger.info('Files uploaded successfully, starting agent loop...');
-
-      // Start the agent loop
-      setCurrentStep("writer");
-      const agentResponse = await fetch('/api/agent-loop/generate-report', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          report_id: reportId,
-          additional_info: additionalInfo
-        })
-      });
-
-      if (!agentResponse.ok) {
-        const errorData = await agentResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to generate report');
-      }
-
-      const agentData = await agentResponse.json();
       
-      if (!agentData.draft) {
-        throw new Error('Invalid response format: missing draft content');
-      }
-
-      setPreview(agentData.draft);
-      setFeedback(agentData.feedback);
-      setDownloadUrl(agentData.docx_url || '');
-      setCurrentLoop(agentData.iterations);
-      setTotalIterations(agentData.iterations);
-      setCurrentStep("reviewer");
-
-      // Call onComplete with the result
-      onComplete({ previewUrl: agentData.docx_url });
-
-      logger.info('Report generated successfully after', agentData.iterations, 'iterations');
-
+      // Continue with agent loop after files are uploaded
+      handleStartAgentLoop();
     } catch (error) {
-      logger.error('Error generating report:', error);
-      setError(error instanceof Error ? error.message : 'Failed to generate report. Please try again.');
-      setCurrentStep("writer");
-    } finally {
-      setIsLoading(false);
+      logger.error('Error uploading files:', error);
+      
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload files. Please try again.';
+      dispatch(failAgentLoop(errorMessage));
+      dispatch(setError(errorMessage));
     }
-  }, [files, additionalInfo, onComplete, reportId]);
+  };
+  
+  // Handle submit - start the agent loop
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // If there are new files to upload, handle that first
+    if (files.length > 0) {
+      await handleUploadFiles();
+    } else {
+      // Otherwise, just start the agent loop with existing documents
+      await handleStartAgentLoop();
+    }
+  }, [files, handleStartAgentLoop, handleUploadFiles]);
 
   // Handler for refinement completion (to track refinements)
   const handleRefinementComplete = useCallback((data: { draft: string, feedback: {score: number; suggestions: string[]}, iterations: number, docx_url?: string }) => {
-    setPreview(data.draft);
+    dispatch(setContent(data.draft));
     setFeedback(data.feedback);
+    
     if (data.docx_url) {
-      setDownloadUrl(data.docx_url);
+      dispatch(setPreviewUrl(data.docx_url));
     }
+    
     setRefinementCount(prev => prev + 1);
-    setTotalIterations(prev => prev + data.iterations);
-  }, []);
-
-  const isFinal = currentLoop === totalLoops || (feedback?.score || 0) > 0.9;
+    
+    // Update agent loop state
+    dispatch(completeAgentLoop({
+      content: data.draft,
+      previewUrl: data.docx_url,
+      iterations: data.iterations
+    }));
+  }, [dispatch]);
+  
+  // Show either the agent initialization/progress tracker or the form to start
+  const showAgentTracker = agentLoop.isInitializing || 
+                          agentLoop.isRunning || 
+                          agentLoop.stage === 'error' ||
+                          agentLoop.progress > 0;
 
   return (
     <Box component="form" onSubmit={handleSubmit} sx={{ maxWidth: 800, mx: 'auto' }}>
-      {error && (
+      {/* Error handling at the top level */}
+      {agentLoop.error && (
         <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
+          {agentLoop.error}
         </Alert>
       )}
 
-      <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Carica Documenti
-        </Typography>
-
-        <Box sx={{ mb: 3 }}>
-          <Button
-            variant="outlined"
-            component="label"
-            startIcon={<UploadIcon />}
-            sx={{ mb: 1 }}
-          >
-            Seleziona File
-            <input
-              type="file"
-              multiple
-              hidden
-              onChange={e => setFiles(Array.from(e.target.files || []))}
-              accept=".doc,.docx,.pdf,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff,.rtf,.odt,.csv,.md,.html,.xls,.xlsx"
-            />
-          </Button>
-          {files.length > 0 && (
-            <List dense>
-              {Array.from(files).map((file, i) => (
-                <ListItem key={i}>
-                  <ListItemIcon>
-                    <InfoIcon color="info" />
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary={file.name}
-                    secondary={`${(file.size / 1024).toFixed(1)} KB`}
-                  />
-                </ListItem>
-              ))}
-            </List>
-          )}
-        </Box>
-
-        {analysis && (
-          <>
-            <Typography variant="subtitle1" gutterBottom>
-              Analisi Documenti
-            </Typography>
-            <List dense sx={{ mb: 3 }}>
-              {analysis.suggestions.map((suggestion, i) => (
-                <ListItem key={i}>
-                  <ListItemIcon>
-                    <InfoIcon color="info" />
-                  </ListItemIcon>
-                  <ListItemText primary={suggestion} />
-                </ListItem>
-              ))}
-            </List>
-          </>
-        )}
-
-        <TextField
-          fullWidth
-          multiline
-          rows={4}
-          label="Informazioni Aggiuntive"
-          value={additionalInfo}
-          onChange={e => setAdditionalInfo(e.target.value)}
-          sx={{ mb: 3 }}
-          helperText="Fornisci informazioni aggiuntive per migliorare il report"
-        />
-
-        <Button
-          type="submit"
-          variant="contained"
-          disabled={isLoading || files.length === 0}
-          sx={{ minWidth: 200 }}
-        >
-          {isLoading ? (
-            <>
-              <CircularProgress size={20} sx={{ mr: 1 }} />
-              {currentStep === "writer" ? "Scrittura..." : "Revisione..."}
-            </>
-          ) : (
-            'Genera Report'
-          )}
-        </Button>
-      </Paper>
-
-      {isLoading && currentLoop > 0 && (
-        <AgentProgressStep
-          step={currentStep}
-          loop={currentLoop}
-          totalLoops={totalLoops}
-          feedback={feedback}
-          isFinal={isFinal}
-        />
+      {/* Agent Initialization Tracker */}
+      {showAgentTracker && (
+        <AgentInitializationTracker />
       )}
 
-      {preview && !isLoading && (
+      {/* Input form - hidden when agent is running */}
+      {!agentLoop.isInitializing && !agentLoop.isRunning && (
         <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6" sx={{ flex: 1 }}>
-              Anteprima Report
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1 }}>
-              <Chip
-                icon={<InfoIcon />}
-                label={`${currentLoop} iterazioni iniziali`}
-                color={isFinal ? "success" : "primary"}
+          <Typography variant="h6" gutterBottom>
+            Generazione Report
+          </Typography>
+
+          {documentIds.length === 0 && (
+            <Box sx={{ mb: 3 }}>
+              <Button
                 variant="outlined"
-                size="small"
-              />
-              {refinementCount > 0 && (
-                <Chip
-                  icon={<InfoIcon />}
-                  label={`${refinementCount} raffinamenti`}
-                  color="secondary"
-                  variant="outlined"
-                  size="small"
+                component="label"
+                startIcon={<UploadIcon />}
+                sx={{ mb: 1 }}
+              >
+                Seleziona File
+                <input
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={handleFileChange}
+                  accept=".doc,.docx,.pdf,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp,.tiff,.rtf,.odt,.csv,.md,.html,.xls,.xlsx"
                 />
-              )}
-              {totalIterations > currentLoop && (
-                <Chip
-                  icon={<InfoIcon />}
-                  label={`${totalIterations} iterazioni totali`}
-                  color="info"
-                  variant="outlined"
-                  size="small"
-                />
+              </Button>
+              {files.length > 0 && (
+                <List dense>
+                  {Array.from(files).map((file, i) => (
+                    <ListItem key={i}>
+                      <ListItemIcon>
+                        <InfoIcon color="info" />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={file.name}
+                        secondary={`${(file.size / 1024).toFixed(1)} KB`}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
               )}
             </Box>
-          </Box>
-          <DocxPreviewEditor
-            initialContent={preview}
-            downloadUrl={downloadUrl}
-            reportId={reportId}
-            showRefinementOptions={!isLoading && currentLoop > 0}
-            onRefinementComplete={handleRefinementComplete}
+          )}
+
+          {documentIds.length > 0 && (
+            <Alert severity="info" sx={{ mb: 3 }}>
+              {documentIds.length} documenti caricati e pronti per l'elaborazione
+            </Alert>
+          )}
+
+          <TextField
+            fullWidth
+            multiline
+            rows={4}
+            label="Informazioni Aggiuntive"
+            value={localAdditionalInfo}
+            onChange={e => setLocalAdditionalInfo(e.target.value)}
+            sx={{ mb: 3 }}
+            helperText="Fornisci informazioni aggiuntive per migliorare il report"
           />
+
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={agentLoop.isInitializing || agentLoop.isRunning || (documentIds.length === 0 && files.length === 0)}
+            sx={{ minWidth: 200 }}
+          >
+            Genera Report
+          </Button>
         </Paper>
       )}
 
-      {feedback && !isLoading && (
-        <Paper elevation={2} sx={{ p: 3 }}>
+      {/* Show iteration feedback when appropriate */}
+      {agentLoop.isRunning && agentLoop.stage !== 'initializing' && (
+        <AgentProgressStep
+          step={agentLoop.stage === 'writing' ? 'writer' : 'reviewer'}
+          loop={agentLoop.currentIteration}
+          totalLoops={agentLoop.totalIterations}
+          feedback={feedback}
+          isFinal={agentLoop.stage === 'complete'}
+        />
+      )}
+
+      {/* Preview content when agent loop is complete */}
+      {agentLoop.stage === 'complete' && (
+        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Feedback AI
+            Anteprima Report
           </Typography>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle1">
-              Punteggio: {(feedback.score * 100).toFixed(0)}%
-            </Typography>
-          </Box>
-          {feedback.suggestions.length > 0 && (
-            <List>
-              {feedback.suggestions.map((suggestion, i) => (
-                <ListItem key={i}>
-                  <ListItemIcon>
-                    <InfoIcon color="info" />
-                  </ListItemIcon>
-                  <ListItemText primary={suggestion} />
-                </ListItem>
-              ))}
-            </List>
+          
+          {feedback && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="subtitle1">
+                Qualità del report: {Math.round(feedback.score * 100)}%
+              </Typography>
+              
+              {feedback.suggestions.length > 0 && (
+                <List dense>
+                  {feedback.suggestions.map((suggestion, i) => (
+                    <ListItem key={i}>
+                      <ListItemIcon>
+                        <InfoIcon color="info" fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={suggestion} 
+                        primaryTypographyProps={{ variant: 'body2' }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </Box>
           )}
         </Paper>
       )}

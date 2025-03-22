@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   Box, 
   Button, 
@@ -17,8 +17,8 @@ import { Download as DownloadIcon, Refresh as RefreshIcon } from '@mui/icons-mat
 import { logger } from '../utils/logger';
 
 interface DocxPreviewEditorProps {
-  initialContent: string;
-  downloadUrl: string;
+  initialContent?: string;
+  downloadUrl?: string;
   reportId?: string;
   showRefinementOptions?: boolean;
   onRefinementComplete?: (data: { 
@@ -30,13 +30,13 @@ interface DocxPreviewEditorProps {
 }
 
 export function DocxPreviewEditor({ 
-  initialContent, 
-  downloadUrl, 
-  reportId,
+  initialContent = '', 
+  downloadUrl = '',
+  reportId = '',
   showRefinementOptions = true,
   onRefinementComplete 
 }: DocxPreviewEditorProps) {
-  const [content, setContent] = useState(initialContent);
+  const [content, setContent] = useState(initialContent || '');
   const [refinementInstructions, setRefinementInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
@@ -46,6 +46,24 @@ export function DocxPreviewEditor({
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [refinementFeedback, setRefinementFeedback] = useState<{score: number; suggestions: string[]} | null>(null);
+  const [missingReportIdWarning, setMissingReportIdWarning] = useState(false);
+
+  // Update content when initialContent prop changes
+  useEffect(() => {
+    if (initialContent) {
+      setContent(initialContent);
+    }
+  }, [initialContent]);
+
+  // Check for missing reportId if refinement options are shown
+  useEffect(() => {
+    if (showRefinementOptions && !reportId) {
+      setMissingReportIdWarning(true);
+      logger.warn('DocxPreviewEditor: reportId is missing but refinement options are enabled');
+    } else {
+      setMissingReportIdWarning(false);
+    }
+  }, [showRefinementOptions, reportId]);
 
   const handleDownload = async () => {
     setIsLoading(true);
@@ -53,6 +71,11 @@ export function DocxPreviewEditor({
 
     try {
       logger.info('Generating DOCX file...');
+
+      // Check if we have a downloadUrl
+      if (!downloadUrl) {
+        throw new Error('URL di download non disponibile. Impossibile generare il documento.');
+      }
 
       const response = await fetch('/api/generate-docx', {
         method: 'POST',
@@ -84,6 +107,12 @@ export function DocxPreviewEditor({
   const handleRefine = async () => {
     if (!refinementInstructions.trim()) {
       setError('Per favore, inserisci le istruzioni per migliorare il report.');
+      return;
+    }
+
+    if (!reportId) {
+      setError('ID del report mancante. Impossibile procedere con il miglioramento.');
+      setMissingReportIdWarning(true);
       return;
     }
 
@@ -222,6 +251,12 @@ export function DocxPreviewEditor({
         </Alert>
       )}
 
+      {missingReportIdWarning && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          Avviso: ID report mancante. La funzionalità di miglioramento non sarà disponibile.
+        </Alert>
+      )}
+
       <TextField
         fullWidth
         multiline
@@ -323,7 +358,7 @@ export function DocxPreviewEditor({
               variant="outlined"
               color="primary"
               onClick={handleRefine}
-              disabled={isRefining || refinementInstructions.trim().length === 0}
+              disabled={isRefining || refinementInstructions.trim().length === 0 || !reportId}
               startIcon={isRefining ? <CircularProgress size={20} /> : <RefreshIcon />}
             >
               {isRefining ? 
@@ -356,7 +391,7 @@ export function DocxPreviewEditor({
           variant="contained"
           color="primary"
           onClick={handleDownload}
-          disabled={isLoading}
+          disabled={isLoading || !downloadUrl}
           startIcon={isLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
         >
           {isLoading ? 'Generazione...' : 'Scarica DOCX'}

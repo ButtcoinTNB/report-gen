@@ -10,31 +10,25 @@ import {
   Divider, 
   CircularProgress,
   Zoom,
-  Fade
+  Fade,
+  Collapse
 } from '@mui/material';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import NavigateNextIcon from '@mui/icons-material/NavigateNext';
+import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import FileUploader from './FileUploader';
 import ReportGenerator from './ReportGenerator';
 import { DocxPreviewEditor } from './DocxPreviewEditor';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
 import { setActiveStep, resetState } from '../store/reportSlice';
 import JourneyVisualizer from './JourneyVisualizer';
+import UploadProgressTracker from './UploadProgressTracker';
 
 interface Props {
   reportId?: string;
   onGenerate?: (reportData: any) => void;
   onError?: (error: Error) => void;
 }
-
-// Update FileUploader component to accept reportId
-interface FileUploaderProps {
-  reportId: string;
-}
-
-// Wrapping FileUploader to handle props
-const FileUploaderWrapper: React.FC<FileUploaderProps> = ({ reportId }) => {
-  return <FileUploader />;
-};
 
 const getStepContent = (
   step: number, 
@@ -44,7 +38,7 @@ const getStepContent = (
 ) => {
   switch (step) {
     case 0:
-      return <FileUploaderWrapper reportId={reportId || ''} />;
+      return <FileUploader reportId={reportId || ''} allowContinueWhileUploading={true} />;
     case 1:
       return <ReportGenerator reportId={reportId || ''} onGenerate={onReportGenerated} onError={onGenerateError} />;
     case 2:
@@ -67,6 +61,7 @@ const ReportStepper: React.FC<Props> = ({ reportId: propReportId, onGenerate, on
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [readyForAutoTransition, setReadyForAutoTransition] = useState(false);
+  const [showBackgroundUploadStatus, setShowBackgroundUploadStatus] = useState(false);
   
   // Define steps
   const steps = [
@@ -99,6 +94,19 @@ const ReportStepper: React.FC<Props> = ({ reportId: propReportId, onGenerate, on
       return () => clearTimeout(timer);
     }
   }, [backgroundUpload, additionalInfo, activeStep]);
+
+  // Show background upload status when user moves to next step while uploads are in progress
+  useEffect(() => {
+    if (activeStep > 0 && backgroundUpload?.isUploading) {
+      setShowBackgroundUploadStatus(true);
+    } else if (!backgroundUpload?.isUploading) {
+      // Hide after a short delay when uploads complete
+      const timer = setTimeout(() => {
+        setShowBackgroundUploadStatus(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeStep, backgroundUpload?.isUploading]);
 
   // Handle completion of steps
   useEffect(() => {
@@ -168,8 +176,8 @@ const ReportStepper: React.FC<Props> = ({ reportId: propReportId, onGenerate, on
   const isNextDisabled = () => {
     switch (activeStep) {
       case 0:
-        // Files will be uploaded in background, so we can always proceed to the next step
-        return false;
+        // Files will be uploaded in background, but we need at least one file uploading or uploaded
+        return !backgroundUpload || (!backgroundUpload.isUploading && backgroundUpload.uploadedFiles === 0);
       case 1:
         // Disable if report is not yet generated
         return !generatedReport;
@@ -206,6 +214,13 @@ const ReportStepper: React.FC<Props> = ({ reportId: propReportId, onGenerate, on
 
   return (
     <Box sx={{ width: '100%' }}>
+      {/* Background upload status (shown when user moves to subsequent steps) */}
+      <Collapse in={showBackgroundUploadStatus && activeStep > 0}>
+        <Box sx={{ position: 'fixed', bottom: 16, right: 16, zIndex: 1200, width: 320 }}>
+          <UploadProgressTracker variant="compact" />
+        </Box>
+      </Collapse>
+      
       <Paper elevation={0} sx={{ 
         mb: 4, 
         bgcolor: 'background.default',
@@ -259,41 +274,36 @@ const ReportStepper: React.FC<Props> = ({ reportId: propReportId, onGenerate, on
                         alignItems: 'center',
                         bgcolor: 'success.light',
                         color: 'success.contrastText',
-                        borderRadius: 2,
+                        borderRadius: 2
                       }}
                     >
                       <AutoAwesomeIcon sx={{ mr: 1 }} />
-                      <Typography variant="body1">
-                        Upload completato! Passando alla generazione del report...
+                      <Typography>
+                        Upload completato! Proseguendo alla generazione del report...
                       </Typography>
-                      <CircularProgress 
-                        size={20} 
-                        thickness={5} 
-                        sx={{ ml: 2, color: 'success.contrastText' }} 
-                      />
                     </Paper>
                   </Zoom>
                 )}
                 
-                <Box sx={{ display: 'flex', flexDirection: 'row', pt: 2 }}>
+                <Box sx={{ mt: 4, display: 'flex', justifyContent: 'space-between' }}>
                   <Button
+                    variant="outlined"
                     disabled={activeStep === 0}
                     onClick={handleBack}
-                    sx={{ mr: 1 }}
+                    startIcon={<NavigateBeforeIcon />}
                   >
                     Indietro
                   </Button>
-                  <Box sx={{ flex: '1 1 auto' }} />
-
-                  {activeStep !== 1 && (
-                    <Button 
-                      variant="contained" 
-                      onClick={handleNext}
-                      disabled={isNextDisabled()}
-                    >
-                      {getNextButtonText()}
-                    </Button>
-                  )}
+                  
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={handleNext}
+                    disabled={isNextDisabled()}
+                    endIcon={<NavigateNextIcon />}
+                  >
+                    {getNextButtonText()}
+                  </Button>
                 </Box>
               </Box>
             )}

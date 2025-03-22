@@ -96,8 +96,158 @@ export function handleError(error: any, options: ErrorHandlerOptions = {}): ApiE
   return apiError;
 }
 
+/**
+ * Error categories for better error handling and user feedback
+ */
+export enum ErrorCategory {
+  NETWORK = 'network',
+  SERVER = 'server',
+  FILE_TYPE = 'file_type',
+  FILE_SIZE = 'file_size',
+  PERMISSION = 'permission',
+  QUOTA = 'quota',
+  UNKNOWN = 'unknown'
+}
+
+/**
+ * Interface for structured error information
+ */
+export interface StructuredError {
+  message: string;
+  category: ErrorCategory;
+  technicalDetails?: string;
+  userGuidance: string;
+  retryable: boolean;
+}
+
+/**
+ * Maps HTTP status codes to error categories
+ */
+const statusToCategory = (status: number): ErrorCategory => {
+  if (status >= 500) return ErrorCategory.SERVER;
+  if (status === 413) return ErrorCategory.FILE_SIZE;
+  if (status === 415) return ErrorCategory.FILE_TYPE;
+  if (status === 403) return ErrorCategory.PERMISSION;
+  if (status === 429) return ErrorCategory.QUOTA;
+  if (status >= 400) return ErrorCategory.SERVER;
+  return ErrorCategory.UNKNOWN;
+};
+
+/**
+ * Maps error categories to user-friendly guidance
+ */
+const categoryToGuidance = (category: ErrorCategory): string => {
+  switch (category) {
+    case ErrorCategory.NETWORK:
+      return 'Verifica la tua connessione internet e riprova. Se il problema persiste, prova a ricaricare la pagina.';
+    case ErrorCategory.SERVER:
+      return 'Si è verificato un errore sul server. Riprova più tardi o contatta il supporto se il problema persiste.';
+    case ErrorCategory.FILE_TYPE:
+      return 'Il formato del file non è supportato. Utilizza solo file nei formati PDF, DOCX, DOC o TXT.';
+    case ErrorCategory.FILE_SIZE:
+      return 'Il file è troppo grande. La dimensione massima consentita è 100 MB. Prova a comprimere il file o suddividerlo in file più piccoli.';
+    case ErrorCategory.PERMISSION:
+      return 'Non hai i permessi necessari per caricare questo file. Verifica di aver effettuato l\'accesso o contatta l\'amministratore.';
+    case ErrorCategory.QUOTA:
+      return 'Hai raggiunto il limite di caricamenti. Riprova più tardi o contatta l\'amministratore per aumentare la quota.';
+    case ErrorCategory.UNKNOWN:
+    default:
+      return 'Si è verificato un errore imprevisto. Riprova o contatta il supporto se il problema persiste.';
+  }
+};
+
+/**
+ * Determines if an error is retryable based on its category
+ */
+const isRetryable = (category: ErrorCategory): boolean => {
+  return [
+    ErrorCategory.NETWORK,
+    ErrorCategory.SERVER,
+    ErrorCategory.UNKNOWN,
+    ErrorCategory.QUOTA
+  ].includes(category);
+};
+
+/**
+ * Processes an error into a structured format with user guidance
+ */
+export const processUploadError = (error: any): StructuredError => {
+  logger.error('Processing upload error:', error);
+  
+  // Default to unknown category
+  let category = ErrorCategory.UNKNOWN;
+  let message = 'Errore sconosciuto durante il caricamento';
+  let technicalDetails = '';
+  
+  // Handle different error types
+  if (error instanceof Error) {
+    message = error.message;
+    
+    // Check for network errors
+    if (
+      error.name === 'NetworkError' || 
+      error.message.includes('network') ||
+      error.message.includes('connection') ||
+      error.message.includes('offline')
+    ) {
+      category = ErrorCategory.NETWORK;
+    }
+  }
+  
+  // Handle response errors with status codes
+  if (error && error.status) {
+    category = statusToCategory(error.status);
+    technicalDetails = `Status: ${error.status}`;
+    
+    // Extract more details from response if available
+    if (error.data && error.data.message) {
+      message = error.data.message;
+    }
+  }
+  
+  // Check for file type errors
+  if (
+    message.toLowerCase().includes('file type') || 
+    message.toLowerCase().includes('format') || 
+    message.toLowerCase().includes('mime')
+  ) {
+    category = ErrorCategory.FILE_TYPE;
+  }
+  
+  // Check for file size errors
+  if (
+    message.toLowerCase().includes('size') || 
+    message.toLowerCase().includes('too large') || 
+    message.toLowerCase().includes('troppo grande')
+  ) {
+    category = ErrorCategory.FILE_SIZE;
+  }
+  
+  // Get user guidance based on category
+  const userGuidance = categoryToGuidance(category);
+  
+  // Determine if the error is retryable
+  const retryable = isRetryable(category);
+  
+  return {
+    message,
+    category,
+    technicalDetails,
+    userGuidance,
+    retryable
+  };
+};
+
+/**
+ * Formats a structured error into a user-friendly message
+ */
+export const formatErrorForUser = (error: StructuredError): string => {
+  return `${error.message}. ${error.userGuidance}`;
+};
+
 export default {
-  handleError,
-  getErrorMessage,
-  logger
+  processUploadError,
+  formatErrorForUser,
+  ErrorCategory,
+  isRetryable: (category: ErrorCategory) => isRetryable(category)
 }; 

@@ -1,104 +1,153 @@
-# Insurance Report Generator - Frontend
+# Insurance Report Generator Frontend
 
-This is the frontend application for the Insurance Report Generator, built with React, Redux, and TypeScript.
+A modern, React-based frontend application for generating insurance reports from uploaded documents with sophisticated background processing capabilities.
 
-## Application Structure
+## Features
 
-The application follows a step-by-step process for generating insurance reports:
+- **Seamless File Uploads**: Upload insurance documents with real-time progress tracking
+- **Background Processing**: Continue using the application while files upload in the background
+- **Error Recovery**: Robust error handling with automatic and manual retry mechanisms
+- **Multi-step Workflow**: Guided process from document upload to report refinement
+- **AI-powered Report Generation**: Automatic generation of comprehensive insurance reports
+- **Report Refinement**: Interactive editing and improvement of generated reports
 
-1. **Upload Documents** - Users upload insurance claim documents (PDF, DOCX, TXT)
-2. **Generate Report** - AI processes the documents to generate a report
-3. **Review & Edit** - Users can review, edit, and refine the report
-4. **Download Report** - The final report can be downloaded in various formats
+## Technical Overview
 
-## Directory Structure
+### Core Technologies
 
-The frontend follows the standard Next.js with TypeScript project structure:
+- **React**: Frontend framework
+- **TypeScript**: Type-safe JavaScript
+- **Material UI**: Component library for consistent UI
+- **Redux**: State management
+- **Axios**: Enhanced API client with retry mechanisms
+
+### Key Components
+
+- **FileUploader**: Primary interface for file uploads with background processing
+- **ReportGenerator**: Controls the report generation process
+- **DocxPreviewEditor**: Allows viewing and refinement of generated reports
+- **JourneyVisualizer**: Visualizes the user's progress through the application
+- **ReportStepper**: Orchestrates the multi-step workflow
+
+## Background Upload Implementation
+
+The background upload feature allows users to continue interacting with the application while files are being uploaded. This significantly improves user experience, especially when dealing with large documents.
+
+### Key Design Points
+
+1. **Immediate Upload Initiation**: Uploads begin as soon as files are selected
+2. **Real-time Progress Tracking**: Visual feedback on upload status
+3. **Error Recovery**: Automatic retries with exponential backoff for transient errors
+4. **Manual Retry Options**: User-initiated retries for failed uploads
+5. **Performance Optimization**: Chunked uploads for large files
+
+See [BACKGROUND_UPLOAD.md](./docs/BACKGROUND_UPLOAD.md) for detailed documentation.
+
+## Error Handling Strategy
+
+The application implements a sophisticated error handling approach:
+
+1. **Error Categorization**: Errors are categorized by type (network, server, client, etc.)
+2. **Intelligent Retry Logic**: Automatic retries for transient errors
+3. **User Feedback**: Clear, actionable error messages
+4. **Exponential Backoff**: Increasing delays between retries to prevent overwhelming the server
+
+### Error Categories
+
+- **Network Errors**: Connection issues, timeouts
+- **Server Errors**: 500-level errors
+- **Client Errors**: 400-level errors
+- **Authentication Errors**: 401, 403 errors
+- **Unknown Errors**: Other error types
+
+### ApiClient Enhancements
+
+The application uses an enhanced ApiClient with improved error handling:
+
+```typescript
+export class ApiError extends Error {
+  public readonly type: ApiErrorType;
+  public readonly isRetryable: boolean;
+  
+  // Determines if an error should be automatically retried
+  static fromAxiosError(error: AxiosError): ApiError {
+    // Categorize error and determine if it's retryable
+    // ...
+  }
+}
+```
+
+## Performance Optimizations
+
+The application includes several performance optimizations:
+
+1. **Lazy Loading**: Heavy components are loaded only when needed
+2. **Chunked Uploads**: Large files are split into manageable chunks
+3. **Debounced Actions**: User interactions are debounced to prevent excessive re-renders
+4. **Memoization**: Expensive calculations and renders are memoized
+
+### Lazy Loading Implementation
+
+```typescript
+// Lazy loaded components
+export const DocxPreviewEditor = lazy(() => 
+  import('./DocxPreviewEditor').then(module => ({ 
+    default: module.DocxPreviewEditor 
+  }))
+);
+```
+
+## Project Structure
 
 ```
 frontend/
-├── pages/           # Next.js pages and API routes
-│   └── api/         # API proxy routes
-├── src/             # Source code
-│   ├── components/  # React components
-│   ├── services/    # API services
-│   ├── store/       # Redux store
-│   ├── types/       # TypeScript types
-│   └── utils/       # Utility functions
-├── public/          # Static assets
-├── styles/          # Global styles
-└── config.ts        # Application configuration
+├── components/       # React components
+├── services/         # API services and data management
+│   └── api/          # API clients and interfaces
+├── store/            # Redux state management
+├── types/            # TypeScript type definitions
+├── utils/            # Utility functions
+└── docs/             # Documentation
+    └── BACKGROUND_UPLOAD.md   # Detailed background upload documentation
 ```
-
-## Components
-
-### Main Components
-
-- `ReportStepper.tsx` - Manages the step-by-step process and coordinates all other components
-- `FileUploader.tsx` - Handles document uploads with drag-and-drop and progress tracking
-- `ReportGenerator.tsx` - Manages the report generation process with real API calls
-- `ReportEditor.tsx` - Allows users to edit report content and request AI refinements
-- `ReportDownloader.tsx` - Provides options for previewing and downloading the final report
-
-### Redux State Management
-
-The application uses Redux for state management. The main state is defined in `reportSlice.ts` and includes:
-
-```typescript
-interface ReportState {
-  activeStep: number;           // Current step in the process
-  reportId: string | null;      // ID of the generated report
-  loading: LoadingState;        // Loading state information
-  documentIds: string[];        // IDs of uploaded documents
-  content: string | null;       // Content of the generated report
-  previewUrl: string | null;    // URL to preview the report
-  additionalInfo: string;       // Additional information for report generation
-  error: string | null;         // Error information
-}
-
-interface LoadingState {
-  isLoading: boolean;
-  progress: number;
-  stage: 'initial' | 'uploading' | 'analyzing' | 'generating' | 'refining' | 'preview' | 'downloading' | 'formatting' | 'saving' | 'complete' | 'error';
-  message: string;
-}
-```
-
-## API Integration
-
-The frontend integrates with the backend API for various operations:
-
-- `/api/upload/documents` - Upload documents and get document IDs
-- `/api/generate` - Generate a report from uploaded documents
-- `/api/generate/generate` - Generate report content based on a report ID
-- `/api/edit/{reportId}` - Save edits to a report
-- `/api/edit/ai-refine` - Request AI refinement of a report
-- `/api/format/preview-file` - Generate a preview of the report
-- `/api/download/{reportId}` - Download the report in default format
-- `/api/download/docx/{reportId}` - Download the report as a DOCX file
 
 ## Getting Started
 
-1. Install dependencies:
-   ```
+1. **Installation**:
+   ```bash
    npm install
    ```
 
-2. Start the development server:
-   ```
+2. **Development**:
+   ```bash
    npm run dev
    ```
 
-3. Build for production:
-   ```
+3. **Build**:
+   ```bash
    npm run build
    ```
 
-## Dependencies
+## Testing
 
-- React - UI library
-- Redux Toolkit - State management
-- TypeScript - Type safety
-- Material-UI - Component library
-- React Dropzone - For file upload functionality
-- Next.js - React framework
+The application includes comprehensive tests for critical functionality:
+
+```bash
+# Run all tests
+npm test
+
+# Test specific component
+npm test -- -t "FileUploader"
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch: `git checkout -b feature/my-new-feature`
+3. Commit your changes: `git commit -am 'Add some feature'`
+4. Push to the branch: `git push origin feature/my-new-feature`
+5. Submit a pull request
+
+## License
+
+This project is proprietary and confidential. Unauthorized copying or distribution is prohibited.
