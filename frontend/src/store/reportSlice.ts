@@ -1,6 +1,16 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { ErrorCategory } from '../utils/errorHandler';
 
+// Transaction state used to track ongoing state operations
+export interface StateTransaction {
+  id: string;
+  operation: 'cancel' | 'reconnect' | 'update' | 'complete';
+  startTime: number;
+  isPending: boolean;
+  taskId?: string;
+  retryCount?: number;
+}
+
 export interface LoadingState {
   isLoading: boolean;
   progress: number;
@@ -41,6 +51,7 @@ export interface AgentLoopState {
   canCancel: boolean;
   estimatedTimeRemaining: number | null;
   startTime: number | null;
+  transactionId: string | null; // Track current transaction ID
 }
 
 export interface ReportState {
@@ -56,6 +67,9 @@ export interface ReportState {
   agentLoop: AgentLoopState;
   sessionTimeout: number; // Session timeout in minutes
   lastActivityTime: number; // Last user activity timestamp
+  
+  // Add transaction tracking
+  pendingTransactions: StateTransaction[];
 }
 
 // Initial state for the report generation process
@@ -94,10 +108,17 @@ const initialState: ReportState = {
     error: null,
     canCancel: false,
     estimatedTimeRemaining: null,
-    startTime: null
+    startTime: null,
+    transactionId: null
   },
   sessionTimeout: 30, // 30 minutes session timeout by default
   lastActivityTime: Date.now(),
+  pendingTransactions: [],
+};
+
+// Generate unique transaction ID
+const generateTransactionId = (): string => {
+  return `txn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
 // Create a slice for report generation state
@@ -186,41 +207,45 @@ export const reportSlice = createSlice({
     updateAgentLoopProgress: (state, action: PayloadAction<{ 
       progress: number; 
       message: string; 
+      transactionId?: string;
       stage?: AgentLoopState['stage'];
       estimatedTimeRemaining?: number | null;
     }>) => {
-      const { progress, message, stage, estimatedTimeRemaining } = action.payload;
+      const { progress, message, transactionId, stage, estimatedTimeRemaining } = action.payload;
       
-      // If the agent loop is initializing and progress >= 20, transition to running
-      const isRunning = progress >= 20 || state.agentLoop.isRunning;
-      const isInitializing = progress < 20 && state.agentLoop.isInitializing;
-      
-      // Determine the appropriate stage
-      const newStage = stage || (
-        isInitializing ? 'initializing' : 
-        progress >= 100 ? 'complete' : 
-        isRunning ? (state.agentLoop.stage === 'writing' ? 'reviewing' : 'writing') : 
-        state.agentLoop.stage
-      );
-      
-      // Update the state
-      state.agentLoop = {
-        ...state.agentLoop,
-        isInitializing,
-        isRunning,
-        progress,
-        stage: newStage,
-        message,
-        estimatedTimeRemaining: estimatedTimeRemaining ?? state.agentLoop.estimatedTimeRemaining
-      };
-      
-      // For writing or reviewing stages, update the current iteration
-      if (newStage === 'writing' && state.agentLoop.stage !== 'writing') {
-        // Starting a new iteration when transitioning to writing
-        state.agentLoop.currentIteration = Math.min(
-          state.agentLoop.currentIteration + 1, 
-          state.agentLoop.totalIterations
+      // Only update if not in transaction or if this update is part of the current transaction
+      if (!state.agentLoop.transactionId || state.agentLoop.transactionId === transactionId) {
+        // If the agent loop is initializing and progress >= 20, transition to running
+        const isRunning = progress >= 20 || state.agentLoop.isRunning;
+        const isInitializing = progress < 20 && state.agentLoop.isInitializing;
+        
+        // Determine the appropriate stage
+        const newStage = stage || (
+          isInitializing ? 'initializing' : 
+          progress >= 100 ? 'complete' : 
+          isRunning ? (state.agentLoop.stage === 'writing' ? 'reviewing' : 'writing') : 
+          state.agentLoop.stage
         );
+        
+        // Update the state
+        state.agentLoop = {
+          ...state.agentLoop,
+          isInitializing,
+          isRunning,
+          progress,
+          stage: newStage,
+          message,
+          estimatedTimeRemaining: estimatedTimeRemaining ?? state.agentLoop.estimatedTimeRemaining
+        };
+        
+        // For writing or reviewing stages, update the current iteration
+        if (newStage === 'writing' && state.agentLoop.stage !== 'writing') {
+          // Starting a new iteration when transitioning to writing
+          state.agentLoop.currentIteration = Math.min(
+            state.agentLoop.currentIteration + 1, 
+            state.agentLoop.totalIterations
+          );
+        }
       }
       
       state.lastActivityTime = Date.now();
@@ -271,15 +296,22 @@ export const reportSlice = createSlice({
       state.error = action.payload;
       state.lastActivityTime = Date.now();
     },
-    cancelAgentLoop: (state) => {
+    cancelAgentLoop: (state, action: PayloadAction<{ transactionId?: string }>) => {
       // Mark the agent loop as cancelled without losing the task ID
       const taskId = state.agentLoop.taskId;
-      state.agentLoop = {
-        ...initialState.agentLoop,
-        taskId,
-        message: 'Generazione annullata dall\'utente',
-        stage: 'idle'
-      };
+      const transactionId = action.payload?.transactionId || state.agentLoop.transactionId;
+      
+      // Only proceed if not already in the middle of a different transaction
+      if (state.agentLoop.transactionId === null || state.agentLoop.transactionId === transactionId) {
+        state.agentLoop = {
+          ...initialState.agentLoop,
+          taskId,
+          transactionId,
+          message: 'Generazione annullata dall\'utente',
+          stage: 'idle'
+        };
+      }
+      
       state.lastActivityTime = Date.now();
     },
     resetState: (state) => {
@@ -331,6 +363,67 @@ export const reportSlice = createSlice({
         Object.assign(state, initialState);
         state.lastActivityTime = currentTime;
       }
+    },
+    beginTransaction: (state, action: PayloadAction<Omit<StateTransaction, 'id' | 'startTime' | 'isPending'>>) => {
+      const transactionId = generateTransactionId();
+      const transaction: StateTransaction = {
+        ...action.payload,
+        id: transactionId,
+        startTime: Date.now(),
+        isPending: true
+      };
+      
+      state.pendingTransactions.push(transaction);
+      
+      if (action.payload.taskId && action.payload.operation === 'cancel') {
+        // Mark the agent loop state as being in a transaction
+        if (state.agentLoop.taskId === action.payload.taskId) {
+          state.agentLoop.transactionId = transactionId;
+        }
+      }
+      
+      state.lastActivityTime = Date.now();
+    },
+    completeTransaction: (state, action: PayloadAction<{ transactionId: string; success: boolean }>) => {
+      const { transactionId, success } = action.payload;
+      const transactionIndex = state.pendingTransactions.findIndex(t => t.id === transactionId);
+      
+      if (transactionIndex >= 0) {
+        if (success) {
+          // Remove the completed transaction
+          state.pendingTransactions.splice(transactionIndex, 1);
+        } else {
+          // Mark transaction as not pending but keep for retry/logging
+          state.pendingTransactions[transactionIndex].isPending = false;
+        }
+      }
+      
+      // Clear transaction ID from agent loop if it matches
+      if (state.agentLoop.transactionId === transactionId) {
+        state.agentLoop.transactionId = null;
+      }
+      
+      state.lastActivityTime = Date.now();
+    },
+    cleanupStaleTransactions: (state) => {
+      // Clean up stale transactions older than 5 minutes
+      const now = Date.now();
+      const fiveMinutesAgo = now - (5 * 60 * 1000);
+      
+      state.pendingTransactions = state.pendingTransactions.filter(transaction => {
+        return transaction.isPending || transaction.startTime > fiveMinutesAgo;
+      });
+      
+      // Clear transaction ID if it's no longer in the transactions list
+      if (state.agentLoop.transactionId) {
+        const transactionExists = state.pendingTransactions.some(
+          t => t.id === state.agentLoop.transactionId
+        );
+        
+        if (!transactionExists) {
+          state.agentLoop.transactionId = null;
+        }
+      }
     }
   }
 });
@@ -358,6 +451,9 @@ export const {
   setSessionTimeout,
   updateLastActivityTime,
   checkSessionTimeout,
+  beginTransaction,
+  completeTransaction,
+  cleanupStaleTransactions,
 } = reportSlice.actions;
 
 // Export reducer

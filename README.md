@@ -229,4 +229,220 @@ Potential future enhancements could include:
 
 - WebSocket-based real-time updates instead of polling
 - More accurate time estimation based on document size and complexity
-- Enhanced progress visualization with document-specific status 
+- Enhanced progress visualization with document-specific status
+
+# Recent Improvements
+
+The Agent Loop Initialization System has undergone several important improvements:
+
+## 1. Configuration and Flexibility
+
+- Added a centralized configuration system (`apiConfig`) for all API-related settings
+- Made polling intervals, timeouts, retry logic, and other parameters configurable
+- Ensured hardcoded values are replaced with configurable parameters throughout the codebase
+
+## 2. WebSocket Implementation
+
+- Implemented WebSocket support for real-time task status updates
+- Created a fallback mechanism to polling when WebSockets are unavailable
+- Added robust reconnection logic with exponential backoff
+- Ensured proper cleanup of WebSocket connections to prevent resource leaks
+
+## 3. Error Recovery Enhancements
+
+- Improved network error detection and recovery
+- Added automatic retry mechanisms for transient failures
+- Implemented detailed error categorization with specific user guidance
+- Enhanced error display with recovery suggestions based on error type
+
+## 4. Security Improvements
+
+- Added user validation for sensitive operations like task cancellation
+- Implemented JWT-based authentication support
+- Created role-based access control for administrative functions
+- Added protection against unauthorized task cancellation
+
+## 5. Resource Management
+
+- Fixed memory leaks in component cleanup
+- Implemented proper resource tracking and cleanup for backend processes
+- Added graceful termination of tasks during cancellation
+- Enhanced connection management to prevent orphaned connections
+
+## 6. Import/Export Standardization
+
+- Fixed import/export inconsistencies between components
+- Standardized how components are imported from index files
+- Ensured proper module resolution throughout the application
+
+These improvements make the Agent Loop Initialization System more robust, efficient, and maintainable while preserving the core functionality and user experience.
+
+# Insurance Report Generator - System Improvements
+
+This document outlines recent improvements made to the Insurance Report Generator application to enhance robustness, efficiency, and maintainability.
+
+## Recent System Enhancements
+
+### 1. Transaction-Based State Management
+
+The frontend state management has been enhanced with transaction-based patterns to prevent race conditions and ensure data consistency during critical operations:
+
+- **Transaction Tracking**: Redux state now tracks pending transactions with their status and metadata.
+- **Atomic Operations**: Critical state changes (like cancellations and reconnections) are managed as atomic transactions.
+- **Cleanup Mechanism**: Stale transactions are automatically cleaned up after 5 minutes.
+- **Race Condition Prevention**: State updates are only applied if they belong to the current transaction or if no transaction is in progress.
+
+**Key files:**
+- `frontend/src/store/reportSlice.ts` - Transaction state management
+- `frontend/src/services/api/ReportService.ts` - Transaction implementation in API service
+
+### 2. Standardized Error Handling
+
+A comprehensive error handling system has been implemented to standardize error responses and improve troubleshooting:
+
+- **Centralized Error Handler**: Common error handling logic with standardized error types and responses.
+- **Error Categorization**: Errors are categorized by type (authentication, validation, not found, etc.) with appropriate HTTP status codes.
+- **Structured Error Responses**: All errors follow a consistent format with status, code, message and contextual details.
+- **Transaction Tracing**: Error responses include transaction IDs for cross-component tracing.
+- **Retryable Errors**: Flags indicating whether operations can be retried automatically.
+
+**Key files:**
+- `backend/utils/error_handler.py` - Centralized error handling utilities
+
+### 3. Resource Management and Cleanup
+
+Improved resource management systems ensure proper initialization, tracking, and cleanup of system resources:
+
+- **Dependency Manager**: Centralized tracking of system dependencies and resources.
+- **Resource Trackers**: Type-safe resource tracking with automatic cleanup.
+- **Connection Management**: Proper lifecycle management for database and external service connections.
+- **Cleanup Tasks**: Background tasks for automatic cleanup of stale resources.
+- **Shutdown Hooks**: Graceful shutdown procedures that ensure all resources are properly released.
+
+**Key files:**
+- `backend/utils/dependency_manager.py` - Resource tracking and management
+- `backend/utils/task_manager.py` - Task lifecycle management with cleanup
+- `backend/main.py` - Application lifecycle events
+
+### 4. Database Impact and TTL
+
+Enhanced database interaction with caching, TTL support, and performance optimizations:
+
+- **TTL for Cached Items**: Time-to-live implementation for cached database entries.
+- **Connection Pooling**: Thread-local connection pooling for improved performance.
+- **Atomic Writes**: Safe database updates using temporary files and atomic renames.
+- **Cache Invalidation**: Smart cache invalidation on updates to prevent stale data.
+- **Background Cleanup**: Automatic cleanup of expired database entries.
+
+**Key files:**
+- `backend/utils/db_connector.py` - Database interface with TTL caching
+
+## Implementation Details
+
+### Frontend Transaction Pattern
+
+The transaction pattern works as follows:
+
+1. Before starting a critical operation (e.g., cancelling a task), a transaction is created with `beginTransaction`.
+2. The transaction ID is stored in the Redux state.
+3. While the transaction is active, only updates belonging to that transaction are applied.
+4. When the operation completes, `completeTransaction` is called to finalize the state.
+5. A background cleanup task removes stale transactions.
+
+Example:
+```typescript
+// Start a transaction
+const transactionAction = beginTransaction({
+  operation: 'cancel',
+  taskId
+});
+store.dispatch(transactionAction);
+
+// Perform operations...
+
+// Complete the transaction
+store.dispatch(completeTransaction({
+  transactionId,
+  success: true
+}));
+```
+
+### Backend Error Handling
+
+The error handling system provides a consistent way to raise and format errors:
+
+```python
+# Raise a standardized error
+raise_error(
+    "not_found",
+    message="Report not found",
+    detail=f"No report found with ID {report_id}",
+    transaction_id=transaction_id,
+    request_id=x_request_id
+)
+
+# Format an error without raising
+error_response = format_error(
+    "validation",
+    message="Invalid input data",
+    detail="The provided data did not pass validation",
+    context={"errors": validation_errors}
+)
+```
+
+### Resource Cleanup
+
+Resources are tracked and cleaned up through the dependency manager:
+
+```python
+# Register a resource tracker
+file_tracker = dependency_manager.register_tracker(
+    "temp_files",
+    lambda f: f.close(),
+    "file"
+)
+
+# Register a resource
+file_id = file_tracker.register(open_file, {"path": file_path})
+
+# Release when done
+file_tracker.release(file_id)
+```
+
+### Database with TTL
+
+The database connector provides TTL-based caching:
+
+```python
+# Save a task with TTL
+await db_connector.save_task(
+    task_id,
+    "processing",
+    "report_generation",
+    task_data,
+    owner_id=user_id,
+    ttl_hours=24  # Expires after 24 hours
+)
+
+# Get a task (uses cache with TTL)
+task = await db_connector.get_task(task_id)
+```
+
+## Future Enhancements
+
+Potential future improvements include:
+
+1. **WebSocket Reconnection Logic**: Further enhance the WebSocket reconnection with exponential backoff and connection quality monitoring.
+2. **Distributed Locking**: Implement distributed locks for multi-server deployments.
+3. **Advanced Caching**: Add multi-level caching with memory and Redis/Memcached.
+4. **Metrics Collection**: Add performance metrics collection for monitoring system health.
+5. **API Versioning**: Implement formal API versioning for better backward compatibility.
+
+## Technical Requirements
+
+- **Frontend**: React 18+, Redux Toolkit
+- **Backend**: FastAPI, SQLite, asyncio
+- **Python Version**: 3.9+
+- **Node Version**: 16+
+
+See `backend/requirements.txt` and `frontend/package.json` for detailed dependency information. 

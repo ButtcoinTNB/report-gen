@@ -18,9 +18,10 @@ import {
 import { Upload as UploadIcon, Info as InfoIcon } from '@mui/icons-material';
 import { DocxPreviewEditor } from './DocxPreviewEditor';
 import { AgentProgressStep } from './AgentProgressStep';
-import AgentInitializationTracker from './AgentInitializationTracker';
+import { AgentInitializationTracker } from './index';
 import { logger } from '../utils/logger';
 import { reportService } from '../services/api/ReportService';
+import { apiConfig } from '../config/api.config';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { 
   initAgentLoop, 
@@ -119,7 +120,7 @@ export function AgentLoopRunner({ reportId, onComplete }: AgentLoopRunnerProps) 
       files.forEach(file => formData.append('files', file));
       formData.append('report_id', reportId);
       
-      const response = await fetch('/api/upload/files', {
+      const response = await fetch(apiConfig.endpoints.fileUpload, {
         method: 'POST',
         body: formData
       });

@@ -48,15 +48,25 @@ const AgentInitializationTracker: React.FC<AgentInitializationTrackerProps> = ({
   
   // Track elapsed time
   useEffect(() => {
+    // Don't start the timer if there's no start time or if the process isn't running
     if (!agentLoop.startTime || (!agentLoop.isInitializing && !agentLoop.isRunning)) {
+      // Reset elapsed time when process stops
+      setElapsedTime(0);
       return;
     }
     
+    // Calculate initial elapsed time (in case component is mounted after the process started)
+    setElapsedTime(Math.floor((Date.now() - agentLoop.startTime) / 1000));
+    
+    // Set up interval for updating elapsed time
     const interval = setInterval(() => {
       setElapsedTime(Math.floor((Date.now() - agentLoop.startTime!) / 1000));
     }, 1000);
     
-    return () => clearInterval(interval);
+    // Clean up the interval on component unmount or when process stops
+    return () => {
+      clearInterval(interval);
+    };
   }, [agentLoop.startTime, agentLoop.isInitializing, agentLoop.isRunning]);
   
   // Format elapsed time as mm:ss
@@ -230,9 +240,81 @@ const AgentInitializationTracker: React.FC<AgentInitializationTrackerProps> = ({
         
         {/* Error message */}
         {agentLoop.error && (
-          <Alert severity="error">
+          <Alert severity="error" sx={{ mb: 2 }}>
             <AlertTitle>Errore durante l'inizializzazione</AlertTitle>
-            {agentLoop.error}
+            <Box sx={{ mb: 1 }}>
+              {agentLoop.error}
+            </Box>
+            
+            {/* Recovery guidance based on error type */}
+            <Box sx={{ mt: 2, fontSize: '0.9rem' }}>
+              {agentLoop.error.includes('network') || agentLoop.error.includes('connessione') ? (
+                <>
+                  <Typography variant="subtitle2" fontWeight="bold">
+                    Suggerimento:
+                  </Typography>
+                  <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
+                    <li>Controlla la tua connessione a Internet</li>
+                    <li>Riprova tra qualche istante</li>
+                    <li>Se il problema persiste, contatta l'assistenza</li>
+                  </ul>
+                </>
+              ) : agentLoop.error.includes('timeout') || agentLoop.error.includes('tempo') ? (
+                <>
+                  <Typography variant="subtitle2" fontWeight="bold">
+                    Suggerimento:
+                  </Typography>
+                  <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
+                    <li>Il server potrebbe essere sovraccarico</li>
+                    <li>Riprova più tardi quando il sistema è meno occupato</li>
+                    <li>Se stai elaborando file di grandi dimensioni, considera di dividerli in parti più piccole</li>
+                  </ul>
+                </>
+              ) : agentLoop.error.includes('permission') || agentLoop.error.includes('autorizzazione') ? (
+                <>
+                  <Typography variant="subtitle2" fontWeight="bold">
+                    Suggerimento:
+                  </Typography>
+                  <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
+                    <li>Verifica di avere le autorizzazioni necessarie</li>
+                    <li>Prova a effettuare nuovamente l'accesso</li>
+                    <li>Contatta l'amministratore per assistenza</li>
+                  </ul>
+                </>
+              ) : agentLoop.error.includes('cancelled') || agentLoop.error.includes('annullat') ? (
+                <>
+                  <Typography variant="subtitle2" fontWeight="bold">
+                    Informazione:
+                  </Typography>
+                  <p style={{ margin: '0.5rem 0' }}>
+                    Il processo è stato annullato. Puoi ricominciare quando preferisci.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Typography variant="subtitle2" fontWeight="bold">
+                    Azioni possibili:
+                  </Typography>
+                  <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
+                    <li>Riprova l'operazione</li>
+                    <li>Verifica che i documenti caricati siano nel formato corretto</li>
+                    <li>Se il problema persiste, contatta l'assistenza tecnica</li>
+                  </ul>
+                </>
+              )}
+            </Box>
+            
+            {/* Technical details section */}
+            {agentLoop.error.includes('technical:') && (
+              <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid rgba(0,0,0,0.1)', fontSize: '0.8rem', color: 'text.secondary' }}>
+                <Typography variant="caption" component="p">
+                  Dettagli tecnici:
+                </Typography>
+                <code style={{ display: 'block', padding: '0.5rem', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflowX: 'auto', fontSize: '0.7rem' }}>
+                  {agentLoop.error.split('technical:')[1].trim()}
+                </code>
+              </Box>
+            )}
           </Alert>
         )}
         

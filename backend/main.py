@@ -10,6 +10,10 @@ from pathlib import Path
 import asyncio
 import time
 from datetime import datetime, timedelta
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+from typing import Callable
 
 # Set up logging first
 logging.basicConfig(
@@ -57,15 +61,12 @@ for dir_name in subdirs:
             logger.info(f"Created __init__.py in {dir_path}")
 
 # Now we can safely import everything else
-from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import uvicorn
 from fastapi.staticfiles import StaticFiles
 
 # Import API routes and config
-from api import upload, generate, format, edit, download
+from api import upload, generate, format, edit, download, agent_loop, utils, documents, reports
 from config import settings
 from api.agent_loop import router as agent_loop_router
 from api.cleanup import router as cleanup_router
@@ -77,6 +78,9 @@ from utils.error_handler import api_exception_handler
 from utils.openapi import custom_openapi
 from api.openapi_examples import ENDPOINT_EXAMPLES
 from utils.middleware import setup_middleware
+from utils.dependency_manager import get_dependency_manager
+from utils.task_manager import initialize_task_cache, shutdown_task_cache
+from utils.db_connector import get_db_connector
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -190,6 +194,10 @@ app.include_router(edit.router, prefix="/api/edit", tags=["Edit"])
 app.include_router(download.router, prefix="/api/download", tags=["Download"])
 app.include_router(agent_loop_router, prefix="/api/v2", tags=["AI Agent Loop"])
 app.include_router(cleanup_router)
+app.include_router(agent_loop.router, prefix="/api", tags=["agent-loop"])
+app.include_router(documents.router, prefix="/api", tags=["documents"])
+app.include_router(reports.router, prefix="/api", tags=["reports"])
+app.include_router(utils.router, prefix="/api", tags=["utilities"])
 
 # Serve static files
 upload_dir = Path("./uploads")
@@ -315,6 +323,33 @@ async def startup_event():
     await cleanup_old_data(settings.DATA_RETENTION_HOURS)
     # Start periodic cleanup task
     asyncio.create_task(start_cleanup_scheduler())
+    
+    # Initialize the task cache
+    await initialize_task_cache()
+    
+    # Initialize the database if needed
+    # This happens automatically when the connector is created
+    db = get_db_connector()
+    
+    logger.info("Application started successfully")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources before the application stops"""
+    logger.info("Shutting down application")
+    
+    # Shut down the task cache
+    await shutdown_task_cache()
+    
+    # Close database connections
+    db = get_db_connector()
+    await db.close()
+    
+    # Shut down the dependency manager
+    dependency_manager = get_dependency_manager()
+    await dependency_manager.shutdown()
+    
+    logger.info("Application shutdown complete")
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -340,7 +375,8 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True
+        reload=True,
+        log_level="info",
     )
 
 logger.info("Application initialized successfully!")
