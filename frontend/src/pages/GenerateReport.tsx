@@ -213,7 +213,25 @@ const GenerateReport: React.FC = () => {
         
         return (
           <Box sx={{ mt: 4 }}>
-            <AgentLoopRunner />
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => handleAdditionalInfo("")}
+              sx={{ mb: 2 }}
+            >
+              Genera Report AI
+            </Button>
+            <AgentLoopRunner 
+              reportId={uploadedDocumentIds[0]}
+              onComplete={(result) => {
+                if (result.previewUrl) {
+                  setReportPreview({
+                    ...reportPreview,
+                    previewUrl: result.previewUrl
+                  });
+                }
+              }}
+            />
           </Box>
         );
       

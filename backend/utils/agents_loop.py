@@ -180,4 +180,119 @@ class AIAgentLoop:
             "draft": draft,
             "feedback": feedback,
             "iterations": i + 1
+        }
+
+    async def refine_report(self, refinement_prompt: str) -> Dict:
+        """
+        Run a special refinement loop based on user instructions.
+        
+        This is similar to generate_report but focuses on specific refinement instructions
+        and starts with an existing draft content.
+        
+        Args:
+            refinement_prompt: A formatted prompt with the current content and refinement instructions
+            
+        Returns:
+            Dict with draft, feedback and iterations
+        """
+        draft = ""
+        feedback = {"score": 0, "suggestions": []}
+        
+        # Format reference examples for prompts
+        style_examples = "\n".join([
+            f"=== ESEMPIO {i+1} ===\nInput:\n{ex['messages'][0]['content']}\n\nOutput:\n{ex['messages'][1]['content']}\n"
+            for i, ex in enumerate(self.reference_examples)
+        ])
+        
+        # Refinement usually needs fewer iterations
+        max_refinement_loops = 2
+        
+        # Extract potential refinement types from instructions for better handling
+        refinement_types = {
+            "aggiunta": "aggiungere nuove informazioni o sezioni",
+            "correzione": "correggere errori fattuali o calcoli",
+            "riorganizzazione": "ristrutturare o riorganizzare i contenuti",
+            "linguaggio": "migliorare il tono, lo stile o la chiarezza",
+            "dettagli": "aggiungere maggiori dettagli a sezioni esistenti",
+            "formato": "migliorare la formattazione o la struttura del documento"
+        }
+        
+        for i in range(max_refinement_loops):
+            logger.info(f"Starting refinement iteration {i + 1}/{max_refinement_loops}")
+            
+            # Writer agent refines the report with focus on the specific instructions
+            writer_input = f"""
+            === GUIDA BRAND ===
+            {self.brand_guide}
+
+            === RIFERIMENTI STILISTICI ===
+            {style_examples}
+
+            === ISTRUZIONI PER RAFFINAMENTO ===
+            {refinement_prompt}
+            
+            === GUIDA TECNICA AL RAFFINAMENTO ===
+            1. Mantieni la struttura e lo stile generale del report originale.
+            2. Implementa con precisione le modifiche richieste dall'utente.
+            3. Non aggiungere informazioni inventate o non presenti nell'input originale.
+            4. Conserva tutti gli elementi strutturali come intestazioni, tabelle, elenchi.
+            5. Se le istruzioni riguardano una specifica sezione, modifica solo quella.
+            6. Non abbreviare o rimuovere sezioni che non sono menzionate nelle istruzioni.
+            7. Assicurati che il tono sia coerente in tutto il documento anche dopo le modifiche.
+            
+            INDICAZIONI IMPORTANTI:
+            - Leggi attentamente il contenuto attuale e le istruzioni di raffinamento
+            - Identifica esattamente quali parti devono essere modificate
+            - Apporta solo le modifiche specificate nelle istruzioni
+            - Mantieni intatto il resto del documento
+            - Verifica la coerenza e la fluidità del testo dopo le modifiche
+            """
+            
+            draft = await self._call_model(writer_input, self.writer_prompt)
+            
+            # Reviewer agent analyzes the refined draft
+            reviewer_input = f"""
+            === GUIDA BRAND ===
+            {self.brand_guide}
+
+            === ISTRUZIONI PER RAFFINAMENTO ===
+            {refinement_prompt}
+
+            === TESTO RAFFINATO ===
+            {draft}
+            
+            === FOCUS DI REVISIONE ===
+            1. Verifica che tutte le modifiche richieste siano state implementate correttamente
+            2. Controlla che non siano state introdotte incongruenze o errori
+            3. Valuta la coerenza del testo dopo le modifiche
+            4. Assicurati che il tono e lo stile siano mantenuti in tutto il documento
+            5. Verifica che non siano state perse o alterate informazioni importanti
+            """
+            
+            review_result = await self._call_model(reviewer_input, self.reviewer_prompt)
+            
+            try:
+                feedback = json.loads(review_result)
+                logger.info(f"Feedback score: {feedback['score']}, suggestions: {len(feedback['suggestions'])}")
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse reviewer feedback JSON, retrying with explicit JSON instruction")
+                review_result = await self._call_model(
+                    reviewer_input + "\n\nIMPORTANTE: Rispondi SOLO con un oggetto JSON valido nel formato specificato.",
+                    self.reviewer_prompt
+                )
+                try:
+                    feedback = json.loads(review_result)
+                except json.JSONDecodeError:
+                    feedback = {"score": 0, "suggestions": ["Errore nel formato del feedback"]}
+                    logger.error("Failed to parse reviewer feedback JSON even after retry")
+                
+            # Exit if quality is high enough
+            if feedback["score"] > 0.9:
+                logger.info(f"Quality threshold met at refinement iteration {i + 1}")
+                break
+                
+        return {
+            "draft": draft,
+            "feedback": feedback,
+            "iterations": i + 1
         } 
