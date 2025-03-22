@@ -3,13 +3,12 @@ Upload API endpoints for file uploads
 """
 
 import os
-import datetime
+from datetime import datetime
 import uuid
 import json
 import asyncio
 import shutil
 import mimetypes
-from datetime import datetime
 from fastapi import File, Request
 from typing import List, Optional, Dict, Any
 
@@ -256,7 +255,7 @@ async def upload_files(
                     "content": content,
                     "metadata": {
                         "ip_address": client_ip,
-                        "upload_time": datetime.utcnow().isoformat()
+                        "upload_time": datetime.now().isoformat()
                     }
                 }
                 
@@ -522,7 +521,7 @@ async def upload_documents(
             "report_id": report_uuid,  # Store the UUID for external reference
             "template_id": template_id,
             "files": uploaded_files,
-            "created_at": datetime.datetime.now().isoformat(),
+            "created_at": datetime.now().isoformat(),
             "status": "uploaded",
             "title": f"Report #{report_uuid[:8]}",  # Default title using part of the UUID
             "content": "",  # Initialize empty content
@@ -967,7 +966,7 @@ async def complete_chunked_upload(
             "file_path": file_path,
             "file_size": file_info["size_bytes"],
             "mime_type": result["mime_type"],
-            "uploaded_at": datetime.datetime.now().isoformat(),
+            "uploaded_at": datetime.now().isoformat(),
             "processed": False
         }
         
@@ -1085,7 +1084,7 @@ async def create_empty_report(
             "report_id": report_uuid,
             "template_id": template_id,
             "files": [],
-            "created_at": datetime.datetime.now().isoformat(),
+            "created_at": datetime.now().isoformat(),
             "status": "empty",
             "title": f"Report #{report_uuid[:8]}",
             "content": ""
