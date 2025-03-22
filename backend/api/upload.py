@@ -216,11 +216,15 @@ async def upload_template(
 
 @router.post("/files", status_code=201)
 async def upload_files(
+    request: Request,
     files: List[UploadFile] = File(...),
     report_id: Optional[UUID4] = Form(None)
 ) -> Dict[str, Any]:
     """Upload multiple files and optionally associate with a report"""
     try:
+        # Get client IP from request headers
+        client_ip = request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for") or request.client.host
+        
         uploaded_files = []
         async with supabase_client_context() as supabase:
             for file in files:
@@ -240,7 +244,7 @@ async def upload_files(
                 if FileProcessor.is_text_file(file_path):
                     content = FileProcessor.extract_text(file_path)
                 
-                # Create file record
+                # Create file record with client IP in metadata
                 file_record = {
                     "file_id": str(file_id),
                     "report_id": str(report_id) if report_id else None,
@@ -249,7 +253,11 @@ async def upload_files(
                     "file_type": file_data["mime_type"],
                     "mime_type": file_data["mime_type"],
                     "file_size": file_data["file_size"],
-                    "content": content
+                    "content": content,
+                    "metadata": {
+                        "ip_address": client_ip,
+                        "upload_time": datetime.utcnow().isoformat()
+                    }
                 }
                 
                 file_response = await supabase.table("files").insert(file_record).execute()

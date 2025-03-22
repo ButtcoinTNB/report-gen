@@ -2,6 +2,23 @@
 
 An AI-powered system that generates professional insurance reports from various document types. The system uses a dual-agent approach with a writer and reviewer to ensure high-quality, consistent reports following company guidelines.
 
+## Authentication & Access
+
+This is a public API service - no authentication is required to use the core features. The system uses rate limiting for protection against abuse. While authentication is supported, it is entirely optional and only used for:
+- Associating uploaded files with user accounts (if desired)
+- Better tracking and management of reports
+- Future features that may require user context
+
+Users can freely:
+- Upload documents
+- Generate reports
+- Download reports
+- All other core functionality
+
+Rate limiting is applied to prevent abuse:
+- 100 requests per hour for most endpoints
+- 25 requests per hour for resource-intensive endpoints
+
 ## Features
 
 - **Multi-format Document Support**:
