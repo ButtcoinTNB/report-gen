@@ -3,7 +3,7 @@ Service for handling file downloads and previews from Supabase storage.
 """
 
 from typing import Optional, Dict, Any, BinaryIO
-from ..utils.supabase_client import supabase
+from utils.supabase_client import supabase
 
 class DownloadService:
     def __init__(self):

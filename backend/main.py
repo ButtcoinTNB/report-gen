@@ -74,7 +74,7 @@ from utils.exceptions import BaseAPIException
 from utils.error_handler import api_exception_handler
 from utils.openapi import custom_openapi
 from api.openapi_examples import ENDPOINT_EXAMPLES
-from utils.middleware import setup_middleware, add_process_time_header
+from utils.middleware import setup_middleware
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -109,31 +109,8 @@ app.add_middleware(
     max_age=86400,  # Cache preflight requests for 24 hours
 )
 
-# Add custom middleware
-app.middleware("http")(add_process_time_header)
-
-# Add error handling middleware to ensure CORS headers are set even on errors
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    try:
-        response = await call_next(request)
-        return response
-    except Exception as e:
-        # Ensure CORS headers are set even on errors
-        if request.headers.get("origin") in settings.allowed_origins:
-            headers = {
-                "Access-Control-Allow-Origin": request.headers["origin"],
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Expose-Headers": "Content-Disposition, Content-Type",
-            }
-            return JSONResponse(
-                status_code=500,
-                content={"detail": str(e)},
-                headers=headers
-            )
-        raise
+# Set up middleware
+setup_middleware(app)
 
 # Exception handlers
 @app.exception_handler(BaseAPIException)
