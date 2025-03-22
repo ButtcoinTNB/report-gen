@@ -491,9 +491,9 @@ async def upload_documents(
                 uploaded_files.append(
                     {
                         "filename": original_filename,
-                        "path": file_path,
+                        "path": str(file_path),  # Convert PosixPath to string
                         "type": ext.lower().replace(".", ""),
-                        "storage_path": storage_path if 'storage_path' in locals() else None,
+                        "storage_path": str(storage_path) if 'storage_path' in locals() else None,  # Convert PosixPath to string
                         "public_url": public_url
                     }
                 )
@@ -520,7 +520,11 @@ async def upload_documents(
         metadata = {
             "report_id": report_uuid,  # Store the UUID for external reference
             "template_id": template_id,
-            "files": uploaded_files,
+            "files": [{
+                **f,
+                "path": str(f["path"]),  # Convert any PosixPath to string
+                "storage_path": str(f["storage_path"]) if f.get("storage_path") else None
+            } for f in uploaded_files],
             "created_at": datetime.now().isoformat(),
             "status": "uploaded",
             "title": f"Report #{report_uuid[:8]}",  # Default title using part of the UUID
