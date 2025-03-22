@@ -39,7 +39,7 @@ except ModuleNotFoundError:
             # Set up CORS
             app.add_middleware(
                 CORSMiddleware,
-                allow_origins=["*"],  # For production, restrict this
+                allow_origins=["https://report-gen-liard.vercel.app"],  # For production, restrict this
                 allow_credentials=True,
                 allow_methods=["*"],
                 allow_headers=["*"],
