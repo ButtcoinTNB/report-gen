@@ -18,6 +18,10 @@ services:
         value: 3.11.0
       - key: NODE_ENV
         value: production
+      - key: CORS_ALLOW_ALL
+        value: "false"
+      - key: ALLOWED_ORIGINS
+        value: "https://report-gen-liard.vercel.app"
     # Add your other environment variables from your Render dashboard
     # - key: DATABASE_URL
     #   fromDatabase:

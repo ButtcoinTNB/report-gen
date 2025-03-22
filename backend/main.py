@@ -104,11 +104,38 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition", "Content-Type"],
+    expose_headers=["Content-Disposition", "Content-Type", "Content-Length"],
     max_age=86400,  # Cache preflight requests for 24 hours
 )
+
+# Add error handling middleware to ensure CORS headers are set even on errors
+@app.middleware("http")
+async def cors_error_handler(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        # Get origin from request headers
+        origin = request.headers.get("origin")
+        
+        # Check if origin is allowed
+        if origin in settings.allowed_origins:
+            # Return error response with CORS headers
+            headers = {
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Expose-Headers": "Content-Disposition, Content-Type, Content-Length",
+            }
+            return JSONResponse(
+                status_code=500,
+                content={"detail": str(e)},
+                headers=headers
+            )
+        raise  # Re-raise the exception if origin not allowed
 
 # Set up middleware
 setup_middleware(app)
