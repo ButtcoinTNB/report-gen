@@ -16,9 +16,8 @@ from datetime import datetime
 try:
     # First try imports without 'backend.' prefix (for Render)
     from services.download_service import download_service
-    from auth.auth_service import get_current_user
-    from config import settings
     from utils.auth import get_current_user
+    from config import settings
     from utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
     from services.docx_service import docx_service
     from utils.supabase_helper import create_supabase_client, supabase_client_context
@@ -29,9 +28,8 @@ try:
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from backend.services.download_service import download_service
-    from backend.auth.auth_service import get_current_user
-    from backend.config import settings
     from backend.utils.auth import get_current_user
+    from backend.config import settings
     from backend.utils.storage import get_report_path, does_file_exist, validate_path, get_safe_file_path
     from backend.services.docx_service import docx_service
     from backend.utils.supabase_helper import create_supabase_client, supabase_client_context

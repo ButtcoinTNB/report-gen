@@ -94,8 +94,9 @@ app = FastAPI(
     title="Insurance Report Generator API",
     description="API for generating insurance reports using AI agents",
     version="2.0.0",
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    # Only show docs in non-production environment
+    docs_url="/docs" if os.getenv("NODE_ENV") != "production" else None,
+    redoc_url="/redoc" if os.getenv("NODE_ENV") != "production" else None,
 )
 
 # Configure CORS with proper error handling
@@ -131,7 +132,7 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={
             "code": "INTERNAL_ERROR",
             "message": "An unexpected error occurred",
-            "details": str(exc) if settings.DEBUG else None
+            "details": str(exc) if os.getenv("NODE_ENV") != "production" else None
         },
     )
 
