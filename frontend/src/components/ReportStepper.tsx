@@ -1,122 +1,305 @@
-import React from 'react';
-import { Box, Stepper, Step, StepLabel, Typography, Button, Paper } from '@mui/material';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { setActiveStep } from '../store/reportSlice';
+import React, { useState, useEffect } from 'react';
+import { 
+  Stepper, 
+  Step, 
+  StepLabel, 
+  Box, 
+  Button, 
+  Paper, 
+  Typography, 
+  Divider, 
+  CircularProgress,
+  Zoom,
+  Fade
+} from '@mui/material';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import FileUploader from './FileUploader';
 import ReportGenerator from './ReportGenerator';
-import ReportEditor from './ReportEditor';
-import ReportDownloader from './ReportDownloader';
+import { DocxPreviewEditor } from './DocxPreviewEditor';
+import { useAppSelector, useAppDispatch } from '../store/hooks';
+import { setActiveStep, resetState } from '../store/reportSlice';
+import JourneyVisualizer from './JourneyVisualizer';
 
-// Define steps
-const steps = [
-  'Upload Documents',
-  'Generate Report',
-  'Review & Edit',
-  'Download Report'
-];
+interface Props {
+  reportId?: string;
+  onGenerate?: (reportData: any) => void;
+  onError?: (error: Error) => void;
+}
 
-// Step content components
-const getStepContent = (step: number) => {
+// Update FileUploader component to accept reportId
+interface FileUploaderProps {
+  reportId: string;
+}
+
+// Wrapping FileUploader to handle props
+const FileUploaderWrapper: React.FC<FileUploaderProps> = ({ reportId }) => {
+  return <FileUploader />;
+};
+
+const getStepContent = (
+  step: number, 
+  reportId: string | null, 
+  onReportGenerated: (reportData: any) => void, 
+  onGenerateError: (error: Error) => void
+) => {
   switch (step) {
     case 0:
-      return <FileUploader />;
+      return <FileUploaderWrapper reportId={reportId || ''} />;
     case 1:
-      return <ReportGenerator />;
+      return <ReportGenerator reportId={reportId || ''} onGenerate={onReportGenerated} onError={onGenerateError} />;
     case 2:
-      return <ReportEditor />;
-    case 3:
-      return <ReportDownloader />;
+      return <DocxPreviewEditor 
+        initialContent={''}
+        downloadUrl={''}
+        reportId={reportId || ''}
+        showRefinementOptions={true}
+      />;
     default:
-      return 'Unknown step';
+      return <Typography>Passo sconosciuto</Typography>;
   }
 };
 
-const ReportStepper: React.FC = () => {
+const ReportStepper: React.FC<Props> = ({ reportId: propReportId, onGenerate, onError }) => {
   const dispatch = useAppDispatch();
-  const activeStep = useAppSelector(state => state.report.activeStep);
-  const documentIds = useAppSelector(state => state.report.documentIds);
-  const reportId = useAppSelector(state => state.report.reportId);
-  const content = useAppSelector(state => state.report.content);
+  const { activeStep, reportId: storeReportId, documentIds, backgroundUpload, additionalInfo } = useAppSelector(state => state.report);
+  const [generatedReport, setGeneratedReport] = useState<any>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [completedSteps, setCompletedSteps] = useState<string[]>([]);
+  const [readyForAutoTransition, setReadyForAutoTransition] = useState(false);
   
-  // Handle next step button click
+  // Define steps
+  const steps = [
+    { label: 'Carica Documenti', id: 'upload' },
+    { label: 'Genera Report', id: 'generate' },
+    { label: 'Refina & Modifica', id: 'refine' },
+  ];
+
+  // Combined report ID from props or store
+  const reportId = propReportId || storeReportId;
+
+  // Check if auto-transition should trigger (when upload completes and we have sufficient info)
+  useEffect(() => {
+    if (
+      activeStep === 0 && 
+      backgroundUpload && 
+      !backgroundUpload.isUploading && 
+      backgroundUpload.progress === 100 && 
+      additionalInfo.trim().length > 10
+    ) {
+      setReadyForAutoTransition(true);
+      
+      // Auto-transition after a short delay
+      const timer = setTimeout(() => {
+        if (readyForAutoTransition) {
+          handleNext();
+        }
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [backgroundUpload, additionalInfo, activeStep]);
+
+  // Handle completion of steps
+  useEffect(() => {
+    const newCompletedSteps = [...completedSteps];
+    
+    if (activeStep > 0 && !newCompletedSteps.includes('upload')) {
+      newCompletedSteps.push('upload');
+    }
+    
+    if (generatedReport && !newCompletedSteps.includes('generate')) {
+      newCompletedSteps.push('generate');
+    }
+    
+    if (newCompletedSteps.length !== completedSteps.length) {
+      setCompletedSteps(newCompletedSteps);
+    }
+  }, [activeStep, generatedReport]);
+
+  // Reset component state when stepper is reset
+  useEffect(() => {
+    if (activeStep === 0) {
+      setGeneratedReport(null);
+      setError(null);
+    }
+  }, [activeStep]);
+
   const handleNext = () => {
-    dispatch(setActiveStep(activeStep + 1));
+    setIsTransitioning(true);
+    
+    setTimeout(() => {
+      dispatch(setActiveStep(activeStep + 1));
+      setIsTransitioning(false);
+      setReadyForAutoTransition(false);
+    }, 300);
   };
-  
-  // Handle back button click
+
   const handleBack = () => {
-    dispatch(setActiveStep(activeStep - 1));
+    setIsTransitioning(true);
+    
+    setTimeout(() => {
+      dispatch(setActiveStep(activeStep - 1));
+      setIsTransitioning(false);
+    }, 300);
   };
-  
-  // Reset to first step
+
   const handleReset = () => {
-    dispatch(setActiveStep(0));
+    dispatch(resetState());
   };
-  
-  // Determine if the next button should be disabled
-  const isNextDisabled = (): boolean => {
+
+  const handleReportGenerated = (reportData: any) => {
+    setGeneratedReport(reportData);
+    if (onGenerate) {
+      onGenerate(reportData);
+    }
+    // Auto-advance to next step
+    handleNext();
+  };
+
+  const handleGenerateError = (err: Error) => {
+    setError(err);
+    if (onError) {
+      onError(err);
+    }
+  };
+
+  // Determine if the Next button should be disabled
+  const isNextDisabled = () => {
     switch (activeStep) {
       case 0:
-        return documentIds.length === 0; // Disable if no documents uploaded
+        // Files will be uploaded in background, so we can always proceed to the next step
+        return false;
       case 1:
-        return !reportId; // Disable if no report generated
+        // Disable if report is not yet generated
+        return !generatedReport;
       case 2:
-        return !content; // Disable if no content to edit
+        // Always enable in refinement step
+        return false;
       default:
         return false;
     }
   };
 
+  // Determine what the Next button should say
+  const getNextButtonText = () => {
+    switch (activeStep) {
+      case 0:
+        return 'Continua';
+      case 1:
+        return generatedReport ? 'Visualizza Report' : 'Genera Report';
+      case 2:
+        return 'Finalizza';
+      default:
+        return 'Avanti';
+    }
+  };
+
+  const getCurrentJourneyStep = () => {
+    switch (activeStep) {
+      case 0: return backgroundUpload?.isUploading ? 0 : 1;
+      case 1: return 2;
+      case 2: return 3;
+      default: return 0;
+    }
+  };
+
   return (
     <Box sx={{ width: '100%' }}>
-      <Stepper activeStep={activeStep} sx={{ pt: 3, pb: 5 }}>
-        {steps.map((label) => (
-          <Step key={label}>
-            <StepLabel>{label}</StepLabel>
-          </Step>
-        ))}
-      </Stepper>
+      <Paper elevation={0} sx={{ 
+        mb: 4, 
+        bgcolor: 'background.default',
+        position: 'sticky',
+        top: 0,
+        zIndex: 10,
+        pt: 2,
+        pb: 1,
+        borderBottom: '1px solid',
+        borderColor: 'divider'
+      }}>
+        <Box sx={{ mb: 2 }}>
+          <JourneyVisualizer 
+            activeStep={getCurrentJourneyStep()}
+            stepsCompleted={completedSteps}
+            showContent={false}
+          />
+        </Box>
+        
+        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 1 }}>
+          {steps.map((step, index) => (
+            <Step key={index}>
+              <StepLabel>{step.label}</StepLabel>
+            </Step>
+          ))}
+        </Stepper>
+      </Paper>
       
-      <div>
-        {activeStep === steps.length ? (
-          <Paper square elevation={0} sx={{ p: 3, bgcolor: 'background.default' }}>
-            <Typography>All steps completed - Report is ready!</Typography>
-            <Button onClick={handleReset} sx={{ mt: 1, mr: 1 }}>
-              Start New Report
-            </Button>
-          </Paper>
-        ) : (
-          <div>
-            {getStepContent(activeStep)}
-            
-            <Box sx={{ display: 'flex', flexDirection: 'row', pt: 2 }}>
-              <Button
-                color="inherit"
-                disabled={activeStep === 0}
-                onClick={handleBack}
-                sx={{ mr: 1 }}
-              >
-                Back
-              </Button>
-              <Box sx={{ flex: '1 1 auto' }} />
-              
-              {activeStep < steps.length - 1 ? (
-                <Button 
-                  onClick={handleNext}
-                  disabled={isNextDisabled()}
-                  variant="contained"
-                >
-                  Next
+      <Box sx={{ position: 'relative', minHeight: '400px' }}>
+        <Fade in={!isTransitioning} timeout={300}>
+          <Box>
+            {activeStep === steps.length ? (
+              <Box sx={{ mt: 2 }}>
+                <Typography>Tutti i passaggi sono stati completati</Typography>
+                <Button onClick={handleReset} sx={{ mt: 2 }}>
+                  Inizia di Nuovo
                 </Button>
-              ) : (
-                <Button onClick={handleNext} variant="contained">
-                  Finish
-                </Button>
-              )}
-            </Box>
-          </div>
-        )}
-      </div>
+              </Box>
+            ) : (
+              <Box sx={{ mt: 2 }}>
+                {getStepContent(activeStep, reportId, handleReportGenerated, handleGenerateError)}
+                
+                {readyForAutoTransition && activeStep === 0 && (
+                  <Zoom in={readyForAutoTransition}>
+                    <Paper 
+                      elevation={4} 
+                      sx={{ 
+                        mt: 2, 
+                        p: 2, 
+                        display: 'flex',
+                        alignItems: 'center',
+                        bgcolor: 'success.light',
+                        color: 'success.contrastText',
+                        borderRadius: 2,
+                      }}
+                    >
+                      <AutoAwesomeIcon sx={{ mr: 1 }} />
+                      <Typography variant="body1">
+                        Upload completato! Passando alla generazione del report...
+                      </Typography>
+                      <CircularProgress 
+                        size={20} 
+                        thickness={5} 
+                        sx={{ ml: 2, color: 'success.contrastText' }} 
+                      />
+                    </Paper>
+                  </Zoom>
+                )}
+                
+                <Box sx={{ display: 'flex', flexDirection: 'row', pt: 2 }}>
+                  <Button
+                    disabled={activeStep === 0}
+                    onClick={handleBack}
+                    sx={{ mr: 1 }}
+                  >
+                    Indietro
+                  </Button>
+                  <Box sx={{ flex: '1 1 auto' }} />
+
+                  {activeStep !== 1 && (
+                    <Button 
+                      variant="contained" 
+                      onClick={handleNext}
+                      disabled={isNextDisabled()}
+                    >
+                      {getNextButtonText()}
+                    </Button>
+                  )}
+                </Box>
+              </Box>
+            )}
+          </Box>
+        </Fade>
+      </Box>
     </Box>
   );
 };

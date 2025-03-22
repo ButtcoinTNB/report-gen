@@ -62,11 +62,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
+from fastapi.staticfiles import StaticFiles
 
 # Import API routes and config
 from api import upload, generate, format, edit, download
 from config import settings
 from api.agent_loop import router as agent_loop_router
+from api.cleanup import router as cleanup_router
 
 # Import utilities
 from utils.file_utils import safe_path_join
@@ -187,6 +189,16 @@ app.include_router(format.router, prefix="/api/format", tags=["Format"])
 app.include_router(edit.router, prefix="/api/edit", tags=["Edit"])
 app.include_router(download.router, prefix="/api/download", tags=["Download"])
 app.include_router(agent_loop_router, prefix="/api/v2", tags=["AI Agent Loop"])
+app.include_router(cleanup_router)
+
+# Serve static files
+upload_dir = Path("./uploads")
+upload_dir.mkdir(exist_ok=True)
+app.mount("/files", StaticFiles(directory="./uploads"), name="files")
+
+# Add temp directory for processing files
+temp_dir = Path("./temp_files")
+temp_dir.mkdir(exist_ok=True)
 
 # Add a function to clean up old reports and uploads
 async def cleanup_old_data(max_age_hours: int = 24):

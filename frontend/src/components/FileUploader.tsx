@@ -1,16 +1,23 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useDropzone, FileWithPath } from 'react-dropzone';
-import { Box, Typography, Paper, Button } from '@mui/material';
+import { Box, Typography, Paper, Button, Chip } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import CloudDoneIcon from '@mui/icons-material/CloudDone';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { 
   setLoading, 
   setDocumentIds, 
   setReportId, 
   setError,
-  setActiveStep
+  setActiveStep,
+  setBackgroundUpload
 } from '../store/reportSlice';
 import { config } from '../../config';
+import { UploadService, CHUNKED_UPLOAD_SIZE_THRESHOLD } from '../services/api/UploadService';
+
+// Initialize upload service
+const uploadService = new UploadService();
 
 // This is a reusable file uploader component that uses Redux for state management
 const FileUploader: React.FC = () => {
@@ -18,6 +25,8 @@ const FileUploader: React.FC = () => {
   const loading = useAppSelector(state => state.report.loading);
   const activeStep = useAppSelector(state => state.report.activeStep);
   const error = useAppSelector(state => state.report.error);
+  const backgroundUpload = useAppSelector(state => state.report.backgroundUpload);
+  const [filesSelected, setFilesSelected] = useState<FileWithPath[]>([]);
 
   // Handle file upload
   const handleUpload = useCallback(async (files: FileWithPath[]) => {
@@ -26,51 +35,49 @@ const FileUploader: React.FC = () => {
       return;
     }
 
+    // Save files for later use
+    setFilesSelected(files);
+
     try {
       // Set loading state
       dispatch(setLoading({ 
         isLoading: true, 
         stage: 'uploading', 
         progress: 0,
-        message: 'Uploading documents...' 
+        message: 'Uploading documents in background...' 
       }));
 
-      // Create form data for upload
-      const formData = new FormData();
-      files.forEach(file => {
-        formData.append('files', file);
-      });
+      // Start background upload
+      dispatch(setBackgroundUpload({
+        isUploading: true,
+        totalFiles: files.length,
+        uploadedFiles: 0,
+        progress: 0
+      }));
 
-      // Call API to upload files
-      const response = await fetch(`${config.API_URL}/api/upload/documents`, {
-        method: 'POST',
-        body: formData
-      });
+      // Move to next step immediately after initiating the upload
+      dispatch(setActiveStep(activeStep + 1));
 
-      // Handle response
-      const data = await response.json();
-      
-      if (!response.ok || data.status === 'error') {
-        throw new Error(data.message || `Upload failed with status ${response.status}`);
-      }
+      // Use the UploadService to handle the upload (including chunked upload for large files)
+      const result = await uploadService.uploadFiles(
+        files as File[], // Cast to File[] as FileWithPath extends File
+        (progress) => {
+          // Update progress in the UI
+          dispatch(setBackgroundUpload({
+            progress,
+            uploadedFiles: Math.floor((files.length * progress) / 100)
+          }));
+        }
+      );
 
       // Update progress to complete
       dispatch(setLoading({ progress: 100 }));
       
-      // Get the document IDs from the response
-      const documentIds = data.data?.document_ids || 
-                         data.data?.documentIds || 
-                         (Array.isArray(data.data) ? data.data : []);
-      
-      // Update state with document IDs
-      dispatch(setDocumentIds(documentIds));
-      
-      // Get the report ID if present
-      if (data.data?.report_id || data.data?.reportId) {
-        dispatch(setReportId(data.data?.report_id || data.data?.reportId));
-      }
+      // Get the document IDs and report ID from the result
+      dispatch(setDocumentIds(result.fileCount ? Array(result.fileCount).fill(result.reportId) : [result.reportId]));
+      dispatch(setReportId(result.reportId));
 
-      // Complete loading
+      // Complete loading and background upload
       dispatch(setLoading({ 
         isLoading: false, 
         progress: 100, 
@@ -78,10 +85,12 @@ const FileUploader: React.FC = () => {
         message: 'Upload complete!'
       }));
 
-      // Move to next step after a short delay to show the completion state
-      setTimeout(() => {
-        dispatch(setActiveStep(activeStep + 1));
-      }, 500);
+      dispatch(setBackgroundUpload({
+        isUploading: false,
+        progress: 100,
+        uploadedFiles: files.length
+      }));
+
     } catch (err) {
       // Handle errors
       console.error('Upload error:', err);
@@ -89,6 +98,10 @@ const FileUploader: React.FC = () => {
       dispatch(setLoading({ 
         isLoading: false,
         stage: 'error'
+      }));
+      dispatch(setBackgroundUpload({
+        isUploading: false,
+        error: err instanceof Error ? err.message : 'Upload failed'
       }));
     }
   }, [dispatch, activeStep]);
@@ -169,6 +182,20 @@ const FileUploader: React.FC = () => {
         </Box>
       )}
       
+      {filesSelected.length > 0 && (
+        <Box sx={{ mt: 2, display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center' }}>
+          {filesSelected.map((file, index) => (
+            <Chip 
+              key={index}
+              label={file.name}
+              size="small"
+              icon={backgroundUpload?.isUploading ? <CloudUploadIcon /> : <CloudDoneIcon />}
+              color={backgroundUpload?.error ? "error" : "default"}
+            />
+          ))}
+        </Box>
+      )}
+      
       <Button 
         variant="contained" 
         color="primary" 
@@ -181,6 +208,12 @@ const FileUploader: React.FC = () => {
       >
         {loading.isLoading ? 'Uploading...' : 'Select Files'}
       </Button>
+      
+      {backgroundUpload?.isUploading && (
+        <Typography variant="caption" color="primary" sx={{ mt: 1 }}>
+          Files will be uploaded in the background while you proceed
+        </Typography>
+      )}
     </Paper>
   );
 };

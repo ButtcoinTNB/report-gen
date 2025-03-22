@@ -1,11 +1,14 @@
 import { configureStore, Action, ThunkAction } from '@reduxjs/toolkit';
 import reportReducer from './reportSlice';
+import cleanupMiddleware from './middleware/cleanupMiddleware';
 
 // Configure the Redux store
 export const store = configureStore({
   reducer: {
     report: reportReducer,
   },
+  middleware: (getDefaultMiddleware) => 
+    getDefaultMiddleware().concat(cleanupMiddleware),
   // Enable Redux DevTools in development
   devTools: process.env.NODE_ENV !== 'production',
 });
