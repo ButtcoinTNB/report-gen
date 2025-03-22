@@ -11,6 +11,8 @@ import json
 import traceback
 import hashlib
 from datetime import datetime
+from ..services.download_service import download_service
+from ..auth.auth_service import get_current_user
 
 # Use imports with fallbacks for better compatibility across environments
 try:
@@ -546,3 +548,52 @@ async def download_report_content(report_id: UUID4):
             media_type="text/plain",
             filename=f"report_{report_id}.txt"
         )
+
+@router.get("/templates/{template_id}")
+async def get_template(
+    template_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get template information and download URL."""
+    try:
+        template = await download_service.get_template(template_id)
+        return template
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/reference-reports/{report_id}")
+async def get_reference_report(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get reference report information and download URL."""
+    try:
+        report = await download_service.get_reference_report(report_id)
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/reports/{report_id}")
+async def get_report(
+    report_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get report information and download URL."""
+    try:
+        report = await download_service.get_report(report_id)
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/download/{bucket}/{file_path:path}")
+async def download_file(
+    bucket: str,
+    file_path: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Download a file directly from Supabase storage."""
+    try:
+        file_bytes = await download_service.download_file(bucket, file_path)
+        return file_bytes
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

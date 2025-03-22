@@ -48,6 +48,12 @@ class AIAgentLoop:
             prompts = json.load(f)
             return prompts["writer_system_prompt"], prompts["reviewer_system_prompt"]
         
+    def _load_template(self) -> str:
+        """Load the template.docx file for format reference."""
+        template_path = Path(__file__).parent.parent / "reference_reports" / "template.docx"
+        with open(template_path, "rb") as f:
+            return f.read()
+        
     async def _call_model(self, prompt: str, system_prompt: str, retries: int = 2) -> str:
         """Make an API call to the configured model via OpenRouter with retries."""
         if not OPENROUTER_API_KEY:

@@ -1136,3 +1136,88 @@ async def upload_query(
                 "created_at": datetime.now().isoformat()
             }
         }
+
+@router.post("/upload/template")
+async def upload_template(
+    file: UploadFile = File(...),
+    description: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload a template file to Supabase storage."""
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Upload to Supabase using service
+        template = await upload_service.upload_template(
+            file=file_content,
+            filename=file.filename,
+            user_id=current_user["id"],
+            description=description
+        )
+        
+        return {
+            "status": "success",
+            "message": "Template uploaded successfully",
+            "template": template
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/upload/reference-report")
+async def upload_reference_report(
+    file: UploadFile = File(...),
+    template_id: str = Form(...),
+    description: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload a reference report to Supabase storage."""
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Upload to Supabase using service
+        reference_report = await upload_service.upload_reference_report(
+            file=file_content,
+            filename=file.filename,
+            template_id=template_id,
+            user_id=current_user["id"],
+            description=description
+        )
+        
+        return {
+            "status": "success",
+            "message": "Reference report uploaded successfully",
+            "reference_report": reference_report
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/upload/report")
+async def upload_report(
+    file: UploadFile = File(...),
+    reference_report_id: str = Form(...),
+    description: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload a generated report to Supabase storage."""
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Upload to Supabase using service
+        report = await upload_service.upload_report(
+            file=file_content,
+            filename=file.filename,
+            reference_report_id=reference_report_id,
+            user_id=current_user["id"],
+            description=description
+        )
+        
+        return {
+            "status": "success",
+            "message": "Report uploaded successfully",
+            "report": report
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
