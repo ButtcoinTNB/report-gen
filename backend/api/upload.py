@@ -298,226 +298,286 @@ async def upload_documents(
     Returns:
         Standardized API response with report ID and uploaded file details
     """
-    logger.info(f"Upload documents request received: {len(files)} files, template_id={template_id}")
-    
-    # Check total size of all files
-    total_size = sum(file.size for file in files)
-    max_total_size = settings.MAX_UPLOAD_SIZE  # 100MB by default
-    
-    if total_size > max_total_size:
-        max_size_mb = max_total_size / (1024 * 1024)
-        raise ValidationException(
-            message=f"Total file size exceeds the {max_size_mb:.1f} MB limit",
-            details={
-                "total_size": total_size, 
-                "max_size": max_total_size,
-                "file_count": len(files)
-            }
-        )
-    
-    uploaded_files = []
-    file_processing_log = []
-    
-    # Generate a unique report ID (UUID for external reference)
-    report_uuid = str(uuid.uuid4())
-    logger.info(f"Generated report UUID: {report_uuid}")
-    
-    # Create a directory for this report's files using the UUID
-    report_dir = safe_path_join(settings.UPLOAD_DIR, report_uuid)
-    os.makedirs(report_dir, exist_ok=True)
-    logger.info(f"Created report directory: {report_dir}")
-
-    # Initialize Supabase client
-    supabase = create_supabase_client()
-    supabase_urls = []
-
-    for file in files:
-        try:
-            logger.info(f"Processing file: {file.filename}, size: {file.size}, content_type: {file.content_type}")
-            file_processing_log.append(f"Processing file: {file.filename}, size: {file.size}, content_type: {file.content_type}")
+    try:
+        logger.info(f"Upload documents request received: {len(files)} files, template_id={template_id}")
+        
+        # Validate files are not empty
+        if not files:
+            raise ValidationException(
+                message="No files were provided",
+                details={"file_count": 0}
+            )
             
-            # Check file type
-            file_extension = os.path.splitext(file.filename)[1].lower()
-            allowed_extensions = [".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png"]
-            
-            if not any(file_extension.endswith(ext) for ext in allowed_extensions):
-                error_msg = f"Unsupported file type: {file_extension}. Only PDF, Word, text files and images are accepted"
-                file_processing_log.append(f"ERROR: {error_msg}")
-                raise HTTPException(
-                    status_code=400,
-                    detail=error_msg,
-                )
-            
-            # Individual file size check is no longer needed since we check total size above
-            # But keeping a relaxed limit for individual files (80% of max)
-            individual_max = int(max_total_size * 0.8)  # 80% of max allowed size
-            if file.size > individual_max:
-                max_size_mb = individual_max / (1024 * 1024)
-                error_msg = f"Individual file size ({file.size/(1024*1024):.2f} MB) exceeds {max_size_mb:.1f} MB limit"
-                file_processing_log.append(f"ERROR: {error_msg}")
-                raise HTTPException(
-                    status_code=400,
-                    detail=error_msg
-                )
-
-            # Create unique filename
-            ext = os.path.splitext(file.filename)[1]
-            safe_filename = secure_filename(file.filename)
-            filename = f"{uuid.uuid4()}{ext}"
-            file_path = safe_path_join(report_dir, filename)
-            
-            # Save original filename mapping for reference
-            original_filename = file.filename
-
-            # Save file locally
-            logger.info(f"Saving file to: {file_path}")
-            file_processing_log.append(f"Saving file to: {file_path}")
-            
-            try:
-                file_content = await file.read()  # Read the file content
-                
-                with open(file_path, "wb") as buffer:
-                    buffer.write(file_content)  # Write the content to the file
-                
-                # Reset the file cursor for potential future read operations
-                await file.seek(0)
-                
-                # Check if file was saved correctly
-                if os.path.exists(file_path):
-                    saved_size = os.path.getsize(file_path)
-                    if saved_size == 0:
-                        file_processing_log.append(f"WARNING: File was saved but is empty (0 bytes): {file_path}")
-                    elif saved_size != file.size:
-                        file_processing_log.append(f"WARNING: File size mismatch. Original: {file.size}, Saved: {saved_size}")
-                    else:
-                        file_processing_log.append(f"Successfully saved file: {file_path} ({saved_size} bytes)")
-                else:
-                    file_processing_log.append(f"ERROR: File was not saved successfully: {file_path}")
-                    
-            except Exception as save_error:
-                error_msg = f"Error saving file {file.filename}: {str(save_error)}"
-                logger.error(error_msg)
-                file_processing_log.append(f"ERROR: {error_msg}")
-                raise Exception(error_msg)
-                
-            # Try to upload to Supabase Storage
-            try:
-                storage_path = f"reports/{report_uuid}/{filename}"
-                
-                with open(file_path, "rb") as f:
-                    file_data = f.read()
-                    
-                logger.info(f"Uploading to Supabase: {storage_path}")
-                file_processing_log.append(f"Uploading to Supabase: {storage_path}")
-                
-                # Determine correct content type
-                content_type = file.content_type
-                if not content_type or content_type == "application/octet-stream":
-                    # Try to infer content type from extension
-                    content_type = mimetypes.guess_type(file_path)[0] or f"application/{ext.replace('.', '')}"
-                
-                response = supabase.storage.from_("reports").upload(
-                    path=storage_path,
-                    file=file_data,
-                    file_options={"content-type": content_type}
-                )
-                
-                # Get public URL
-                public_url = supabase.storage.from_("reports").get_public_url(storage_path)
-                supabase_urls.append(public_url)
-                logger.info(f"Uploaded to Supabase, public URL: {public_url}")
-                file_processing_log.append(f"Successfully uploaded to Supabase: {public_url}")
-                
-            except Exception as e:
-                logger.error(f"Error uploading to Supabase (continuing with local file): {str(e)}")
-                file_processing_log.append(f"WARNING: Error uploading to Supabase: {str(e)}")
-                public_url = None
-                storage_path = None
-                
-            # Add file information to uploaded_files list
-            uploaded_files.append(
-                {
-                    "filename": original_filename,
-                    "path": file_path,
-                    "type": ext.lower().replace(".", ""),
-                    "storage_path": storage_path if 'storage_path' in locals() else None,
-                    "public_url": public_url
+        # Check if any files are empty
+        empty_files = [f.filename for f in files if f.size == 0]
+        if empty_files:
+            raise ValidationException(
+                message="Empty files detected",
+                details={"empty_files": empty_files}
+            )
+        
+        # Check total size of all files
+        total_size = sum(file.size for file in files)
+        max_total_size = settings.MAX_UPLOAD_SIZE  # 100MB by default
+        
+        if total_size > max_total_size:
+            max_size_mb = max_total_size / (1024 * 1024)
+            raise ValidationException(
+                message=f"Total file size exceeds the {max_size_mb:.1f} MB limit",
+                details={
+                    "total_size": total_size, 
+                    "max_size": max_total_size,
+                    "file_count": len(files)
                 }
             )
-        except Exception as file_error:
-            logger.error(f"Error processing file {file.filename}: {str(file_error)}")
-            file_processing_log.append(f"ERROR: Error processing file {file.filename}: {str(file_error)}")
-            import traceback
-            trace = traceback.format_exc()
-            file_processing_log.append(f"Traceback: {trace}")
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Error processing file {file.filename}: {str(file_error)}"
-            )
-        finally:
-            # Ensure the file is closed
-            await file.close()
-
-    # Store report metadata in local JSON file
-    metadata_path = safe_path_join(report_dir, "metadata.json")
-    metadata = {
-        "report_id": report_uuid,  # Store the UUID for external reference
-        "template_id": template_id,
-        "files": uploaded_files,
-        "created_at": datetime.datetime.now().isoformat(),
-        "status": "uploaded",
-        "title": f"Report #{report_uuid[:8]}",  # Default title using part of the UUID
-        "content": "",  # Initialize empty content
-        "processing_log": file_processing_log  # Add processing log for debugging
-    }
-    
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f, indent=2)
-    
-    logger.info(f"Saved metadata to: {metadata_path}")
-    
-    # Store metadata in Supabase database
-    try:
-        logger.info("Saving metadata to Supabase database")
-        # Note: We don't include the 'id' field in the database insert
-        # The database will generate its own integer ID
-        db_metadata = {
-            "template_id": template_id,
-            "title": metadata["title"],
-            "content": "",
-            "is_finalized": False,
-            "file_count": len(uploaded_files),
-            "report_id": report_uuid  # Store the UUID for reference
-        }
-        response = supabase.table("reports").insert(db_metadata).execute()
-        logger.info("Saved report metadata to Supabase:", response)
         
-        # Get the database-generated integer ID
-        if response.data and len(response.data) > 0:
-            db_id = response.data[0]["id"]
-            # Save the mapping between UUID and integer ID
-            mapping_path = safe_path_join(report_dir, "id_mapping.json")
-            with open(mapping_path, "w") as f:
-                json.dump({"report_id": report_uuid, "db_id": db_id}, f, indent=2)
-            logger.info(f"Created ID mapping: report_id {report_uuid} -> Database ID {db_id}")
-            
-            # Return the database ID in the response
-            return {
-                "report_id": report_uuid,
-                "files": uploaded_files,
+        uploaded_files = []
+        file_processing_log = []
+        
+        # Generate a unique report ID (UUID for external reference)
+        report_uuid = str(uuid.uuid4())
+        logger.info(f"Generated report UUID: {report_uuid}")
+        
+        # Create a directory for this report's files using the UUID
+        report_dir = safe_path_join(settings.UPLOAD_DIR, report_uuid)
+        os.makedirs(report_dir, exist_ok=True)
+        logger.info(f"Created report directory: {report_dir}")
+
+        # Initialize Supabase client
+        supabase = create_supabase_client()
+        supabase_urls = []
+
+        for file in files:
+            try:
+                logger.info(f"Processing file: {file.filename}, size: {file.size}, content_type: {file.content_type}")
+                file_processing_log.append(f"Processing file: {file.filename}, size: {file.size}, content_type: {file.content_type}")
+                
+                # Check file type
+                file_extension = os.path.splitext(file.filename)[1].lower()
+                allowed_extensions = [".pdf", ".docx", ".doc", ".txt", ".jpg", ".jpeg", ".png"]
+                
+                if not any(file_extension.endswith(ext) for ext in allowed_extensions):
+                    error_msg = f"Unsupported file type: {file_extension}. Only PDF, Word, text files and images are accepted"
+                    file_processing_log.append(f"ERROR: {error_msg}")
+                    raise ValidationException(
+                        message=error_msg,
+                        details={
+                            "filename": file.filename,
+                            "extension": file_extension,
+                            "allowed_extensions": allowed_extensions
+                        }
+                    )
+                
+                # Individual file size check is no longer needed since we check total size above
+                # But keeping a relaxed limit for individual files (80% of max)
+                individual_max = int(max_total_size * 0.8)  # 80% of max allowed size
+                if file.size > individual_max:
+                    max_size_mb = individual_max / (1024 * 1024)
+                    error_msg = f"Individual file size ({file.size/(1024*1024):.2f} MB) exceeds {max_size_mb:.1f} MB limit"
+                    file_processing_log.append(f"ERROR: {error_msg}")
+                    raise ValidationException(
+                        message=error_msg,
+                        details={
+                            "filename": file.filename,
+                            "file_size": file.size,
+                            "max_size": individual_max
+                        }
+                    )
+
+                # Create unique filename
+                ext = os.path.splitext(file.filename)[1]
+                safe_filename = secure_filename(file.filename)
+                filename = f"{uuid.uuid4()}{ext}"
+                file_path = safe_path_join(report_dir, filename)
+                
+                # Save original filename mapping for reference
+                original_filename = file.filename
+
+                # Save file locally
+                logger.info(f"Saving file to: {file_path}")
+                file_processing_log.append(f"Saving file to: {file_path}")
+                
+                try:
+                    file_content = await file.read()  # Read the file content
+                    
+                    if not file_content:
+                        raise ValidationException(
+                            message=f"File {file.filename} is empty or could not be read",
+                            details={"filename": file.filename}
+                        )
+                    
+                    with open(file_path, "wb") as buffer:
+                        buffer.write(file_content)  # Write the content to the file
+                    
+                    # Reset the file cursor for potential future read operations
+                    await file.seek(0)
+                    
+                    # Check if file was saved correctly
+                    if os.path.exists(file_path):
+                        saved_size = os.path.getsize(file_path)
+                        if saved_size == 0:
+                            raise ValidationException(
+                                message=f"File {file.filename} was saved but is empty (0 bytes)",
+                                details={"filename": file.filename, "path": file_path}
+                            )
+                        elif saved_size != file.size:
+                            raise ValidationException(
+                                message=f"File size mismatch for {file.filename}",
+                                details={
+                                    "filename": file.filename,
+                                    "original_size": file.size,
+                                    "saved_size": saved_size
+                                }
+                            )
+                        else:
+                            file_processing_log.append(f"Successfully saved file: {file_path} ({saved_size} bytes)")
+                    else:
+                        raise ValidationException(
+                            message=f"File {file.filename} was not saved successfully",
+                            details={"filename": file.filename, "path": file_path}
+                        )
+                        
+                except Exception as save_error:
+                    error_msg = f"Error saving file {file.filename}: {str(save_error)}"
+                    logger.error(error_msg)
+                    file_processing_log.append(f"ERROR: {error_msg}")
+                    raise ValidationException(
+                        message=error_msg,
+                        details={"filename": file.filename, "error": str(save_error)}
+                    )
+                    
+                # Try to upload to Supabase Storage
+                try:
+                    storage_path = f"reports/{report_uuid}/{filename}"
+                    
+                    with open(file_path, "rb") as f:
+                        file_data = f.read()
+                        
+                    logger.info(f"Uploading to Supabase: {storage_path}")
+                    file_processing_log.append(f"Uploading to Supabase: {storage_path}")
+                    
+                    # Determine correct content type
+                    content_type = file.content_type
+                    if not content_type or content_type == "application/octet-stream":
+                        # Try to infer content type from extension
+                        content_type = mimetypes.guess_type(file_path)[0] or f"application/{ext.replace('.', '')}"
+                    
+                    response = supabase.storage.from_("reports").upload(
+                        path=storage_path,
+                        file=file_data,
+                        file_options={"content-type": content_type}
+                    )
+                    
+                    # Get public URL
+                    public_url = supabase.storage.from_("reports").get_public_url(storage_path)
+                    supabase_urls.append(public_url)
+                    logger.info(f"Uploaded to Supabase, public URL: {public_url}")
+                    file_processing_log.append(f"Successfully uploaded to Supabase: {public_url}")
+                    
+                except Exception as e:
+                    logger.error(f"Error uploading to Supabase (continuing with local file): {str(e)}")
+                    file_processing_log.append(f"WARNING: Error uploading to Supabase: {str(e)}")
+                    public_url = None
+                    storage_path = None
+                    
+                # Add file information to uploaded_files list
+                uploaded_files.append(
+                    {
+                        "filename": original_filename,
+                        "path": file_path,
+                        "type": ext.lower().replace(".", ""),
+                        "storage_path": storage_path if 'storage_path' in locals() else None,
+                        "public_url": public_url
+                    }
+                )
+            except Exception as file_error:
+                logger.error(f"Error processing file {file.filename}: {str(file_error)}")
+                file_processing_log.append(f"ERROR: Error processing file {file.filename}: {str(file_error)}")
+                import traceback
+                trace = traceback.format_exc()
+                file_processing_log.append(f"Traceback: {trace}")
+                raise ValidationException(
+                    message=f"Error processing file {file.filename}",
+                    details={
+                        "filename": file.filename,
+                        "error": str(file_error),
+                        "traceback": trace
+                    }
+                )
+            finally:
+                # Ensure the file is closed
+                await file.close()
+
+        # Store report metadata in local JSON file
+        metadata_path = safe_path_join(report_dir, "metadata.json")
+        metadata = {
+            "report_id": report_uuid,  # Store the UUID for external reference
+            "template_id": template_id,
+            "files": uploaded_files,
+            "created_at": datetime.datetime.now().isoformat(),
+            "status": "uploaded",
+            "title": f"Report #{report_uuid[:8]}",  # Default title using part of the UUID
+            "content": "",  # Initialize empty content
+            "processing_log": file_processing_log  # Add processing log for debugging
+        }
+        
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        
+        logger.info(f"Saved metadata to: {metadata_path}")
+        
+        # Store metadata in Supabase database
+        try:
+            logger.info("Saving metadata to Supabase database")
+            # Note: We don't include the 'id' field in the database insert
+            # The database will generate its own integer ID
+            db_metadata = {
                 "template_id": template_id,
+                "title": metadata["title"],
+                "content": "",
+                "is_finalized": False,
+                "file_count": len(uploaded_files),
+                "report_id": report_uuid  # Store the UUID for reference
             }
+            response = supabase.table("reports").insert(db_metadata).execute()
+            logger.info("Saved report metadata to Supabase:", response)
+            
+            # Get the database-generated integer ID
+            if response.data and len(response.data) > 0:
+                db_id = response.data[0]["id"]
+                # Save the mapping between UUID and integer ID
+                mapping_path = safe_path_join(report_dir, "id_mapping.json")
+                with open(mapping_path, "w") as f:
+                    json.dump({"report_id": report_uuid, "db_id": db_id}, f, indent=2)
+                logger.info(f"Created ID mapping: report_id {report_uuid} -> Database ID {db_id}")
+                
+                # Return the database ID in the response
+                return {
+                    "report_id": report_uuid,
+                    "files": uploaded_files,
+                    "template_id": template_id,
+                }
+            
+        except Exception as e:
+            logger.error(f"Error saving report metadata to Supabase (continuing with local file): {str(e)}")
+            file_processing_log.append(f"WARNING: Error saving metadata to Supabase: {str(e)}")
+        
+        # Default return if we don't have a database ID but upload was successful
+        return {
+            "report_id": report_uuid,
+            "files": uploaded_files,
+            "template_id": template_id,
+        }
         
     except Exception as e:
-        logger.error(f"Error saving report metadata to Supabase (continuing with local file): {str(e)}")
-        file_processing_log.append(f"WARNING: Error saving metadata to Supabase: {str(e)}")
-    
-    # Default return if we don't have a database ID but upload was successful
-    return {
-        "report_id": report_uuid,
-        "files": uploaded_files,
-        "template_id": template_id,
-    }
+        logger.error(f"Error in upload_documents: {str(e)}")
+        import traceback
+        trace = traceback.format_exc()
+        logger.error(f"Traceback: {trace}")
+        raise ValidationException(
+            message=str(e),
+            details={"traceback": trace}
+        )
 
 
 @router.post("/document", response_model=dict)

@@ -7,14 +7,54 @@ This module contains middleware classes that can be applied to the FastAPI app.
 import time
 import uuid
 import os
-from typing import Callable, Dict, Any
+from typing import Callable, Dict, Any, List
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 from utils.error_handler import logger
+from fastapi.middleware.cors import CORSMiddleware
 
 # Check if we're in production mode
 IS_PRODUCTION = os.getenv("NODE_ENV") == "production"
+
+# Define allowed origins
+ALLOWED_ORIGINS = [
+    "https://report-gen-liard.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:8000",
+]
+
+class CORSHandlerMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware that ensures CORS headers are set on all responses,
+    including error responses.
+    """
+    def __init__(self, app: ASGIApp, allowed_origins: List[str] = ALLOWED_ORIGINS):
+        super().__init__(app)
+        self.allowed_origins = allowed_origins
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        try:
+            # Get origin from request
+            origin = request.headers.get("origin")
+            
+            # Process request
+            response = await call_next(request)
+            
+            # Add CORS headers if origin is allowed
+            if origin in self.allowed_origins:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = "*"
+                response.headers["Access-Control-Expose-Headers"] = "*"
+            
+            return response
+            
+        except Exception as e:
+            # Re-raise the exception after logging
+            logger.error(f"Error in request: {str(e)}")
+            raise
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
@@ -122,6 +162,20 @@ def setup_middleware(app: FastAPI) -> None:
     Args:
         app: The FastAPI application
     """
+    # Add CORS middleware first
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+        max_age=86400,  # Cache preflight requests for 24 hours
+    )
+    
+    # Add custom CORS handler middleware
+    app.add_middleware(CORSHandlerMiddleware)
+    
     # Add request logging middleware with environment-appropriate settings
     app.add_middleware(
         RequestLoggingMiddleware,

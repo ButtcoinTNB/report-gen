@@ -26,6 +26,22 @@ class BaseAPIException(HTTPException):
         if details:
             detail["details"] = details
             
+        # Ensure CORS headers are included
+        if headers is None:
+            headers = {}
+        
+        # Add CORS headers if not present
+        if "Access-Control-Allow-Origin" not in headers:
+            headers["Access-Control-Allow-Origin"] = "*"  # Will be overridden by middleware if needed
+        if "Access-Control-Allow-Credentials" not in headers:
+            headers["Access-Control-Allow-Credentials"] = "true"
+        if "Access-Control-Allow-Methods" not in headers:
+            headers["Access-Control-Allow-Methods"] = "*"
+        if "Access-Control-Allow-Headers" not in headers:
+            headers["Access-Control-Allow-Headers"] = "*"
+        if "Access-Control-Expose-Headers" not in headers:
+            headers["Access-Control-Expose-Headers"] = "*"
+            
         super().__init__(status_code=status_code, detail=detail, headers=headers)
 
 

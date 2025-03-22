@@ -100,13 +100,19 @@ app = FastAPI(
 )
 
 # Configure CORS with proper error handling
+origins = [
+    "https://report-gen-liard.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=origins,  # Use explicit list instead of settings
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],
-    expose_headers=["Content-Disposition", "Content-Type", "Content-Length"],
+    expose_headers=["*"],  # Expose all headers
     max_age=86400,  # Cache preflight requests for 24 hours
 )
 
@@ -115,27 +121,38 @@ app.add_middleware(
 async def cors_error_handler(request: Request, call_next):
     try:
         response = await call_next(request)
+        
+        # Add CORS headers to all responses
+        origin = request.headers.get("origin")
+        if origin in origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            response.headers["Access-Control-Expose-Headers"] = "*"
+        
         return response
     except Exception as e:
         # Get origin from request headers
         origin = request.headers.get("origin")
         
-        # Check if origin is allowed
-        if origin in settings.allowed_origins:
-            # Return error response with CORS headers
-            headers = {
-                "Access-Control-Allow-Origin": origin,
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                "Access-Control-Allow-Headers": "*",
-                "Access-Control-Expose-Headers": "Content-Disposition, Content-Type, Content-Length",
-            }
-            return JSONResponse(
-                status_code=500,
-                content={"detail": str(e)},
-                headers=headers
-            )
-        raise  # Re-raise the exception if origin not allowed
+        # Return error response with CORS headers
+        headers = {
+            "Access-Control-Allow-Origin": origin if origin in origins else origins[0],
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Expose-Headers": "*",
+        }
+        
+        # Log the error for debugging
+        logger.error(f"Error processing request: {str(e)}", exc_info=True)
+        
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e)},
+            headers=headers
+        )
 
 # Set up middleware
 setup_middleware(app)
@@ -246,12 +263,24 @@ async def cleanup_old_data(max_age_hours: int = 24):
                 supabase = create_supabase_client()
                 max_age_time = datetime.now() - timedelta(hours=max_age_hours)
                 
-                response = supabase.table("reports").update(
-                    {"files_cleaned": True}
-                ).filter("created_at", "lt", max_age_time.isoformat()
-                ).filter("files_cleaned", "eq", False).execute()
-                
-                logger.info(f"Updated database for cleaned files: {response}")
+                # First, check if the files_cleaned column exists
+                try:
+                    # Try to get a single row to check schema
+                    response = supabase.table("reports").select("*").limit(1).execute()
+                    if response.data and "files_cleaned" in response.data[0]:
+                        # Column exists, proceed with update
+                        # Update records where files_cleaned is null and created_at is older than max_age_time
+                        response = supabase.table("reports").update(
+                            {"files_cleaned": True}
+                        ).filter("created_at", "lt", max_age_time.isoformat()
+                        ).filter("files_cleaned", "is", "null").execute()
+                        
+                        logger.info(f"Updated database for cleaned files: {response}")
+                    else:
+                        logger.info("Skipping database update: files_cleaned column not found in schema")
+                except Exception as schema_error:
+                    logger.warning(f"Error checking schema, skipping database update: {str(schema_error)}")
+                    
         except Exception as e:
             logger.error(f"Error updating database: {str(e)}")
         
