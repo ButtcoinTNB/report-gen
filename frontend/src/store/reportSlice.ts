@@ -52,6 +52,8 @@ export interface AgentLoopState {
   estimatedTimeRemaining: number | null;
   startTime: number | null;
   transactionId: string | null; // Track current transaction ID
+  stalledSince: number | null; // Timestamp when the process was detected as stalled
+  isStalled: boolean; // Flag indicating if the process is stalled
 }
 
 export interface ReportState {
@@ -109,7 +111,9 @@ const initialState: ReportState = {
     canCancel: false,
     estimatedTimeRemaining: null,
     startTime: null,
-    transactionId: null
+    transactionId: null,
+    stalledSince: null,
+    isStalled: false
   },
   sessionTimeout: 30, // 30 minutes session timeout by default
   lastActivityTime: Date.now(),
@@ -235,7 +239,10 @@ export const reportSlice = createSlice({
           progress,
           stage: newStage,
           message,
-          estimatedTimeRemaining: estimatedTimeRemaining ?? state.agentLoop.estimatedTimeRemaining
+          estimatedTimeRemaining: estimatedTimeRemaining ?? state.agentLoop.estimatedTimeRemaining,
+          // Reset stalled state when progress updates
+          isStalled: false,
+          stalledSince: null
         };
         
         // For writing or reviewing stages, update the current iteration
@@ -248,6 +255,7 @@ export const reportSlice = createSlice({
         }
       }
       
+      // Update last activity time
       state.lastActivityTime = Date.now();
     },
     completeAgentLoop: (state, action: PayloadAction<{
@@ -424,6 +432,28 @@ export const reportSlice = createSlice({
           state.agentLoop.transactionId = null;
         }
       }
+    },
+    detectStalledAgentLoop: (state, action: PayloadAction<{ threshold: number }>) => {
+      const { threshold } = action.payload;
+      const now = Date.now();
+      
+      // Only check for stalled processes if the agent loop is active
+      if ((state.agentLoop.isInitializing || state.agentLoop.isRunning) && 
+          !state.agentLoop.isStalled) {
+        
+        // Calculate time since last update
+        const timeSinceLastActivity = now - state.lastActivityTime;
+        
+        // If last activity was more than the threshold ago, mark as stalled
+        if (timeSinceLastActivity > threshold) {
+          state.agentLoop.isStalled = true;
+          state.agentLoop.stalledSince = now;
+        }
+      }
+    },
+    resetStalledState: (state) => {
+      state.agentLoop.isStalled = false;
+      state.agentLoop.stalledSince = null;
     }
   }
 });
@@ -454,6 +484,8 @@ export const {
   beginTransaction,
   completeTransaction,
   cleanupStaleTransactions,
+  detectStalledAgentLoop,
+  resetStalledState,
 } = reportSlice.actions;
 
 // Export reducer

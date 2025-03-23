@@ -3,7 +3,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any, AsyncIterator
 from utils.agents_loop import AIAgentLoop
-from services.docx_formatter import generate_docx
+from services.docx_formatter import generate_docx, get_document_metrics
+from utils.metrics import MetricsCollector
 import uuid
 import os
 import time
@@ -16,6 +17,7 @@ from utils.security import validate_user, get_user_from_request
 from ..utils.event_emitter import EventEmitter
 from ..utils.task_manager import tasks_cache
 from ..utils.error_handler import raise_error, format_error, ErrorHandler
+import logging
 
 router = APIRouter()
 agent_loop = AIAgentLoop()
@@ -28,6 +30,24 @@ event_subscribers = {}
 
 # Setup event emitter for task status updates
 task_events = EventEmitter()
+
+# Initialize metrics collector
+metrics_collector = MetricsCollector(
+    metrics_file=Path(__file__).parent.parent / "data" / "metrics.json", 
+    backup_interval=100  # Backup metrics every 100 operations
+)
+
+# Path for storing performance metrics
+METRICS_LOG_PATH = Path(__file__).parent.parent / "logs" / "performance_metrics.log"
+METRICS_LOG_PATH.parent.mkdir(exist_ok=True, parents=True)
+
+# Configure metrics logger
+metrics_logger = logging.getLogger("performance_metrics")
+metrics_logger.setLevel(logging.INFO)
+# Add file handler for metrics
+file_handler = logging.FileHandler(METRICS_LOG_PATH)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+metrics_logger.addHandler(file_handler)
 
 class AgentLoopRequest(BaseModel):
     report_id: str
@@ -266,198 +286,160 @@ async def get_task_status(
         )
 
 @router.post("/cancel-task/{task_id}")
-async def cancel_task(
-    task_id: str,
-    cancel_data: CancelInput = Body(CancelInput()),
-    x_request_id: Optional[str] = Header(None)
-):
-    """
-    Cancel an ongoing task
-    """
-    try:
-        # Verify task exists
-        if task_id not in tasks_cache:
-            raise_error(
-                "not_found",
-                message="Task not found",
-                detail=f"No task found with ID {task_id}",
-                transaction_id=cancel_data.transactionId,
-                request_id=x_request_id
-            )
+async def cancel_task(task_id: str):
+    """Cancel a running task by its ID"""
+    if task_id in tasks_cache:
+        # Mark the task as cancelled in the AIAgentLoop
+        if hasattr(tasks_cache[task_id]["agent"], "cancel_processing"):
+            tasks_cache[task_id]["agent"].cancel_processing()
         
-        # Verify task can be cancelled (only pending or processing tasks can be cancelled)
-        if tasks_cache[task_id]["status"] not in ["pending", "processing"]:
-            raise_error(
-                "conflict",
-                message="Task cannot be cancelled",
-                detail=f"Task is in {tasks_cache[task_id]['status']} state and cannot be cancelled",
-                transaction_id=cancel_data.transactionId,
-                request_id=x_request_id
-            )
+        # Immediately update task status
+        tasks_cache[task_id]["status"] = "cancelled"
+        tasks_cache[task_id]["message"] = "Task cancelled by user"
         
-        # Verify ownership if userId is provided
-        if cancel_data.userId and tasks_cache[task_id].get("owner") and tasks_cache[task_id]["owner"] != cancel_data.userId:
-            raise_error(
-                "authorization",
-                message="Not authorized to cancel this task",
-                detail="You do not have permission to cancel this task",
-                transaction_id=cancel_data.transactionId,
-                request_id=x_request_id
-            )
+        # Notify all subscribers about the cancellation
+        await update_task_status(task_id, "cancelled", 0, "Task cancelled by user")
         
-        # Update task status to cancelled
-        tasks_cache[task_id].update({
-            "status": "failed",
-            "error": "Task cancelled by user",
-            "updated_at": datetime.now().isoformat(),
-            "transaction_id": cancel_data.transactionId
-        })
-        
-        # Emit cancellation event for subscribers
-        task_events.emit(f"task.{task_id}.cancelled", {
-            "task_id": task_id,
-            "status": "cancelled",
-            "message": "Task cancelled by user",
-            "transaction_id": cancel_data.transactionId
-        })
-        
-        return {
-            "status": "success",
-            "message": "Task cancelled successfully",
-            "task_id": task_id
-        }
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        ErrorHandler.handle_exception(
-            e,
-            error_type="internal",
-            message="Failed to cancel task",
-            context={"task_id": task_id, "userId": cancel_data.userId},
-            transaction_id=cancel_data.transactionId,
-            request_id=x_request_id
-        )
+        logger.info(f"Task {task_id} cancelled by user request")
+        return {"success": True, "message": "Task cancelled"}
+    return {"success": False, "message": "Task not found"}
 
 @router.get("/subscribe/{task_id}")
-async def subscribe_to_task(
-    task_id: str,
-    user_id: Optional[str] = Query(None),
-    x_request_id: Optional[str] = Header(None)
-):
-    """
-    SSE endpoint to subscribe to task status updates
-    """
-    try:
-        # Verify task exists
-        if task_id not in tasks_cache:
-            raise_error(
-                "not_found",
-                message="Task not found",
-                detail=f"No task found with ID {task_id}",
-                request_id=x_request_id
-            )
+async def subscribe_to_task(task_id: str, request: Request):
+    """Subscribe to task progress updates via server-sent events."""
+    if task_id not in tasks_cache:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+
+    async def event_generator():
+        subscriber_id = str(uuid.uuid4())
+        if "subscribers" not in tasks_cache[task_id]:
+            tasks_cache[task_id]["subscribers"] = {}
         
-        # Verify ownership if user_id is provided
-        if user_id and tasks_cache[task_id].get("owner") and tasks_cache[task_id]["owner"] != user_id:
-            raise_error(
-                "authorization",
-                message="Not authorized to access this task",
-                detail="You do not have permission to access this task",
-                request_id=x_request_id
-            )
+        # Create a queue for this subscriber
+        queue = asyncio.Queue()
+        tasks_cache[task_id]["subscribers"][subscriber_id] = queue
+        
+        logger.info(f"New subscriber {subscriber_id} for task {task_id}")
+        
+        try:
+            # Send initial state
+            status = tasks_cache[task_id]["status"]
+            progress = tasks_cache[task_id]["progress"]
+            message = tasks_cache[task_id]["message"]
+            result = tasks_cache[task_id].get("result", None)
+            error = tasks_cache[task_id].get("error", None)
+            stage = tasks_cache[task_id].get("stage", None)
+            estimated_time_remaining = tasks_cache[task_id].get("estimatedTimeRemaining", None)
             
-        async def event_generator():
-            """Generate SSE events for task status updates"""
-            # Send initial status
-            yield f"data: {json.dumps(tasks_cache[task_id])}\n\n"
+            # Convert to floats for JSON serialization
+            if estimated_time_remaining is not None:
+                estimated_time_remaining = float(estimated_time_remaining)
             
-            # Setup subscription for task events
-            queue = asyncio.Queue()
+            data = {
+                "task_id": task_id,
+                "status": status,
+                "progress": progress,
+                "message": message,
+                "result": result,
+                "error": error
+            }
             
-            def on_task_update(data):
-                if not queue.full():
-                    asyncio.create_task(queue.put(data))
+            # Add stage and estimated time if available
+            if stage:
+                data["stage"] = stage
+            if estimated_time_remaining is not None:
+                data["estimatedTimeRemaining"] = estimated_time_remaining
+                
+            yield format_sse(data=data)
             
-            # Subscribe to task events
-            task_events.on(f"task.{task_id}.update", on_task_update)
-            task_events.on(f"task.{task_id}.complete", on_task_update)
-            task_events.on(f"task.{task_id}.error", on_task_update)
-            task_events.on(f"task.{task_id}.cancelled", on_task_update)
+            # Send periodic keepalive pings to prevent connection timeout
+            keepalive_task = asyncio.create_task(send_keepalive_pings(queue))
             
             try:
-                # Wait for events
+                # Process updates from the queue
                 while True:
-                    try:
-                        data = await asyncio.wait_for(queue.get(), timeout=30)
-                        yield f"data: {json.dumps(data)}\n\n"
-                    except asyncio.TimeoutError:
-                        # Send keepalive comment after timeout
-                        yield ": keepalive\n\n"
+                    update = await queue.get()
+                    if update is None:  # None is our signal to stop
+                        break
+                    yield format_sse(data=update)
             finally:
-                # Clean up event listeners
-                task_events.off(f"task.{task_id}.update", on_task_update)
-                task_events.off(f"task.{task_id}.complete", on_task_update)
-                task_events.off(f"task.{task_id}.error", on_task_update)
-                task_events.off(f"task.{task_id}.cancelled", on_task_update)
-        
-        return event_generator()
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        ErrorHandler.handle_exception(
-            e,
-            error_type="internal", 
-            message="Failed to set up subscription",
-            context={"task_id": task_id},
-            request_id=x_request_id
-        )
+                # Cancel the keepalive task when the loop exits
+                keepalive_task.cancel()
+                
+        except asyncio.CancelledError:
+            logger.info(f"Subscriber {subscriber_id} connection closed")
+        finally:
+            # Clean up the subscriber
+            if task_id in tasks_cache and "subscribers" in tasks_cache[task_id]:
+                if subscriber_id in tasks_cache[task_id]["subscribers"]:
+                    del tasks_cache[task_id]["subscribers"][subscriber_id]
+                    logger.info(f"Removed subscriber {subscriber_id} for task {task_id}")
 
-async def update_task_status(
-    task_id: str, 
-    status: str, 
-    message: str = None, 
-    progress: float = None, 
-    result: Any = None, 
-    error: str = None
-):
-    """
-    Update task status and emit events
-    """
-    # Skip updates for tasks that have been cancelled
-    if task_id in tasks_cache and tasks_cache[task_id]["status"] == "failed" and tasks_cache[task_id].get("error") == "Task cancelled by user":
-        return
-    
-    # Update task status in cache
+    return EventSourceResponse(event_generator())
+
+async def send_keepalive_pings(queue):
+    """Send periodic pings to keep the connection alive"""
+    try:
+        while True:
+            # Send a ping every 30 seconds
+            await asyncio.sleep(30)
+            await queue.put({"type": "ping", "time": time.time()})
+    except asyncio.CancelledError:
+        pass
+
+def format_sse(data: dict) -> dict:
+    """Format a Server-Sent Events message"""
+    json_data = json.dumps(data)
+    return {
+        "event": "update",
+        "data": json_data
+    }
+
+async def update_task_status(task_id: str, status: str, progress: float, message: str, 
+                            result: dict = None, error: str = None, stage: str = None,
+                            estimated_time_remaining: float = None):
+    """Update task status and notify all subscribers"""
     if task_id in tasks_cache:
-        update_data = {"updated_at": datetime.now().isoformat()}
+        # Update task status
+        tasks_cache[task_id]["status"] = status
+        tasks_cache[task_id]["progress"] = progress
+        tasks_cache[task_id]["message"] = message
         
-        if status is not None:
-            update_data["status"] = status
-        
-        if message is not None:
-            update_data["message"] = message
-            
-        if progress is not None:
-            update_data["progress"] = progress
-            
         if result is not None:
-            update_data["result"] = result
-            
+            tasks_cache[task_id]["result"] = result
         if error is not None:
-            update_data["error"] = error
+            tasks_cache[task_id]["error"] = error
+        if stage is not None:
+            tasks_cache[task_id]["stage"] = stage
+        if estimated_time_remaining is not None:
+            tasks_cache[task_id]["estimatedTimeRemaining"] = estimated_time_remaining
             
-        tasks_cache[task_id].update(update_data)
+        # Prepare data for subscribers
+        data = {
+            "task_id": task_id,
+            "status": status,
+            "progress": progress,
+            "message": message
+        }
         
-        # Prepare event data
-        event_data = tasks_cache[task_id].copy()
-        
-        # Emit appropriate event
-        if status == "completed":
-            task_events.emit(f"task.{task_id}.complete", event_data)
-        elif status == "failed":
-            task_events.emit(f"task.{task_id}.error", event_data)
-        else:
-            task_events.emit(f"task.{task_id}.update", event_data)
+        # Include optional fields if they exist
+        if result is not None:
+            data["result"] = result
+        if error is not None:
+            data["error"] = error
+        if stage is not None:
+            data["stage"] = stage
+        if estimated_time_remaining is not None:
+            # Convert to float for JSON serialization
+            data["estimatedTimeRemaining"] = float(estimated_time_remaining)
+            
+        # Notify all subscribers
+        if "subscribers" in tasks_cache[task_id]:
+            for subscriber_queue in tasks_cache[task_id]["subscribers"].values():
+                try:
+                    await subscriber_queue.put(data)
+                except Exception as e:
+                    logger.error(f"Error notifying subscriber: {e}")
 
 async def process_report_generation(
     task_id: str,
@@ -467,137 +449,100 @@ async def process_report_generation(
     user_id: str = None,
     transaction_id: str = None
 ):
-    """
-    Process report generation in the background
-    """
+    """Process the report generation in the background"""
     try:
         # Update task status to processing
         await update_task_status(
             task_id, 
             "processing", 
-            "Starting report generation", 
-            0.05
+            "Preparing agent loop for report generation",
+            progress=5
         )
         
-        # Simulate document parsing (10% of progress)
-        await asyncio.sleep(2)
-        await update_task_status(
-            task_id, 
-            "processing", 
-            "Parsing documents", 
-            0.1
-        )
-        
-        # Simulate parsing each document
-        for i, doc_id in enumerate(document_ids):
-            # Check if task was cancelled
-            if tasks_cache[task_id]["status"] == "failed" and tasks_cache[task_id].get("error") == "Task cancelled by user":
-                return
-                
-            await asyncio.sleep(1)
-            doc_progress = 0.1 + (i + 1) / len(document_ids) * 0.2
-            await update_task_status(
-                task_id, 
-                "processing", 
-                f"Parsing document {i+1}/{len(document_ids)}", 
-                doc_progress
-            )
-        
-        # Simulate agent reasoning iterations
-        total_iterations = min(max_iterations, 3)  # Cap at 3 iterations for demo
-        for iteration in range(total_iterations):
-            # Check if task was cancelled
-            if tasks_cache[task_id]["status"] == "failed" and tasks_cache[task_id].get("error") == "Task cancelled by user":
-                return
-                
-            # Each iteration takes 30% of the remaining progress
-            base_progress = 0.3
-            progress_per_iteration = (1.0 - base_progress) / total_iterations
-            
-            # Simulate iterative thinking
-            await asyncio.sleep(2)
-            iter_start = base_progress + iteration * progress_per_iteration
-            
-            # Update for iteration start
-            await update_task_status(
-                task_id, 
-                "processing", 
-                f"Starting iteration {iteration+1}/{total_iterations}", 
-                iter_start
-            )
-            
-            # Simulate steps within iteration
-            steps = ["Analyzing policies", "Comparing coverage", "Drafting section", "Reviewing"]
-            for step_idx, step in enumerate(steps):
-                # Check if task was cancelled
-                if tasks_cache[task_id]["status"] == "failed" and tasks_cache[task_id].get("error") == "Task cancelled by user":
-                    return
-                    
-                await asyncio.sleep(1)
-                step_progress = iter_start + (step_idx + 1) / len(steps) * progress_per_iteration
-                await update_task_status(
-                    task_id, 
-                    "processing", 
-                    f"Iteration {iteration+1}/{total_iterations}: {step}", 
-                    step_progress
+        # Create an instance of AIAgentLoop with a progress callback
+        ai_loop = AIAgentLoop(
+            max_loops=max_iterations,
+            progress_callback=lambda progress, message, stage=None: asyncio.create_task(
+                update_task_status(
+                    task_id,
+                    "processing",
+                    message,
+                    progress=progress,
+                    result={"stage": stage} if stage else None
                 )
-        
-        # Generate mock result
-        report_id = str(uuid.uuid4())
-        mock_result = {
-            "report_id": report_id,
-            "title": "Insurance Coverage Analysis",
-            "summary": "This analysis reviews the provided insurance policies and identifies coverage gaps and recommendations.",
-            "sections": [
-                {
-                    "title": "Policy Overview",
-                    "content": "Your current insurance portfolio includes coverage for home, auto, and life insurance."
-                },
-                {
-                    "title": "Coverage Analysis",
-                    "content": "We've identified potential gaps in your liability coverage and recommend increasing limits."
-                },
-                {
-                    "title": "Recommendations",
-                    "content": "Consider adding an umbrella policy to extend liability protection across all your policies."
-                }
-            ],
-            "user_id": user_id
-        }
-        
-        # Save mock result to file (in real app, would save to database)
-        os.makedirs("data/reports", exist_ok=True)
-        with open(f"data/reports/{report_id}.json", "w") as f:
-            json.dump(mock_result, f)
-        
-        # Update task as completed
-        await update_task_status(
-            task_id, 
-            "completed", 
-            "Report generated successfully", 
-            1.0, 
-            mock_result
+            )
         )
         
-    except Exception as e:
-        error_message = str(e)
-        error_context = {
-            "task_id": task_id,
-            "error_type": type(e).__name__,
-            "transaction_id": transaction_id
-        }
+        # Format the user content
+        user_content = format_insurance_data(insurance_data, document_ids)
         
-        # Log the error
-        print(f"Error in report generation: {error_message}")
-        print(f"Context: {error_context}")
-        
-        # Update task as failed
+        # Update status before starting the main processing
         await update_task_status(
-            task_id, 
-            "failed", 
-            "Failed to generate report", 
-            progress=None, 
-            error=error_message
+            task_id,
+            "processing",
+            "Initializing AI agents",
+            progress=10
+        )
+        
+        # Run the agent loop
+        try:
+            start_time = time.time()
+            logger.info(f"Starting agent loop for task {task_id}")
+            
+            # Generate the report
+            result = await ai_loop.generate_report(user_content)
+            
+            # Log completion
+            processing_time = time.time() - start_time
+            logger.info(f"Agent loop completed in {processing_time:.2f} seconds after {result['iterations']} iterations")
+            
+            # Generate DOCX
+            await update_task_status(
+                task_id,
+                "processing",
+                "Generating DOCX file",
+                progress=90
+            )
+            
+            # Create a readable filename
+            safe_name = insurance_data.get("claim_number", "report").replace(" ", "_")
+            docx_path = f"generated_reports/{safe_name}_{task_id[:8]}.docx"
+            
+            # Generate the DOCX file
+            docx_result = await generate_docx(result["draft"], docx_path)
+            
+            # Update with final result
+            await update_task_status(
+                task_id,
+                "completed",
+                "Report generated successfully",
+                progress=100,
+                result={
+                    "draft": result["draft"],
+                    "feedback": result["feedback"],
+                    "iterations": result["iterations"],
+                    "docx_url": docx_result["url"],
+                    "processing_time": processing_time
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in agent loop: {e}")
+            await update_task_status(
+                task_id,
+                "failed",
+                f"Error generating report: {str(e)}",
+                error=str(e)
+            )
+            raise
+            
+    except Exception as e:
+        logger.error(f"Error in report generation: {e}")
+        await update_task_status(
+            task_id,
+            "failed",
+            f"Error generating report: {str(e)}",
+            error=str(e)
         )
 
 async def process_report_refinement(
@@ -718,3 +663,242 @@ async def process_report_refinement(
             progress=None, 
             error=error_message
         ) 
+
+async def process_report_generation(task_id: str, request: AgentLoopRequest) -> None:
+    """
+    Process the report generation asynchronously
+    """
+    temp_files = []  # Track temporary files for cleanup
+    start_time = time.time()
+    report_metrics = {
+        "task_id": task_id,
+        "report_id": request.report_id,
+        "iterations": 0,
+        "generation_time": 0,
+        "quality_score": 0
+    }
+    
+    try:
+        # Update initial task status
+        tasks_cache[task_id]["stage"] = "file_processing"
+        tasks_cache[task_id]["progress"] = 10
+        tasks_cache[task_id]["message"] = "Processing input files"
+        await update_task_status(task_id)
+        
+        # Create AI Agent Loop
+        agent_loop = AIAgentLoop(
+            writer_system_prompt=request.writer_system_prompt if hasattr(request, "writer_system_prompt") else None,
+            reviewer_system_prompt=request.reviewer_system_prompt if hasattr(request, "reviewer_system_prompt") else None
+        )
+        
+        # Add progress callback
+        async def progress_callback(progress: float, message: str, stage: str = None, estimated_time: float = None):
+            # Scale progress to 10-90% range (reserving 0-10% for initialization, 90-100% for document generation)
+            scaled_progress = 10 + int(progress * 80)
+            tasks_cache[task_id]["progress"] = scaled_progress
+            tasks_cache[task_id]["message"] = message
+            if stage:
+                tasks_cache[task_id]["stage"] = stage
+            if estimated_time is not None:
+                tasks_cache[task_id]["estimated_time_remaining"] = estimated_time
+            await update_task_status(task_id)
+        
+        # Set the progress callback
+        agent_loop.set_progress_callback(progress_callback)
+        
+        # TODO: Process file_urls if provided in the request
+        # For now, we'll use the additional_info
+        
+        # Run the agent loop
+        tasks_cache[task_id]["stage"] = "ai_processing"
+        tasks_cache[task_id]["message"] = "AI agents generating report content"
+        await update_task_status(task_id)
+        
+        # Setup reporting parameters
+        report_params = {
+            "report_id": request.report_id,
+            "additional_info": request.additional_info
+        }
+        
+        # Execute the agent loop
+        result = await agent_loop.execute(**report_params)
+        
+        # Update task with AI result
+        tasks_cache[task_id]["progress"] = 90
+        tasks_cache[task_id]["message"] = "Generating final document"
+        tasks_cache[task_id]["stage"] = "document_generation"
+        await update_task_status(task_id)
+        
+        # Extract results
+        content = result.get("content", "")
+        feedback = result.get("feedback", {})
+        iterations = result.get("iterations", 1)
+        
+        # Update metrics
+        report_metrics["iterations"] = iterations
+        report_metrics["content_length"] = len(content)
+        report_metrics["quality_score"] = feedback.get("score", 0) * 100 if isinstance(feedback, dict) else 0
+        
+        # Generate DOCX document with enhanced formatter
+        document_metadata = {
+            "title": f"Insurance Report - {request.report_id}",
+            "report_id": request.report_id,
+            "author": "Insurance Report Generator",
+            "category": "Insurance",
+            "comments": f"Generated with {iterations} iterations. Quality score: {report_metrics['quality_score']:.1f}/100",
+            "template_type": request.template_type if hasattr(request, "template_type") else "default"
+        }
+        
+        docx_result = await generate_docx(content, metadata=document_metadata)
+        
+        # If document generation failed
+        if "error" in docx_result:
+            raise Exception(f"Document generation failed: {docx_result['error']}")
+        
+        # Update metrics with document generation info
+        report_metrics["document_generation_time"] = docx_result.get("generation_time", 0)
+        report_metrics["document_quality_score"] = docx_result.get("quality", {}).get("score", 0) * 100
+        report_metrics["document_from_cache"] = docx_result.get("from_cache", False)
+        
+        # Get the document URL
+        document_url = docx_result.get("url", "")
+        if not document_url:
+            document_url = f"/reports/{os.path.basename(docx_result.get('path', ''))}"
+            
+        # Finalize the result
+        tasks_cache[task_id]["status"] = "completed"
+        tasks_cache[task_id]["progress"] = 100
+        tasks_cache[task_id]["message"] = "Report generation completed"
+        tasks_cache[task_id]["stage"] = "completed"
+        tasks_cache[task_id]["estimated_time_remaining"] = 0
+        tasks_cache[task_id]["result"] = {
+            "draft": content,
+            "feedback": feedback,
+            "docxUrl": document_url,
+            "iterations": iterations,
+            "quality_score": report_metrics['quality_score']
+        }
+        
+        # Complete metrics collection
+        report_metrics["status"] = "completed"
+        report_metrics["duration"] = time.time() - start_time
+        metrics_collector.add_metric("report_generation", report_metrics)
+        
+        # Log performance metrics
+        metrics_logger.info(f"Report generation completed: {json.dumps(report_metrics)}")
+        
+        # Notify subscribers of completion
+        await update_task_status(task_id)
+        
+    except Exception as e:
+        logger.error(f"Error in report generation process: {str(e)}")
+        tasks_cache[task_id]["status"] = "error"
+        tasks_cache[task_id]["error"] = str(e)
+        tasks_cache[task_id]["stage"] = "error"
+        
+        # Update metrics for error case
+        report_metrics["status"] = "error"
+        report_metrics["error"] = str(e)
+        report_metrics["duration"] = time.time() - start_time
+        metrics_collector.add_metric("report_generation_error", report_metrics)
+        
+        # Log error in performance metrics
+        metrics_logger.error(f"Report generation error: {json.dumps(report_metrics)}")
+        
+        # Notify subscribers of error
+        await update_task_status(task_id)
+    
+    finally:
+        # Clean up any temporary files
+        for file_path in temp_files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.debug(f"Removed temporary file: {file_path}")
+            except Exception as e:
+                logger.warning(f"Error removing temporary file {file_path}: {str(e)}")
+
+@router.get("/metrics/document-generation")
+async def get_document_generation_metrics() -> Dict[str, Any]:
+    """
+    Get metrics about document generation
+    """
+    try:
+        docx_metrics = await get_document_metrics()
+        return {
+            "status": "success",
+            "metrics": docx_metrics
+        }
+    except Exception as e:
+        logger.error(f"Error getting document metrics: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+@router.get("/metrics/report-generation")
+async def get_report_generation_metrics() -> Dict[str, Any]:
+    """
+    Get metrics about report generation
+    """
+    try:
+        report_metrics = metrics_collector.get_metrics("report_generation", limit=100)
+        error_metrics = metrics_collector.get_metrics("report_generation_error", limit=20)
+        
+        # Calculate averages
+        total_reports = len(report_metrics)
+        if total_reports > 0:
+            avg_duration = sum(m.get("duration", 0) for m in report_metrics) / total_reports
+            avg_iterations = sum(m.get("iterations", 0) for m in report_metrics) / total_reports
+            avg_quality = sum(m.get("quality_score", 0) for m in report_metrics) / total_reports
+        else:
+            avg_duration = 0
+            avg_iterations = 0
+            avg_quality = 0
+            
+        return {
+            "status": "success",
+            "summary": {
+                "total_reports": total_reports,
+                "avg_duration_seconds": avg_duration,
+                "avg_iterations": avg_iterations,
+                "avg_quality_score": avg_quality,
+                "error_count": len(error_metrics)
+            },
+            "recent_reports": report_metrics[:10],
+            "recent_errors": error_metrics[:5]
+        }
+    except Exception as e:
+        logger.error(f"Error getting report metrics: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+# Periodic cleanup job to remove old tasks
+async def periodic_task_cleanup():
+    """Remove old tasks from memory periodically"""
+    try:
+        while True:
+            await asyncio.sleep(3600)  # Run every hour
+            
+            current_time = time.time()
+            tasks_to_remove = []
+            
+            for task_id, task_data in tasks_cache.items():
+                # Remove tasks that have been cleaned and are older than 24 hours
+                if task_data.get("cleaned") and current_time - task_data.get("cleaned_at", 0) > 86400:
+                    tasks_to_remove.append(task_id)
+                    
+            # Remove old tasks
+            for task_id in tasks_to_remove:
+                del tasks_cache[task_id]
+                logger.info(f"Removed old task {task_id} from memory")
+                
+    except Exception as e:
+        logger.error(f"Error in periodic task cleanup: {e}")
+
+# Start the cleanup job on application startup
+@app.on_event("startup")
+async def start_cleanup_job():
+    asyncio.create_task(periodic_task_cleanup()) 

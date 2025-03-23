@@ -451,4 +451,4 @@ export function createApiClient(
 /**
  * Default API client instance
  */
-export const apiClient = createApiClient(config.API_BASE_URL); 
+export const apiClient = createApiClient(config.API_URL); 

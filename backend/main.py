@@ -66,7 +66,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 # Import API routes and config
-from api import upload, generate, format, edit, download, agent_loop, utils, documents, reports
+from api import upload, generate, format, edit, download, agent_loop, utils, documents, reports, templates, metrics
 from config import settings
 from api.agent_loop import router as agent_loop_router
 from api.cleanup import router as cleanup_router
@@ -81,6 +81,8 @@ from utils.middleware import setup_middleware
 from utils.dependency_manager import get_dependency_manager
 from utils.task_manager import initialize_task_cache, shutdown_task_cache
 from utils.db_connector import get_db_connector
+from utils.resource_manager import resource_manager, run_periodic_cleanup
+from utils.metrics import MetricsCollector
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -197,6 +199,8 @@ app.include_router(cleanup_router)
 app.include_router(agent_loop.router, prefix="/api", tags=["agent-loop"])
 app.include_router(documents.router, prefix="/api", tags=["documents"])
 app.include_router(reports.router, prefix="/api", tags=["reports"])
+app.include_router(templates.router, prefix="/api", tags=["templates"])
+app.include_router(metrics.router, prefix="/api", tags=["metrics"])
 app.include_router(utils.router, prefix="/api", tags=["utilities"])
 
 # Serve static files
@@ -207,6 +211,12 @@ app.mount("/files", StaticFiles(directory="./uploads"), name="files")
 # Add temp directory for processing files
 temp_dir = Path("./temp_files")
 temp_dir.mkdir(exist_ok=True)
+
+# Initialize metrics collector
+metrics_collector = MetricsCollector(
+    metrics_file=Path(parent_dir) / "data" / "metrics.json", 
+    backup_interval=100  # Backup metrics every 100 operations
+)
 
 # Add a function to clean up old reports and uploads
 async def cleanup_old_data(max_age_hours: int = 24):
@@ -331,6 +341,20 @@ async def startup_event():
     # This happens automatically when the connector is created
     db = get_db_connector()
     
+    # Start resource cleanup task
+    asyncio.create_task(run_periodic_cleanup(3600))  # Run resource cleanup every hour
+    
+    # Record startup in metrics
+    try:
+        await metrics.record_startup()
+        logger.info("Startup metrics recorded")
+    except Exception as e:
+        logger.error(f"Failed to record startup metrics: {str(e)}")
+    
+    # Initialize resource manager
+    resource_manager.initialize()
+    logger.info("Resource manager initialized")
+    
     logger.info("Application started successfully")
 
 @app.on_event("shutdown")
@@ -348,6 +372,18 @@ async def shutdown_event():
     # Shut down the dependency manager
     dependency_manager = get_dependency_manager()
     await dependency_manager.shutdown()
+    
+    # Clean up all resources
+    cleanup_count = resource_manager.cleanup_all()
+    logger.info(f"Cleaned up {cleanup_count} resources during shutdown")
+    
+    # Backup metrics before shutdown
+    metrics_collector.backup_metrics()
+    logger.info("Metrics backed up successfully")
+    
+    # Clean up resource manager
+    resource_manager.cleanup()
+    logger.info("Resource manager cleaned up")
     
     logger.info("Application shutdown complete")
 

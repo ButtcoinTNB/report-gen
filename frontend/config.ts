@@ -35,7 +35,7 @@ export interface EnvValidationResult {
   warnings: EnvWarning[];
 }
 
-// Define config object
+// Define config object with safe defaults
 export const config: Config = {
   API_URL,
   endpoints: {
@@ -46,6 +46,18 @@ export const config: Config = {
     download: `${API_URL}/api/download`,
   }
 };
+
+// For TypeScript safety, ensure all config properties are defined
+Object.keys(config).forEach(key => {
+  if (config[key as keyof Config] === undefined) {
+    console.warn(`Missing configuration for ${key}, using fallback value`);
+    
+    // Set fallback values for different config types
+    if (key === 'API_URL') {
+      (config as any)[key] = 'http://localhost:8000';
+    }
+  }
+});
 
 /**
  * Validates required environment variables and logs warnings if any are missing
