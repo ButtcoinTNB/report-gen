@@ -79,6 +79,41 @@ The system supports various file formats through specialized processors:
 - **Images**: Implements `tesseract.js` for OCR in Italian and English
 - **Excel**: Processes spreadsheets using `xlsx` with sheet preservation
 
+## Enhanced Reports Presentation
+
+The system now includes a sophisticated results presentation interface:
+
+- **High-Fidelity Document Preview**:
+  - Interactive document viewer with zoom controls
+  - Pagination for multi-page documents
+  - Fullscreen viewing option
+  - Print layout view
+
+- **Quality Metrics Dashboard**:
+  - Visual summary of report quality score
+  - Time saved compared to manual creation
+  - Number of AI refinement iterations
+  - Manual edit tracking
+
+- **Download Options**:
+  - Multiple format support (DOCX, PDF)
+  - Progress tracking during download
+  - File size information
+  - Descriptive file naming
+
+- **Sharing Capabilities**:
+  - Secure shareable links generation
+  - One-click link copying
+  - Configurable expiration dates
+  - No authentication required for recipients
+
+- **Success Messaging**:
+  - Clear notifications for completed actions
+  - Contextual error handling
+  - User guidance for next steps
+
+This enhanced interface provides a more professional user experience and makes the final report delivery more efficient and user-friendly.
+
 ## AI Agent Loop
 
 The system implements a dual-agent approach for report generation:
@@ -445,4 +480,87 @@ Potential future improvements include:
 - **Python Version**: 3.9+
 - **Node Version**: 16+
 
-See `backend/requirements.txt` and `frontend/package.json` for detailed dependency information. 
+See `backend/requirements.txt` and `frontend/package.json` for detailed dependency information.
+
+## Performance Optimizations
+
+This application includes several performance optimizations to ensure fast loading times and efficient operation:
+
+### 1. Static Asset Caching
+
+The application implements advanced caching strategies for static assets:
+
+- All static files (images, CSS, JavaScript, fonts) use `Cache-Control` headers with a long `max-age` and the `immutable` directive
+- DNS prefetching is enabled to reduce connection setup time
+- Security headers are properly configured
+
+### 2. Data Caching
+
+Local caching of Supabase data has been implemented:
+
+- Queries can be cached with configurable TTLs (short/medium/long durations)
+- Document metadata is cached to reduce network requests
+- Cache invalidation happens automatically when documents are updated
+
+### 3. Code Splitting and Lazy Loading
+
+Heavy components are loaded dynamically using Next.js's dynamic imports:
+
+- Document preview components are only loaded when needed
+- The report summary and download progress components use code splitting
+- Components with browser-specific APIs are marked with `ssr: false` to avoid server-side rendering issues
+
+### 4. Image Optimization
+
+Images are optimized for different device sizes:
+
+- Next.js Image component is configured with proper device and image sizes
+- SVG files are converted to React components for better performance
+- Responsive images adapt to different screen sizes
+
+### 5. Environment Detection
+
+The application uses environment detection utilities to:
+
+- Safely handle browser-specific APIs
+- Use mock data during development when needed
+- Provide appropriate base URLs based on the runtime environment
+- Support internationalization with client locale detection
+
+## Deployment
+
+This application can be deployed on Vercel using the following steps:
+
+1. Push your code to a GitHub repository
+2. Connect the repository to Vercel
+3. Configure the following build settings:
+   - Framework Preset: Next.js
+   - Build Command: `npm run build`
+   - Output Directory: `.next`
+   - Install Command: `npm install --legacy-peer-deps`
+
+### Troubleshooting Deployment Issues
+
+If you encounter build errors during deployment:
+
+1. **"Cannot find module 'critters'"**: Make sure `critters` is installed as a dependency
+   ```bash
+   npm install critters
+   ```
+
+2. **Experimental features warnings**: Ensure your `next.config.js` only includes supported experimental features
+
+3. **Memory issues during build**: The Vercel configuration increases the Node.js memory limit with the `NODE_OPTIONS` environment variable
+
+4. **Static generation errors**: Some pages might fail to generate statically if they depend on server-side context. You can:
+   - Use `getStaticProps` with `fallback: true` for pages that need data
+   - Disable static optimization for specific pages using `NEXT_DISABLE_SSGOPT=true`
+
+### Environment Variables
+
+Make sure to set the following environment variables in your Vercel project:
+
+- `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase anonymous key
+- `NEXT_PUBLIC_API_URL`: The URL of your API
+- `NEXT_PUBLIC_SITE_URL`: The URL of your deployed site 

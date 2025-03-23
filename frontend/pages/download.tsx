@@ -26,6 +26,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { downloadApi, generateApi } from '../src/services';
 import { Report as ReportType } from '../src/types';
 import { logger } from '../src/utils/logger';
+import EnhancedReportDownloader from '../src/components/EnhancedReportDownloader';
+import { useAppDispatch } from '../src/store/hooks';
+import { setReportId } from '../src/store/reportSlice';
 
 // Local interface that extends the base Report type with additional properties
 interface DownloadPageReport extends ReportType {
@@ -46,12 +49,14 @@ interface DownloadResponse {
 const DownloadPage = () => {
   const router = useRouter();
   const { id } = router.query; // Get report ID from URL
+  const dispatch = useAppDispatch();
   
   // State
   const [report, setReport] = useState<DownloadPageReport | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState('');
+  const [useEnhancedDownloader, setUseEnhancedDownloader] = useState(true);
   
   // Fetch report data on component mount
   useEffect(() => {
@@ -60,6 +65,9 @@ const DownloadPage = () => {
       
       setIsLoading(true);
       try {
+        // Set the report ID in Redux store for the EnhancedReportDownloader
+        dispatch(setReportId(id as string));
+        
         // Call the API client function to fetch the report
         const reportData = await generateApi.getReport(id as string);
         
@@ -89,7 +97,7 @@ const DownloadPage = () => {
         URL.revokeObjectURL(report.download_url);
       }
     };
-  }, [id]);
+  }, [id, dispatch]);
   
   // Download the report PDF
   const handleDownload = async () => {
@@ -113,6 +121,11 @@ const DownloadPage = () => {
     return date.toLocaleString();
   };
   
+  // Toggle between old and new downloader UI
+  const toggleDownloaderUI = () => {
+    setUseEnhancedDownloader(!useEnhancedDownloader);
+  };
+  
   // If loading
   if (isLoading) {
     return (
@@ -125,7 +138,7 @@ const DownloadPage = () => {
   }
   
   // If no report or error
-  if (!report && !isLoading) {
+  if (!report && !isLoading && !useEnhancedDownloader) {
     return (
       <Container maxWidth="md" sx={{ mt: 5, mb: 5 }}>
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -142,19 +155,60 @@ const DownloadPage = () => {
     );
   }
   
+  // Enhanced downloader view
+  if (useEnhancedDownloader && id) {
+    return (
+      <>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2 }}>
+          <Button 
+            variant="outlined" 
+            startIcon={<ArrowBackIcon />}
+            onClick={() => router.push('/')}
+          >
+            Torna alla Home
+          </Button>
+          
+          <Button
+            variant="text"
+            color="secondary"
+            onClick={toggleDownloaderUI}
+            size="small"
+          >
+            Switch to Classic View
+          </Button>
+        </Box>
+        
+        <EnhancedReportDownloader />
+      </>
+    );
+  }
+  
+  // Classic downloader view
   return (
     <Container maxWidth="md" sx={{ mt: 5, mb: 5 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Typography variant="h4" component="h1">
           Scarica Report
         </Typography>
-        <Button 
-          variant="outlined" 
-          startIcon={<ArrowBackIcon />}
-          onClick={() => router.push('/')}
-        >
-          Torna alla Home
-        </Button>
+        <Box>
+          <Button 
+            variant="outlined" 
+            startIcon={<ArrowBackIcon />}
+            onClick={() => router.push('/')}
+            sx={{ mr: 2 }}
+          >
+            Torna alla Home
+          </Button>
+          
+          <Button
+            variant="text"
+            color="primary"
+            onClick={toggleDownloaderUI}
+            size="small"
+          >
+            Switch to Enhanced View
+          </Button>
+        </Box>
       </Box>
       
       {/* Report Card */}

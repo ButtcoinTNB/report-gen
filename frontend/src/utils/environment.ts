@@ -19,6 +19,14 @@ export const isServer = !isBrowser;
 export const isDevelopment = process.env.NODE_ENV === 'development';
 
 /**
+ * Checks if we should use mock data instead of real API/Supabase calls
+ * This is determined by:
+ * 1. Development mode AND
+ * 2. NEXT_PUBLIC_USE_MOCKS environment variable set to 'true'
+ */
+export const useMocks = isDevelopment && process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
+
+/**
  * Safe wrapper for accessing browser APIs
  * @param callback Function that uses browser APIs
  * @param fallback Value to return when not in browser
@@ -35,4 +43,34 @@ export function runInBrowser(callback: () => void): void {
   if (isBrowser) {
     callback();
   }
-} 
+}
+
+/**
+ * Gets the base URL for the app
+ * @returns The base URL of the application
+ */
+export const getBaseUrl = (): string => {
+  if (isBrowser) {
+    return window.location.origin;
+  }
+
+  // When on the server, use environment variables
+  const url = process.env.VERCEL_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+
+  // Return the URL with https if not localhost
+  return url.startsWith('http') ? url : `https://${url}`;
+};
+
+/**
+ * Detect client browser locale for internationalization
+ * @returns The detected locale or default ('it-IT')
+ */
+export const getClientLocale = (): string => {
+  if (!isBrowser) return 'it-IT'; // Default to Italian
+  
+  try {
+    return navigator.language || 'it-IT';
+  } catch {
+    return 'it-IT';
+  }
+}; 
