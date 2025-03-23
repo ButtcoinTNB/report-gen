@@ -125,6 +125,9 @@ const generateTransactionId = (): string => {
   return `txn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
+// Default stall detection threshold (30 seconds)
+const DEFAULT_STALL_THRESHOLD = 30000;
+
 // Create a slice for report generation state
 export const reportSlice = createSlice({
   name: 'report',
@@ -433,8 +436,9 @@ export const reportSlice = createSlice({
         }
       }
     },
-    detectStalledAgentLoop: (state, action: PayloadAction<{ threshold: number }>) => {
-      const { threshold } = action.payload;
+    detectStalledAgentLoop: (state, action: PayloadAction<{ threshold?: number } | undefined>) => {
+      // Use provided threshold or default if not provided
+      const threshold = action.payload?.threshold || DEFAULT_STALL_THRESHOLD;
       const now = Date.now();
       
       // Only check for stalled processes if the agent loop is active

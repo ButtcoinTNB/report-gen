@@ -16,7 +16,7 @@ const nextConfig = {
   images: {
     domains: ['jkvmxxdshxyjhdoszrkv.supabase.co'],
     formats: ['image/avif', 'image/webp'],
-    minimumCacheTTL: 60,
+    minimumCacheTTL: 3600, // Increase cache time to 1 hour
   },
   // Performance optimizations
   swcMinify: true, // Use SWC for minification (faster than Terser)
@@ -29,15 +29,40 @@ const nextConfig = {
   // Output standalone build for better deployment performance
   output: 'standalone',
   
-  // Add headers to prevent caching during development
+  // Add optimized caching headers for production
   async headers() {
     return [
       {
-        source: '/:path*',
+        // Don't cache API responses
+        source: '/api/:path*',
         headers: [
           {
             key: 'Cache-Control',
             value: 'no-store, max-age=0',
+          },
+        ],
+      },
+      {
+        // Cache static assets aggressively
+        source: '/:path*(\.js|\.css|\.woff2|\.jpg|\.jpeg|\.png|\.gif|\.ico|\.svg)$',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: process.env.NODE_ENV === 'production'
+              ? 'public, max-age=31536000, immutable' // 1 year for production
+              : 'no-store, max-age=0', // No cache for development
+          },
+        ],
+      },
+      {
+        // Default caching for HTML pages
+        source: '/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: process.env.NODE_ENV === 'production'
+              ? 'public, max-age=3600, s-maxage=60, stale-while-revalidate=86400' // 1 hour with stale-while-revalidate
+              : 'no-store, max-age=0', // No cache for development
           },
         ],
       },
@@ -53,6 +78,14 @@ const nextConfig = {
       // Don't bundle server-only dependencies on the client
     }
     return config;
+  },
+  // Enable Automatic Static Optimization where possible
+  // This will pre-render pages to static HTML when possible
+  experimental: {
+    optimizeCss: true, // Optimize CSS
+    optimizeImages: true, // Optimize images
+    scrollRestoration: true, // Restore scroll position on navigation
+    workerThreads: true, // Use worker threads for improved performance
   }
 };
 

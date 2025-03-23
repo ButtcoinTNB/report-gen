@@ -5,6 +5,7 @@ import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
 import { RootState } from '../store/index';
 import { AgentLoopState, detectStalledAgentLoop } from '../store/reportSlice';
+import { isBrowser, runInBrowser, browserOnly } from '../utils/environment';
 
 interface AgentInitializationTrackerProps {
   onStalled?: () => void;
@@ -46,19 +47,21 @@ const AgentInitializationTracker: React.FC<AgentInitializationTrackerProps> = ({
 
   // Manage elapsed time and check for stalled state
   useEffect(() => {
-    let interval: number | null = null;
+    let interval: number | undefined;
     
-    // Only track time when the agent loop is active
+    // Only track time when the agent loop is active and we're in a browser
     if (isAgentActive) {
-      // Start counting elapsed time
-      interval = window.setInterval(() => {
-        setElapsedTime((prev) => prev + 1);
-        
-        // Check for stalled state every 10 seconds
-        if (elapsedTime % 10 === 0) {
-          dispatch(detectStalledAgentLoop());
-        }
-      }, 1000);
+      // Start counting elapsed time - only in browser
+      runInBrowser(() => {
+        interval = window.setInterval(() => {
+          setElapsedTime((prev) => prev + 1);
+          
+          // Check for stalled state every 10 seconds
+          if (elapsedTime % 10 === 0) {
+            dispatch(detectStalledAgentLoop({}));
+          }
+        }, 1000);
+      });
       
       // Call the onStalled callback if the process stalled and the callback is provided
       if (agentLoop.isStalled && onStalled) {
@@ -69,10 +72,13 @@ const AgentInitializationTracker: React.FC<AgentInitializationTrackerProps> = ({
       setElapsedTime(0);
     }
     
+    // Cleanup function
     return () => {
-      if (interval !== null) {
-        clearInterval(interval);
-      }
+      runInBrowser(() => {
+        if (interval !== undefined) {
+          clearInterval(interval);
+        }
+      });
     };
   }, [isAgentActive, agentLoop.isStalled, elapsedTime, dispatch, onStalled]);
   
@@ -144,29 +150,27 @@ const AgentInitializationTracker: React.FC<AgentInitializationTrackerProps> = ({
           </Typography>
         </Box>
         
-        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <Tooltip title="Elapsed time">
-            <Chip
-              icon={<AccessTimeIcon />}
-              label={formatTime(elapsedTime)}
+        <Tooltip title="Elapsed time">
+          <Chip 
+            icon={<AccessTimeIcon />} 
+            label={formatTime(elapsedTime)}
+            size="small"
+            color="default"
+            variant="outlined"
+          />
+        </Tooltip>
+        
+        {agentLoop.estimatedTimeRemaining !== null && (
+          <Tooltip title="Estimated time remaining">
+            <Chip 
+              icon={<HourglassEmptyIcon />} 
+              label={formatEstimatedTime(agentLoop)}
               size="small"
-              color="default"
+              color="primary"
               variant="outlined"
             />
           </Tooltip>
-          
-          {agentLoop.estimatedTimeRemaining !== null && (
-            <Tooltip title="Estimated time remaining">
-              <Chip
-                icon={<HourglassEmptyIcon />}
-                label={formatEstimatedTime(agentLoop)}
-                size="small"
-                color="primary"
-                variant="outlined"
-              />
-            </Tooltip>
-          )}
-        </Box>
+        )}
       </Box>
     </Box>
   );
