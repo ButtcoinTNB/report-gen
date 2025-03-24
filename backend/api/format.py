@@ -19,21 +19,19 @@ try:
     from services.docx_formatter import format_report_as_docx
     from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
     from services.pdf_formatter import format_report_as_pdf
-    from utils.error_handler import api_error_handler
+    from utils.error_handler import api_error_handler, logger
     from utils.file_utils import safe_path_join
     from utils.supabase_helper import create_supabase_client
-
-    from supabase import Client, create_client
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from api.schemas import APIResponse
-    from config import settings
-    from services.docx_formatter import format_report_as_docx
-    from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
-    from services.pdf_formatter import format_report_as_pdf
-    from utils.error_handler import api_error_handler
-    from utils.file_utils import safe_path_join
-    from utils.supabase_helper import create_supabase_client
+    from backend.api.schemas import APIResponse
+    from backend.config import settings
+    from backend.services.docx_formatter import format_report_as_docx
+    from backend.services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
+    from backend.services.pdf_formatter import format_report_as_pdf
+    from backend.utils.error_handler import api_error_handler, logger
+    from backend.utils.file_utils import safe_path_join
+    from backend.utils.supabase_helper import create_supabase_client
 
 # Export key functions for other modules
 __all__ = [

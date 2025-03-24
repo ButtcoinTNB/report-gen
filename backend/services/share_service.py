@@ -8,7 +8,6 @@ try:
     from config import get_settings
     from models import ShareLink, ShareLinkResponse
     from utils.supabase_helper import create_supabase_client
-    from utils.validation import validate_token
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from backend.config import get_settings

@@ -8,8 +8,7 @@ from typing import Any, Dict, List
 try:
     # First try imports without 'backend.' prefix (for Render)
     from config import get_settings
-    from models.agent import AgentRequest, AgentResponse
-    from models.report import Report, ReportCreate
+    from models.report import ReportCreate
     from services.task_manager import task_manager
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)

@@ -1,23 +1,27 @@
+from datetime import datetime
 from typing import Any, Dict
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, HTTPException
+from pydantic import BaseModel
 
 # Use imports with fallbacks for better compatibility across environments
 try:
     # First try imports without 'backend.' prefix (for Render)
-    from config import settings
-    from services.docx_formatter import format_report_as_docx
-    from services.pdf_processor import extract_text_from_pdf, process_file
-    from services.report_generator import (
-        generate_editable_outline,
-        generate_report_content,
-    )
-    from utils.file_utils import create_temp_file, safe_path_join
+    from api.schemas import APIResponse
+    from models.report import Report, ReportUpdate, ReportVersion, ReportVersionCreate, ReportVersionResponse
+    from services.ai_service import refine_report_text
+    from utils.error_handler import api_error_handler
     from utils.metrics import MetricsCollector
-    from utils.security import get_user_from_request
+    from utils.supabase_helper import create_supabase_client
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.api.schemas import APIResponse
+    from backend.models.report import Report, ReportUpdate, ReportVersion, ReportVersionCreate, ReportVersionResponse
+    from backend.services.ai_service import refine_report_text
+    from backend.utils.error_handler import api_error_handler
     from backend.utils.metrics import MetricsCollector
+    from backend.utils.supabase_helper import create_supabase_client
 
 router = APIRouter()
 
@@ -26,6 +30,9 @@ metrics = MetricsCollector()
 
 # Dictionary to store editing sessions
 editing_sessions = {}
+
+# Type alias for UUID
+UUID4 = UUID
 
 
 class UpdateReportResponse(BaseModel):

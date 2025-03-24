@@ -5,8 +5,7 @@ from fastapi import APIRouter, HTTPException
 # Use imports with fallbacks for better compatibility across environments
 try:
     # First try imports without 'backend.' prefix (for Render)
-    from dependencies import get_settings
-    from models.report import Report, ReportCreate
+    from models.report import ReportCreate
     from services.agent_service import agent_service
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)

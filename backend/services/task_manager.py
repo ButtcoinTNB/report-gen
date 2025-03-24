@@ -3,7 +3,12 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
+except ImportError:
+    # Fall back to imports with 'backend.' prefix (for local development)
+    from backend.models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
 
 logger = logging.getLogger(__name__)
 

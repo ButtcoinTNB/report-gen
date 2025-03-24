@@ -4,11 +4,14 @@ import logging
 import os
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
 
 # Use imports with fallbacks for better compatibility across environments
 try:
@@ -20,6 +23,7 @@ try:
     from utils.metrics import MetricsCollector
     from utils.security import validate_user
     from utils.task_manager import tasks_cache
+    from main import app
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from backend.services.docx_formatter import (
@@ -32,6 +36,10 @@ except ImportError:
     from backend.utils.metrics import MetricsCollector
     from backend.utils.security import validate_user
     from backend.utils.task_manager import tasks_cache
+    from backend.main import app
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 agent_loop = AIAgentLoop()
@@ -65,6 +73,29 @@ file_handler.setFormatter(
 )
 metrics_logger.addHandler(file_handler)
 
+# Helper function
+def format_insurance_data(insurance_data: Dict[str, Any], document_ids: List[str]) -> str:
+    """
+    Format insurance data and document IDs into a structured string for AI processing
+    """
+    formatted_content = "Insurance Report Request:\n\n"
+    
+    # Add insurance data in a structured format
+    formatted_content += "Insurance Information:\n"
+    for key, value in insurance_data.items():
+        if isinstance(value, dict):
+            formatted_content += f"- {key}:\n"
+            for sub_key, sub_value in value.items():
+                formatted_content += f"  - {sub_key}: {sub_value}\n"
+        else:
+            formatted_content += f"- {key}: {value}\n"
+    
+    # Add document IDs
+    formatted_content += "\nDocument IDs for Analysis:\n"
+    for doc_id in document_ids:
+        formatted_content += f"- {doc_id}\n"
+    
+    return formatted_content
 
 class AgentLoopRequest(BaseModel):
     report_id: str

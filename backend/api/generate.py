@@ -16,43 +16,10 @@ try:
     # First try imports without 'backend.' prefix (for Render)
     from config import settings
     from models import File as FileModel
-    from models import Report, Template, User
-    from services.ai_service import (
-        AIConnectionError,
-        AIParsingError,
-        AIResponseError,
-        AIServiceError,
-        AITimeoutError,
-        call_openrouter_api,
-        extract_template_variables,
-        generate_report_text,
-        refine_report_text,
-    )
-    from services.docx_formatter import format_report_as_docx
-    from services.pdf_extractor import extract_text_from_file, extract_text_from_files
-    from services.template_processor import template_processor
-    from utils.auth import get_current_user
-    from utils.db import get_db
-    from utils.error_handler import (
-        api_error_handler,
-        handle_exception,
-        logger,
-        retry_operation,
-    )
-    from utils.exceptions import (
-        AIServiceException,
-        BadRequestException,
-        DatabaseException,
-        InternalServerException,
-        NotFoundException,
-    )
-except ImportError:
-    # Fallback to imports with 'backend.' prefix (for local dev)
-    from config import settings
-    from models import File as FileModel
     from models import Report, User
     from services.ai_service import (
         AIServiceError,
+        call_openrouter_api,
         generate_report_text,
         refine_report_text,
     )
@@ -65,6 +32,31 @@ except ImportError:
         logger,
     )
     from utils.exceptions import (
+        AIServiceException,
+        BadRequestException,
+        DatabaseException,
+        NotFoundException,
+    )
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.config import settings
+    from backend.models import File as FileModel
+    from backend.models import Report, User
+    from backend.services.ai_service import (
+        AIServiceError,
+        call_openrouter_api,
+        generate_report_text,
+        refine_report_text,
+    )
+    from backend.services.pdf_extractor import extract_text_from_file
+    from backend.services.template_processor import template_processor
+    from backend.utils.auth import get_current_user
+    from backend.utils.db import get_db
+    from backend.utils.error_handler import (
+        api_error_handler,
+        logger,
+    )
+    from backend.utils.exceptions import (
         AIServiceException,
         BadRequestException,
         DatabaseException,

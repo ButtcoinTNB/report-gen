@@ -31,13 +31,11 @@ try:
     from services.pdf_extractor import extract_text_from_file
     from services.upload_service import upload_service
     from utils.auth import get_current_user
-    from utils.error_handler import api_error_handler, handle_exception, logger
+    from utils.error_handler import api_error_handler, logger
     from utils.exceptions import (
         DatabaseException,
-        FileNotFoundError,
         FileProcessingException,
         InternalServerException,
-        ProcessingError,
         ValidationException,
     )
     from utils.file_processor import FileProcessor

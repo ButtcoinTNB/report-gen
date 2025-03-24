@@ -11,20 +11,16 @@ try:
     # First try imports without 'backend.' prefix (for Render)
     from api.schemas import APIResponse
     from config import settings
-    from services.docx_service import docx_service
     from services.download_service import download_service
     from utils.auth import get_current_user
-    from utils.error_handler import api_error_handler, handle_exception, logger
+    from utils.error_handler import api_error_handler, logger
+    from utils.file_processor import FileProcessor
     from utils.file_utils import safe_path_join
     from utils.storage import (
-        does_file_exist,
-        get_report_path,
         get_safe_file_path,
         validate_path,
     )
     from utils.supabase_helper import create_supabase_client, supabase_client_context
-
-    from supabase import Client, create_client
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from backend.api.schemas import APIResponse
@@ -32,6 +28,7 @@ except ImportError:
     from backend.services.download_service import download_service
     from backend.utils.auth import get_current_user
     from backend.utils.error_handler import api_error_handler, logger
+    from backend.utils.file_processor import FileProcessor
     from backend.utils.file_utils import safe_path_join
     from backend.utils.storage import (
         get_safe_file_path,
@@ -42,21 +39,8 @@ except ImportError:
         supabase_client_context,
     )
 
-# Import format functions to avoid circular imports later
-try:
-    from api.format import format_final, get_reference_metadata, update_report_file_path
-    from services.pdf_formatter import format_report_as_pdf
-except ImportError:
-    try:
-        from backend.api.format import (
-            format_final,
-            get_reference_metadata,
-            update_report_file_path,
-        )
-        from backend.services.pdf_formatter import format_report_as_pdf
-    except ImportError:
-        # This allows for cleaner error handling if imports fail
-        logger.warning("Could not import formatting functions, will import when needed")
+# If needed, format-related functions would be imported conditionally here
+# to avoid circular imports when modules are loaded
 
 router = APIRouter()
 
