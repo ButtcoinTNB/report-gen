@@ -1,5 +1,9 @@
 import os
-from pydantic_settings import BaseSettings
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    # Fallback to pydantic BaseSettings if pydantic_settings is not available
+    from pydantic import BaseSettings
 from pydantic import validator, Field
 from dotenv import load_dotenv
 import sys
