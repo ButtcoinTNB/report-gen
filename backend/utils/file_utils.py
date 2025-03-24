@@ -8,42 +8,38 @@ import os
 import re
 from utils.error_handler import logger
 
-# Try to import from werkzeug first
-try:
-    from werkzeug.utils import secure_filename
-except ImportError:
-    # Fallback implementation if werkzeug is not available
-    def secure_filename(filename: str) -> str:
-        """
-        Pass a filename and return a secure version of it.
+# Custom secure_filename implementation without werkzeug dependency
+def secure_filename(filename: str) -> str:
+    """
+    Pass a filename and return a secure version of it.
+    
+    This function works similar to the werkzeug.utils.secure_filename function.
+    It returns a filename that can safely be stored on a regular file system and passed
+    to os.path.join() without risking directory traversal attacks.
+    
+    Args:
+        filename: The filename to secure
         
-        This function works similar to the werkzeug.utils.secure_filename function.
-        It returns a filename that can safely be stored on a regular file system and passed
-        to os.path.join() without risking directory traversal attacks.
+    Returns:
+        A sanitized filename
+    """
+    if not filename:
+        return 'unnamed_file'
         
-        Args:
-            filename: The filename to secure
-            
-        Returns:
-            A sanitized filename
-        """
-        if not filename:
-            return 'unnamed_file'
-            
-        # Remove non-ASCII characters
-        filename = ''.join(c for c in filename if c.isalnum() or c in '._- ')
+    _filename_ascii_strip_re = re.compile(r'[^A-Za-z0-9_.-]')
+    
+    # Replace directory separators with underscores
+    filename = filename.replace('/', '_')
+    filename = filename.replace('\\', '_')
+    
+    # Strip non-ASCII characters
+    filename = _filename_ascii_strip_re.sub('', filename).strip('._')
+    
+    # Make sure we don't have an empty filename
+    if not filename:
+        filename = 'unnamed_file'
         
-        # Remove leading/trailing spaces and dots
-        filename = filename.strip('. ')
-        
-        # Replace all potentially problematic characters with underscores
-        filename = re.sub(r'[^\w\.-]', '_', filename)
-        
-        # Ensure filename is not empty after sanitization
-        if not filename:
-            filename = 'unnamed_file'
-        
-        return filename
+    return filename
 
 def safe_path_join(base_dir: Union[str, Path], *paths) -> Path:
     """

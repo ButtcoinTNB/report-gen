@@ -9,7 +9,6 @@ import mimetypes
 import logging
 from typing import Dict, List, Union, BinaryIO, Optional, Any
 from pathlib import Path
-from werkzeug.utils import secure_filename
 import uuid
 import tempfile
 from PIL import Image
@@ -34,6 +33,25 @@ from utils.exceptions import (
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+# Custom secure_filename implementation to avoid werkzeug dependency
+def secure_filename(filename):
+    """
+    Return a secure version of a filename that can safely be stored on a filesystem.
+    This implementation is a simplified version of werkzeug.utils.secure_filename.
+    """
+    _filename_ascii_strip_re = re.compile(r'[^A-Za-z0-9_.-]')
+    
+    if isinstance(filename, str):
+        filename = filename.replace('/', '_')
+        filename = filename.replace('\\', '_')
+        filename = _filename_ascii_strip_re.sub('', filename).strip('._')
+        
+        # Make sure we don't have an empty filename
+        if not filename:
+            filename = 'unnamed_file'
+            
+    return filename
 
 class FileProcessor:
     """Unified file processing utilities to eliminate code duplication"""
