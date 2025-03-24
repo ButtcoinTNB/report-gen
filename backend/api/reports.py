@@ -1,8 +1,17 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import Dict, Any, List
-from ..models.report import ReportCreate, Report
-from ..services.agent_service import agent_service
-from ..dependencies import get_settings
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models.report import ReportCreate, Report
+    from services.agent_service import agent_service
+    from dependencies import get_settings
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.models.report import ReportCreate, Report
+    from backend.services.agent_service import agent_service
+    from backend.dependencies import get_settings
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 

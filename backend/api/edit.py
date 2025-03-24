@@ -1,27 +1,38 @@
-from fastapi import APIRouter, HTTPException, Body
-import datetime
-from typing import Dict, Any, List
-from uuid import UUID, uuid4
-from pydantic import UUID4, BaseModel
-from datetime import datetime
+from fastapi import APIRouter, HTTPException, Depends, Body
+from typing import Dict, Any, List, Optional
+import json
+import os
+import tempfile
+import time
+import uuid
 
 # Use imports with fallbacks for better compatibility across environments
 try:
     # First try imports without 'backend.' prefix (for Render)
-    from models import ReportUpdate, Report, ReportVersion, ReportVersionCreate, ReportVersionResponse
-    from services.ai_service import refine_report_text
-    from utils.supabase_helper import create_supabase_client
-    from utils.error_handler import api_error_handler
-    from api.schemas import APIResponse
+    from config import settings
+    from services.pdf_processor import process_file, extract_text_from_pdf
+    from services.docx_formatter import format_report_as_docx
+    from services.report_generator import generate_report_content, generate_editable_outline
+    from utils.file_utils import safe_path_join, create_temp_file
+    from utils.security import get_user_from_request
+    from utils.metrics import MetricsCollector
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from models import ReportUpdate, Report, ReportVersion, ReportVersionCreate, ReportVersionResponse
-    from services.ai_service import refine_report_text
-    from utils.supabase_helper import create_supabase_client
-    from utils.error_handler import api_error_handler
-    from api.schemas import APIResponse
+    from backend.config import settings
+    from backend.services.pdf_processor import process_file, extract_text_from_pdf
+    from backend.services.docx_formatter import format_report_as_docx
+    from backend.services.report_generator import generate_report_content, generate_editable_outline
+    from backend.utils.file_utils import safe_path_join, create_temp_file
+    from backend.utils.security import get_user_from_request
+    from backend.utils.metrics import MetricsCollector
 
 router = APIRouter()
+
+# Metrics collector for tracking performance
+metrics = MetricsCollector()
+
+# Dictionary to store editing sessions
+editing_sessions = {}
 
 
 class UpdateReportResponse(BaseModel):

@@ -2,9 +2,6 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Request,
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any, AsyncIterator
-from utils.agents_loop import AIAgentLoop
-from services.docx_formatter import generate_docx, get_document_metrics
-from utils.metrics import MetricsCollector
 import uuid
 import os
 import time
@@ -12,12 +9,28 @@ import json
 import asyncio
 import signal
 import psutil
-from pathlib import Path
-from utils.security import validate_user, get_user_from_request
-from ..utils.event_emitter import EventEmitter
-from ..utils.task_manager import tasks_cache
-from ..utils.error_handler import raise_error, format_error, ErrorHandler
 import logging
+from pathlib import Path
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from utils.agents_loop import AIAgentLoop
+    from services.docx_formatter import generate_docx, get_document_metrics
+    from utils.metrics import MetricsCollector
+    from utils.security import validate_user, get_user_from_request
+    from utils.event_emitter import EventEmitter
+    from utils.task_manager import tasks_cache
+    from utils.error_handler import raise_error, format_error, ErrorHandler
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.utils.agents_loop import AIAgentLoop
+    from backend.services.docx_formatter import generate_docx, get_document_metrics
+    from backend.utils.metrics import MetricsCollector
+    from backend.utils.security import validate_user, get_user_from_request
+    from backend.utils.event_emitter import EventEmitter
+    from backend.utils.task_manager import tasks_cache
+    from backend.utils.error_handler import raise_error, format_error, ErrorHandler
 
 router = APIRouter()
 agent_loop = AIAgentLoop()

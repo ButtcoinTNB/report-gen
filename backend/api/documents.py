@@ -1,10 +1,22 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime
-from ..models.document import DocumentMetadata, DocumentMetadataUpdate
-from ..services.document_service import DocumentService
-from ..utils.validation import validate_url
-from ..dependencies import get_document_service
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models.document import DocumentMetadata, DocumentMetadataUpdate
+    from services.document_service import DocumentService
+    from utils.validation import validate_url
+    from dependencies import get_document_service
+    from api.schemas import APIResponse
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.models.document import DocumentMetadata, DocumentMetadataUpdate
+    from backend.services.document_service import DocumentService
+    from backend.utils.validation import validate_url
+    from backend.dependencies import get_document_service
+    from backend.api.schemas import APIResponse
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 

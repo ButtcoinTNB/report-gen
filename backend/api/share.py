@@ -1,7 +1,16 @@
 from fastapi import APIRouter, HTTPException, Depends
-from ..models.share import ShareLinkCreate, ShareLinkResponse
-from ..services.share_service import ShareService
-from ..config import get_settings
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models.share import ShareLinkCreate, ShareLinkResponse
+    from services.share_service import ShareService
+    from config import get_settings
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.models.share import ShareLinkCreate, ShareLinkResponse
+    from backend.services.share_service import ShareService
+    from backend.config import get_settings
 
 router = APIRouter()
 
@@ -20,17 +29,13 @@ async def create_share_link(
         share_service: Share service instance
         
     Returns:
-        ShareLinkResponse object containing the share link details
+        The created share link information
         
     Raises:
-        HTTPException: If share link creation fails
+        HTTPException: If the document doesn't exist or other errors occur
     """
     try:
-        return await share_service.create_share_link(
-            document_id=data.document_id,
-            expires_in=data.expires_in,
-            max_downloads=data.max_downloads
-        )
+        return await share_service.create_share_link(data)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -46,21 +51,21 @@ async def get_share_link(
     Get information about a share link.
     
     Args:
-        token: Share link token
+        token: The share link token
         share_service: Share service instance
         
     Returns:
-        ShareLinkResponse object containing the share link details
+        The share link information
         
     Raises:
-        HTTPException: If share link is not found or expired
+        HTTPException: If the share link doesn't exist or has expired
     """
     try:
         share_link = await share_service.get_share_link(token)
         if not share_link:
             raise HTTPException(
                 status_code=404,
-                detail="Share link not found or expired"
+                detail="Share link not found or has expired"
             )
         return share_link
     except HTTPException:
@@ -68,7 +73,7 @@ async def get_share_link(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get share link: {str(e)}"
+            detail=f"Failed to retrieve share link: {str(e)}"
         )
 
 @router.delete("/{token}")
@@ -80,18 +85,25 @@ async def revoke_share_link(
     Revoke a share link.
     
     Args:
-        token: Share link token
+        token: The share link token
         share_service: Share service instance
         
     Returns:
         Success message
         
     Raises:
-        HTTPException: If share link revocation fails
+        HTTPException: If the share link doesn't exist or other errors occur
     """
     try:
-        await share_service.revoke_share_link(token)
-        return {"message": "Share link revoked successfully"}
+        success = await share_service.revoke_share_link(token)
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail="Share link not found"
+            )
+        return {"message": "Share link successfully revoked"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -104,23 +116,30 @@ async def track_download(
     share_service: ShareService = Depends(lambda: ShareService())
 ) -> dict:
     """
-    Track a download for a share link.
+    Track a document download via a share link.
     
     Args:
-        token: Share link token
+        token: The share link token
         share_service: Share service instance
         
     Returns:
-        Success message
+        Download URL
         
     Raises:
-        HTTPException: If download tracking fails
+        HTTPException: If the share link doesn't exist or has expired
     """
     try:
-        await share_service.track_download(token)
-        return {"message": "Download tracked successfully"}
+        download_url = await share_service.track_download(token)
+        if not download_url:
+            raise HTTPException(
+                status_code=404,
+                detail="Share link not found or has expired"
+            )
+        return {"download_url": download_url}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to track download: {str(e)}"
+            detail=f"Failed to process download request: {str(e)}"
         ) 
