@@ -23,27 +23,13 @@ logger = logging.getLogger(__name__)
 # Maximum number of pages to process to avoid excessive API usage
 MAX_PAGES = 10
 
-def safe_path_join(base_path: str, relative_path: str) -> str:
-    """
-    Join paths safely to prevent path traversal attacks
-    
-    Args:
-        base_path: Base directory path
-        relative_path: Relative path to join
-        
-    Returns:
-        Safely joined path
-    """
-    # Use FileProcessor's safe path join method
-    return FileProcessor.safe_path_join(base_path, relative_path)
-
 def convert_document_to_images(file_path: str, output_dir: Optional[str] = None) -> List[str]:
     """
-    Convert a document file to a series of images
+    Convert a document file (PDF, DOCX, etc.) to a series of images
     
     Args:
         file_path: Path to the document file
-        output_dir: Directory to save images (optional, will create temp dir if None)
+        output_dir: Optional directory to save images to (creates temp dir if None)
         
     Returns:
         List of paths to the generated images
