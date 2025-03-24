@@ -58,6 +58,19 @@ class ErrorResponse(BaseModel):
     retryable: bool = False
     docs_link: Optional[str] = None
 
+class ErrorCodes:
+    """Error codes for the application"""
+    VALIDATION_ERROR = "validation_error"
+    NOT_FOUND = "not_found"
+    UNAUTHORIZED = "unauthorized"
+    FORBIDDEN = "forbidden"
+    INTERNAL_ERROR = "internal_error"
+    NETWORK_ERROR = "network_error"
+    EXTERNAL_API_ERROR = "external_api_error"
+    DATABASE_ERROR = "database_error"
+    TIMEOUT_ERROR = "timeout_error"
+    STORAGE_ERROR = "storage_error"
+
 class ErrorHandler:
     """
     Centralized error handling utility for standardized error responses

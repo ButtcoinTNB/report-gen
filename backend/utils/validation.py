@@ -2,6 +2,8 @@ from urllib.parse import urlparse
 from typing import Optional
 import re
 import os
+from fastapi import HTTPException, status
+import uuid
 
 def validate_url(url: str) -> bool:
     """
@@ -76,3 +78,50 @@ def validate_file_size(size: int, max_size: Optional[int] = None) -> bool:
         max_size = 10 * 1024 * 1024  # 10MB
         
     return 0 < size <= max_size 
+
+def validate_object_id(id_str: Optional[str]):
+    """
+    Validate that the provided string is a valid UUID.
+    
+    Args:
+        id_str: String to validate as UUID
+        
+    Raises:
+        HTTPException: If the string is not a valid UUID
+    """
+    if id_str is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing ID parameter"
+        )
+    
+    try:
+        # Try to parse as UUID
+        uuid.UUID(id_str)
+    except ValueError:
+        # Check if it's a valid alternative format (using regex)
+        if not re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', id_str, re.I):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid ID format: {id_str}. Must be a valid UUID."
+            )
+            
+def is_valid_object_id(id_str: Optional[str]) -> bool:
+    """
+    Check if the provided string is a valid UUID.
+    
+    Args:
+        id_str: String to check
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    if id_str is None:
+        return False
+    
+    try:
+        uuid.UUID(id_str)
+        return True
+    except ValueError:
+        # Check if it's a valid alternative format
+        return bool(re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', id_str, re.I)) 

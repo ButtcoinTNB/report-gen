@@ -1,323 +1,329 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { useErrorHandler } from '../hooks/useErrorHandler';
-import { backOff } from 'exponential-backoff';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import { v4 as uuid } from 'uuid';
+import { useSnackbar } from 'notistack';
+import reportService from '../services/ReportService';
 
-// Types for task state
-export interface TaskStatus {
-  taskId: string;
-  status: 'idle' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+// Define the stages of the process following the complete flow
+export type ProcessStage = 
+  | 'idle'
+  | 'upload'
+  | 'extraction'
+  | 'analysis'
+  | 'writer'
+  | 'reviewer'
+  | 'refinement'
+  | 'formatting'
+  | 'finalization';
+
+// Define the possible task statuses
+export type TaskStatus = 
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+// Define uploaded file information
+export interface UploadedFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: Date;
+  status: 'pending' | 'uploading' | 'completed' | 'failed';
   progress: number;
-  stage: string;
+  url?: string;
+}
+
+// Define document version interface
+export interface DocumentVersion {
+  id: string;
+  createdAt: Date;
+  label: string;
+  description?: string;
+  isCurrent: boolean;
+  stage: ProcessStage;
+  url?: string;
+}
+
+// Define the task state interface
+export interface TaskState {
+  id: string;
+  status: TaskStatus;
+  stage: ProcessStage;
+  progress: number;
   message: string;
-  estimatedTimeRemaining?: number;
-  quality?: number;
-  iterations?: number;
   error?: string;
+  startTime?: Date;
+  estimatedTimeRemaining?: number;
+  currentReportId?: string;
+  currentVersionId?: string;
+  versions?: DocumentVersion[];
+  uploadedFiles?: UploadedFile[];
 }
 
-interface TaskContextType {
-  activeTask: TaskStatus | null;
-  startTask: (taskId: string, taskType: string) => void;
-  updateTaskProgress: (progress: number, stage: string, message: string) => void;
-  updateTaskMetrics: (metrics: Partial<TaskStatus>) => void;
-  completeTask: (result?: any) => void;
-  failTask: (error: string) => void;
-  cancelTask: () => void;
-  resetTask: () => void;
-  isProcessing: boolean;
-}
-
-// Create context with default values
-const TaskContext = createContext<TaskContextType>({
-  activeTask: null,
-  startTask: () => {},
-  updateTaskProgress: () => {},
-  updateTaskMetrics: () => {},
-  completeTask: () => {},
-  failTask: () => {},
-  cancelTask: () => {},
-  resetTask: () => {},
-  isProcessing: false
-});
-
-// Custom hook for using the task context
-export const useTask = () => {
-  const context = useContext(TaskContext);
-  if (!context) {
-    throw new Error('useTask must be used within a TaskProvider');
-  }
-  return context;
+// Valid transitions between task stages
+const validTransitions: Record<ProcessStage, ProcessStage[]> = {
+  idle: ['upload'],
+  upload: ['extraction'],
+  extraction: ['analysis', 'idle'],  // Can go back to idle if extraction fails
+  analysis: ['writer', 'extraction'], // Can retry extraction if needed
+  writer: ['reviewer', 'analysis'],  // Can go back to analysis if needed
+  reviewer: ['refinement', 'writer'], // Can go back to writer stage if needed
+  refinement: ['formatting', 'reviewer'], // Can restart review process
+  formatting: ['finalization', 'refinement'], // Can go back to refinement
+  finalization: ['idle'] // Start a new task
 };
 
-interface TaskProviderProps {
-  children: ReactNode;
-  pollingInterval?: number; // Milliseconds between status polls
-  maxRetries?: number; // Maximum number of retries for polling
-}
+export type TaskContextType = {
+  task: TaskState;
+  updateTask: (updates: Partial<TaskState>) => void;
+  transitionToStage: (newStage: ProcessStage) => boolean;
+  resetTask: () => void;
+  createVersion: (reportId: string, label: string, description?: string) => Promise<string | null>;
+  switchVersion: (versionId: string) => Promise<boolean>;
+  compareVersions: (versionIds: [string, string]) => Promise<any>;
+  downloadVersion: (versionId: string) => Promise<boolean>;
+};
 
-// Task provider component
-export const TaskProvider: React.FC<TaskProviderProps> = ({ 
-  children,
-  pollingInterval = 2000, // Default to checking every 2 seconds
-  maxRetries = 5 // Default max retries for polling
-}) => {
-  // Task state
-  const [activeTask, setActiveTask] = useState<TaskStatus | null>(null);
-  const [isPolling, setIsPolling] = useState<boolean>(false);
-  const [failedAttempts, setFailedAttempts] = useState<number>(0);
-  
-  // Error handling
-  const { handleError, wrapPromise } = useErrorHandler({
-    showNotification: false // We'll handle task-specific notifications separately
-  });
-  
-  // Check if task is processing
-  const isProcessing = activeTask !== null && activeTask.status === 'in_progress';
-  
-  // Start a new task
-  const startTask = useCallback((taskId: string, taskType: string) => {
-    setActiveTask({
-      taskId,
-      status: 'in_progress',
-      progress: 0,
-      stage: 'initializing',
-      message: 'Inizializzando...',
-      estimatedTimeRemaining: undefined,
-      quality: undefined,
-      iterations: undefined
-    });
-    setIsPolling(true);
-    setFailedAttempts(0);
+// Default context value
+const defaultTaskContext: TaskContextType = {
+  task: {
+    id: '',
+    status: 'pending',
+    stage: 'idle',
+    progress: 0,
+    message: 'Ready to start',
+    versions: []
+  },
+  updateTask: () => {},
+  transitionToStage: () => false,
+  resetTask: () => {},
+  createVersion: async () => null,
+  switchVersion: async () => false,
+  compareVersions: async () => null,
+  downloadVersion: async () => false
+};
+
+// Create the context
+export const TaskContext = createContext<TaskContextType>(defaultTaskContext);
+
+// Hook to use the task context
+export const useTask = () => useContext(TaskContext);
+
+// Provider component
+export const TaskProvider: React.FC<{children: React.ReactNode}> = ({ children }) => {
+  const [task, setTask] = useState<TaskState>(defaultTaskContext.task);
+  const { enqueueSnackbar } = useSnackbar();
+
+  // Update task state partially
+  const updateTask = useCallback((updates: Partial<TaskState>) => {
+    setTask(prevTask => ({ ...prevTask, ...updates }));
   }, []);
-  
-  // Update task progress
-  const updateTaskProgress = useCallback((progress: number, stage: string, message: string) => {
-    setActiveTask(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        progress: Math.min(Math.max(0, progress), 100), // Ensure between 0-100
-        stage,
-        message
-      };
-    });
-  }, []);
-  
-  // Update task metrics (quality, iterations, etc.)
-  const updateTaskMetrics = useCallback((metrics: Partial<TaskStatus>) => {
-    setActiveTask(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        ...metrics
-      };
-    });
-  }, []);
-  
-  // Mark task as complete
-  const completeTask = useCallback((result?: any) => {
-    setActiveTask(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        status: 'completed',
-        progress: 100,
-        stage: 'completed',
-        message: 'Elaborazione completata',
-        estimatedTimeRemaining: 0
-      };
-    });
-    setIsPolling(false);
-  }, []);
-  
-  // Mark task as failed
-  const failTask = useCallback((error: string) => {
-    setActiveTask(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        status: 'failed',
-        stage: 'failed',
-        message: 'Elaborazione fallita',
-        error
-      };
-    });
-    setIsPolling(false);
-  }, []);
-  
-  // Cancel the current task
-  const cancelTask = useCallback(() => {
-    if (!activeTask || !isProcessing) return;
+
+  // Transition to a new stage with validation
+  const transitionToStage = useCallback((newStage: ProcessStage): boolean => {
+    const currentStage = task.stage;
     
-    // Call API to cancel task
-    wrapPromise(
-      fetch(`/api/tasks/${activeTask.taskId}`, {
-        method: 'DELETE'
-      })
-    )
-    .then(() => {
-      setActiveTask(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          status: 'cancelled',
-          stage: 'cancelled',
-          message: 'Elaborazione annullata'
-        };
-      });
-    })
-    .catch(error => {
-      handleError(error, {
-        showNotification: true,
-        onError: () => {
-          // If we can't cancel on the server, at least update the local state
-          setActiveTask(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              status: 'cancelled',
-              stage: 'cancelled',
-              message: 'Elaborazione annullata (parziale)'
-            };
-          });
-        }
-      });
-    })
-    .finally(() => {
-      setIsPolling(false);
+    // Check if the transition is valid
+    if (!validTransitions[currentStage].includes(newStage)) {
+      console.error(`Invalid transition from ${currentStage} to ${newStage}`);
+      return false;
+    }
+    
+    // Update the task with the new stage
+    updateTask({ 
+      stage: newStage,
+      message: `Transitioned to ${newStage} stage`
     });
-  }, [activeTask, isProcessing, wrapPromise, handleError]);
-  
-  // Reset task state
+    
+    return true;
+  }, [task.stage, updateTask]);
+
+  // Reset task to initial state
   const resetTask = useCallback(() => {
-    setActiveTask(null);
-    setIsPolling(false);
-    setFailedAttempts(0);
+    setTask({
+      ...defaultTaskContext.task,
+      id: uuid() // Generate a new task ID
+    });
   }, []);
-  
-  // Poll for task status updates with exponential backoff for failures
-  useEffect(() => {
-    if (!isPolling || !activeTask) return;
-    
-    // Track if component is mounted
-    let isMounted = true;
-    
-    // Single polling attempt with exponential backoff on failure
-    const fetchTaskStatus = async () => {
-      try {
-        // Use backoff for handling transient failures
-        const result = await backOff(
-          async () => {
-            const response = await fetch(`/api/tasks/${activeTask.taskId}`);
-            if (!response.ok) {
-              const error = new Error(`Failed to fetch task status: ${response.statusText}`);
-              // Track as a failure and possibly throw based on status
-              setFailedAttempts(prev => prev + 1);
-              throw error;
-            }
-            // Reset failures on success
-            setFailedAttempts(0);
-            return response.json();
-          },
-          {
-            // Configure backoff
-            numOfAttempts: 3, // Per individual polling cycle
-            startingDelay: 1000,
-            maxDelay: 5000,
-            jitter: 'full', // Use 'full' jitter strategy
-            retry: (error) => {
-              // Don't retry 404s or if we've exceeded max failures
-              if (error.message.includes('404') || failedAttempts >= maxRetries) {
-                return false;
-              }
-              return true;
-            }
-          }
-        );
-        
-        if (!isMounted) return;
-        
-        // Update local state with server data
-        setActiveTask(prev => {
-          if (!prev) return null;
-          
-          // If task is complete, failed, or cancelled, stop polling
-          if (result.status === 'completed' || result.status === 'failed' || result.status === 'cancelled') {
-            setIsPolling(false);
-          }
-          
-          return {
-            ...prev,
-            status: result.status,
-            progress: result.progress !== undefined ? result.progress : prev.progress,
-            stage: result.current_stage || prev.stage,
-            message: result.message || prev.message,
-            estimatedTimeRemaining: result.time_remaining,
-            quality: result.quality_score,
-            iterations: result.iterations,
-            error: result.error
-          };
-        });
-        
-      } catch (error) {
-        if (!isMounted) return;
-        
-        handleError(error, { 
-          showNotification: failedAttempts >= 3, // Only show notifications after multiple failures
-          logError: true 
-        });
-        
-        // If we've exceeded max retries, stop polling
-        if (failedAttempts >= maxRetries) {
-          setIsPolling(false);
-          
-          // Update task state to failed
-          setActiveTask(prev => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              status: 'failed',
-              stage: 'failed',
-              message: 'Impossibile ottenere aggiornamenti dal server',
-              error: 'Connection to server lost'
-            };
-          });
-        }
+
+  // Create a new document version
+  const createVersion = useCallback(async (
+    reportId: string, 
+    label: string, 
+    description?: string
+  ): Promise<string | null> => {
+    try {
+      if (!reportId) {
+        throw new Error('Report ID is required to create a version');
       }
-    };
-    
-    // Set up polling interval with jitter to avoid thundering herd
-    const jitter = Math.random() * 500; // Add up to 500ms of jitter
-    const interval = setInterval(fetchTaskStatus, pollingInterval + jitter);
-    
-    // Initial poll
-    fetchTaskStatus();
-    
-    // Cleanup interval on unmount
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [isPolling, activeTask, pollingInterval, failedAttempts, maxRetries, handleError]);
-  
-  // Context value
-  const value = {
-    activeTask,
-    startTask,
-    updateTaskProgress,
-    updateTaskMetrics,
-    completeTask,
-    failTask,
-    cancelTask,
+      
+      // Call the report service to create version
+      const result = await reportService.createVersion(reportId, {
+        label,
+        description,
+        stage: task.stage
+      });
+      
+      // Create a new version object from the result
+      const newVersion: DocumentVersion = {
+        id: result.id,
+        createdAt: new Date(result.createdAt),
+        label,
+        description,
+        isCurrent: true,
+        stage: task.stage,
+        url: result.url
+      };
+      
+      // Update current versions (mark previous current as not current)
+      const updatedVersions = task.versions ? 
+        task.versions.map(v => ({
+          ...v,
+          isCurrent: false
+        })).concat(newVersion) : 
+        [newVersion];
+      
+      updateTask({
+        versions: updatedVersions,
+        currentVersionId: newVersion.id
+      });
+      
+      enqueueSnackbar(`Version ${label} created successfully`, { 
+        variant: 'success',
+        autoHideDuration: 3000
+      });
+      
+      return newVersion.id;
+    } catch (error) {
+      console.error('Failed to create version:', error);
+      if (error instanceof Error) {
+        enqueueSnackbar(`Failed to create version: ${error.message}`, { 
+          variant: 'error',
+          autoHideDuration: 5000
+        });
+      }
+      return null;
+    }
+  }, [task.stage, task.versions, updateTask, enqueueSnackbar]);
+
+  // Switch to a different version
+  const switchVersion = useCallback(async (versionId: string): Promise<boolean> => {
+    try {
+      if (!task.versions || task.versions.length === 0) {
+        return false;
+      }
+      
+      const version = task.versions.find(v => v.id === versionId);
+      if (!version) {
+        return false;
+      }
+      
+      // Load version content if needed
+      await reportService.getVersion(versionId);
+      
+      // Update current version without changing version array
+      updateTask({
+        currentVersionId: versionId,
+        versions: task.versions.map(v => ({
+          ...v,
+          isCurrent: v.id === versionId
+        }))
+      });
+      
+      enqueueSnackbar(`Switched to version ${version.label}`, { 
+        variant: 'info',
+        autoHideDuration: 3000
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('Failed to switch version:', error);
+      if (error instanceof Error) {
+        enqueueSnackbar(`Failed to switch version: ${error.message}`, { 
+          variant: 'error',
+          autoHideDuration: 5000
+        });
+      }
+      return false;
+    }
+  }, [task.versions, updateTask, enqueueSnackbar]);
+
+  // Compare two versions
+  const compareVersions = useCallback(async (versionIds: [string, string]) => {
+    try {
+      const [versionId1, versionId2] = versionIds;
+      
+      // Get the comparison result from the report service
+      const result = await reportService.compareVersions(versionId1, versionId2);
+      return result;
+    } catch (error) {
+      console.error('Failed to compare versions:', error);
+      if (error instanceof Error) {
+        enqueueSnackbar(`Failed to compare versions: ${error.message}`, { 
+          variant: 'error',
+          autoHideDuration: 5000
+        });
+      }
+      return null;
+    }
+  }, [enqueueSnackbar]);
+
+  // Download a specific version
+  const downloadVersion = useCallback(async (versionId: string): Promise<boolean> => {
+    try {
+      const version = task.versions?.find(v => v.id === versionId);
+      if (!version) {
+        return false;
+      }
+      
+      // Use the report service to download the version
+      await reportService.downloadVersion(versionId, `report-${versionId}.docx`);
+      
+      return true;
+    } catch (error) {
+      console.error('Failed to download version:', error);
+      if (error instanceof Error) {
+        enqueueSnackbar(`Failed to download version: ${error.message}`, { 
+          variant: 'error',
+          autoHideDuration: 5000
+        });
+      }
+      return false;
+    }
+  }, [task.versions, enqueueSnackbar]);
+
+  // Initialize task on mount
+  useEffect(() => {
+    if (!task.id) {
+      resetTask();
+    }
+  }, [resetTask, task.id]);
+
+  const contextValue = useMemo(() => ({
+    task,
+    updateTask,
+    transitionToStage,
     resetTask,
-    isProcessing
-  };
-  
+    createVersion,
+    switchVersion,
+    compareVersions,
+    downloadVersion
+  }), [
+    task, 
+    updateTask, 
+    transitionToStage, 
+    resetTask, 
+    createVersion, 
+    switchVersion, 
+    compareVersions, 
+    downloadVersion
+  ]);
+
   return (
-    <TaskContext.Provider value={value}>
+    <TaskContext.Provider value={contextValue}>
       {children}
     </TaskContext.Provider>
   );
-};
-
-export default TaskProvider; 
+}; 

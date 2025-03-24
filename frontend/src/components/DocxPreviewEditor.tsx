@@ -23,7 +23,11 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel
 } from '@mui/material';
 import { 
   Download as DownloadIcon, 
@@ -35,13 +39,21 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
   Compare as CompareIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  Send as SendIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  FormatPaint as FormatIcon,
+  Description as DocIcon
 } from '@mui/icons-material';
 import { logger } from '../utils/logger';
 import { reportService, ReportVersion } from '../services/api/ReportService';
 import { formatDistanceToNow } from 'date-fns';
 import { it } from 'date-fns/locale';
 import { diffLines } from 'diff';
+import { useTask } from '../context/TaskContext';
+import { useErrorHandler } from '../hooks/useErrorHandler';
+import apiClient from '../services/api';
 
 interface DocxPreviewEditorProps {
   initialContent?: string;
@@ -54,6 +66,8 @@ interface DocxPreviewEditorProps {
     iterations: number;
     docx_url?: string;
   }) => void;
+  onRefinementSubmit?: (instructions: string) => void;
+  onDownload?: (format: 'docx' | 'pdf') => void;
 }
 
 export function DocxPreviewEditor({ 
@@ -61,8 +75,13 @@ export function DocxPreviewEditor({
   downloadUrl = '',
   reportId = '',
   showRefinementOptions = true,
-  onRefinementComplete 
+  onRefinementComplete,
+  onRefinementSubmit,
+  onDownload
 }: DocxPreviewEditorProps) {
+  const { task, updateStage, updateMetrics, setReportId } = useTask();
+  const { handleError, wrapPromise } = useErrorHandler();
+  
   const [content, setContent] = useState(initialContent || '');
   const [refinementInstructions, setRefinementInstructions] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -87,6 +106,9 @@ export function DocxPreviewEditor({
     selected: ''
   });
 
+  // Get actual report ID from props or task context
+  const effectiveReportId = reportId || task.reportId;
+  
   // Update content when initialContent prop changes
   useEffect(() => {
     if (initialContent) {
@@ -96,23 +118,23 @@ export function DocxPreviewEditor({
 
   // Check for missing reportId if refinement options are shown
   useEffect(() => {
-    if (showRefinementOptions && !reportId) {
+    if (showRefinementOptions && !effectiveReportId) {
       setMissingReportIdWarning(true);
       logger.warn('DocxPreviewEditor: reportId is missing but refinement options are enabled');
     } else {
       setMissingReportIdWarning(false);
     }
-  }, [showRefinementOptions, reportId]);
+  }, [showRefinementOptions, effectiveReportId]);
 
   // Load version history when reportId is available
   const loadVersionHistory = useCallback(async () => {
-    if (!reportId) return;
+    if (!effectiveReportId) return;
     
     setLoadingVersions(true);
     setError(null);
     
     try {
-      const versionData = await reportService.getReportVersions(reportId);
+      const versionData = await reportService.getReportVersions(effectiveReportId);
       setVersions(versionData.versions);
     } catch (err) {
       logger.error('Error loading version history:', err);
@@ -120,7 +142,7 @@ export function DocxPreviewEditor({
     } finally {
       setLoadingVersions(false);
     }
-  }, [reportId]);
+  }, [effectiveReportId]);
 
   useEffect(() => {
     if (showVersionHistory) {
@@ -140,7 +162,7 @@ export function DocxPreviewEditor({
 
   // Handle manual content update with version tracking
   const handleUpdateContent = async () => {
-    if (!reportId) {
+    if (!effectiveReportId) {
       setError('ID del report mancante. Impossibile salvare le modifiche.');
       return;
     }
@@ -154,9 +176,8 @@ export function DocxPreviewEditor({
       
       // Update the report with a new version
       await reportService.updateReportWithVersion(
-        reportId,
-        { content },
-        true, // create a new version
+        effectiveReportId,
+        content,
         description || 'Modifiche manuali'
       );
       
@@ -175,7 +196,7 @@ export function DocxPreviewEditor({
 
   // Handle reverting to a previous version
   const handleRevertToVersion = async (version: ReportVersion) => {
-    if (!reportId) {
+    if (!effectiveReportId) {
       setError('ID del report mancante. Impossibile ripristinare la versione.');
       return;
     }
@@ -185,7 +206,7 @@ export function DocxPreviewEditor({
     
     try {
       // Revert to the selected version
-      const result = await reportService.revertToVersion(reportId, version.version_number);
+      const result = await reportService.revertToVersion(effectiveReportId, version.version_number);
       
       // Update the content in the editor
       setContent(result.content);
@@ -212,45 +233,22 @@ export function DocxPreviewEditor({
       current: content,
       selected: version.content
     });
-    setCompareDialogOpen(true);
+    setShowCompareDialog(true);
   };
 
-  const handleDownload = async () => {
-    setIsLoading(true);
-    setError(null);
-
+  const handleDownload = (format: 'docx' | 'pdf') => {
+    if (!effectiveReportId) return;
+    
     try {
-      logger.info('Generating DOCX file...');
-
-      // Check if we have a downloadUrl
-      if (!downloadUrl) {
-        throw new Error('URL di download non disponibile. Impossibile generare il documento.');
-      }
-
-      const response = await fetch('/api/generate-docx', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
+      // Use the reportService to download the file
+      reportService.downloadReport(effectiveReportId, format, (progress) => {
+        logger.info(`Download progress: ${progress}%`);
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to generate document');
-      }
-
-      // Trigger download
-      window.location.href = downloadUrl;
-      setSuccessMessage('File DOCX generato con successo!');
-      setShowSuccess(true);
-      logger.info('DOCX file generated successfully');
-
+      
+      // Call the onDownload callback if provided
+      onDownload?.(format);
     } catch (error) {
-      logger.error('Error generating DOCX:', error);
-      setError(error instanceof Error ? error.message : 'Failed to generate document. Please try again.');
-    } finally {
-      setIsLoading(false);
+      handleError(error);
     }
   };
 
@@ -260,7 +258,7 @@ export function DocxPreviewEditor({
       return;
     }
 
-    if (!reportId) {
+    if (!effectiveReportId) {
       setError('ID del report mancante. Impossibile procedere con il miglioramento.');
       setMissingReportIdWarning(true);
       return;
@@ -274,126 +272,106 @@ export function DocxPreviewEditor({
     try {
       logger.info('Submitting refinement request...');
 
-      // Start the refinement task in the background
-      const startResponse = await fetch('/api/agent-loop/refine-report', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      // Use the ReportService to start the refinement
+      const { task_id } = await reportService.refineReport(
+        effectiveReportId,
+        content,
+        refinementInstructions
+      );
+      
+      // Set up event source for real-time updates
+      const unsubscribe = reportService.subscribeToTaskEvents(
+        task_id,
+        (data) => {
+          // Update progress in UI
+          if (data.progress !== undefined) {
+            setRefinementProgress(data.progress * 100);
+          }
+          
+          // Update status message
+          if (data.message) {
+            setProgressMessage(data.message);
+          }
+          
+          // Handle task completion
+          if (data.status === 'completed' && data.result) {
+            const result = data.result;
+            
+            if (result.draft) {
+              setContent(result.draft);
+              setRefinementInstructions('');
+              setSuccessMessage('Report migliorato con successo!');
+              setShowSuccess(true);
+              setRefinementFeedback(result.feedback || null);
+              
+              // Update task information
+              updateMetrics({
+                progress: 100,
+                message: 'Report migliorato con successo'
+              });
+              
+              // Move to next stage if defined in workflow
+              if (task.stage === 'refinement') {
+                updateStage('formatting', 'Passaggio alla formattazione del report');
+              }
+              
+              if (onRefinementComplete) {
+                onRefinementComplete(result);
+              }
+              
+              // Show "from cache" indicator if the result was cached
+              if (result.from_cache) {
+                setProgressMessage('Miglioramento veloce (pattern in cache)');
+              } else {
+                setProgressMessage('');
+              }
+              
+              // Reload version history after AI refinement
+              loadVersionHistory();
+              
+              logger.info('Report refined successfully');
+              
+              // Close the event source
+              unsubscribe();
+            }
+          }
+          
+          // Handle task failure
+          if (data.status === 'failed') {
+            setError(data.error || 'Failed to refine report. Please try again.');
+            setProgressMessage('');
+            unsubscribe();
+          }
         },
-        body: JSON.stringify({ 
-          report_id: reportId,
-          content: content,
-          instructions: refinementInstructions 
-        }),
-      });
-
-      if (!startResponse.ok) {
-        const errorData = await startResponse.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to start refinement');
-      }
-
-      const { task_id } = await startResponse.json();
-      
-      // Connect to SSE endpoint for real-time updates
-      const result = await subscribeToTaskEvents(task_id);
-      
-      if (result.draft) {
-        setContent(result.draft);
-        setRefinementInstructions('');
-        setSuccessMessage('Report migliorato con successo!');
-        setShowSuccess(true);
-        setRefinementFeedback(result.feedback || null);
-        
-        if (onRefinementComplete) {
-          onRefinementComplete(result);
-        }
-        
-        // Show "from cache" indicator if the result was cached
-        if (result.from_cache) {
-          setProgressMessage('Miglioramento veloce (pattern in cache)');
-        } else {
+        (error) => {
+          logger.error('Error in task events:', error);
+          setError('Connection to event source failed. Please try again.');
           setProgressMessage('');
+          setIsRefining(false);
         }
-        
-        // Reload version history after AI refinement
-        await loadVersionHistory();
-        
-        logger.info('Report refined successfully');
-      } else {
-        throw new Error('Invalid response format: missing draft content');
-      }
+      );
+      
+      // Set a safety timeout
+      const refinementTimeout = setTimeout(() => {
+        unsubscribe();
+        if (isRefining) {
+          setError('Task timed out after 10 minutes. Please try again.');
+          setProgressMessage('');
+          setIsRefining(false);
+        }
+      }, 10 * 60 * 1000);
+      
+      // Clean up timeout if component unmounts
+      return () => {
+        clearTimeout(refinementTimeout);
+        unsubscribe();
+      };
     } catch (error) {
       logger.error('Error refining report:', error);
       setError(error instanceof Error ? error.message : 'Failed to refine report. Please try again.');
       setProgressMessage('');
-    } finally {
       setIsRefining(false);
     }
-  };
-
-  // Use Server-Sent Events for real-time progress updates
-  const subscribeToTaskEvents = (taskId: string): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      try {
-        // Open SSE connection
-        const eventSource = new EventSource(`/api/agent-loop/task-events/${taskId}`);
-        
-        // Handle updates
-        eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            
-            // Update progress in UI
-            if (data.progress !== undefined) {
-              setRefinementProgress(data.progress * 100);
-            }
-            
-            // Update status message
-            if (data.message) {
-              setProgressMessage(data.message);
-            }
-            
-            // Handle task completion
-            if (data.status === 'completed' && data.result) {
-              eventSource.close();
-              resolve(data.result);
-            } 
-            // Handle task failure
-            else if (data.status === 'failed') {
-              eventSource.close();
-              reject(new Error(data.error || 'Task failed'));
-            }
-            // Handle expired tasks
-            else if (data.status === 'expired') {
-              eventSource.close();
-              reject(new Error('Task expired or was removed'));
-            }
-          } catch (err) {
-            logger.error('Error parsing event data:', err);
-          }
-        };
-        
-        // Handle connection errors
-        eventSource.onerror = (error) => {
-          eventSource.close();
-          reject(new Error('Connection to event source failed'));
-        };
-        
-        // Safety timeout (10 minutes)
-        const timeout = setTimeout(() => {
-          eventSource.close();
-          reject(new Error('Task timed out after 10 minutes'));
-        }, 10 * 60 * 1000);
-        
-        // Clean up timeout on completion
-        eventSource.addEventListener('close', () => {
-          clearTimeout(timeout);
-        });
-        
-      } catch (error) {
-        reject(error);
-      }
-    });
   };
 
   // Simple diff function to highlight added/removed content
@@ -444,7 +422,7 @@ export function DocxPreviewEditor({
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Typography variant="h6">Editor Report</Typography>
         <Box>
-          {reportId && (
+          {effectiveReportId && (
             <Tooltip title="Cronologia versioni">
               <IconButton 
                 color={showVersionHistory ? 'primary' : 'default'} 
@@ -459,7 +437,7 @@ export function DocxPreviewEditor({
             variant="outlined"
             color="primary"
             onClick={handleUpdateContent}
-            disabled={isLoading || !reportId}
+            disabled={isLoading || !effectiveReportId}
             sx={{ ml: 1 }}
           >
             Salva versione
@@ -496,7 +474,7 @@ export function DocxPreviewEditor({
                         <IconButton 
                           edge="end" 
                           aria-label="restore" 
-                          onClick={() => handleRevertToVersion(version.version_number)}
+                          onClick={() => handleRevertToVersion(version)}
                           disabled={isReverting}
                           sx={{ ml: 1 }}
                         >
@@ -644,7 +622,7 @@ export function DocxPreviewEditor({
               variant="outlined"
               color="primary"
               onClick={handleRefine}
-              disabled={isRefining || refinementInstructions.trim().length === 0 || !reportId}
+              disabled={isRefining || refinementInstructions.trim().length === 0 || !effectiveReportId}
               startIcon={isRefining ? <CircularProgress size={20} /> : <RefreshIcon />}
             >
               {isRefining ? 
@@ -676,8 +654,8 @@ export function DocxPreviewEditor({
         <Button
           variant="contained"
           color="primary"
-          onClick={handleDownload}
-          disabled={isLoading || !downloadUrl}
+          onClick={() => handleDownload('docx')}
+          disabled={isLoading || !effectiveReportId}
           startIcon={isLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
         >
           {isLoading ? 'Generazione...' : 'Scarica DOCX'}

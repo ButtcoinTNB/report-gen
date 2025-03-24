@@ -10,11 +10,19 @@ from pathlib import Path
 import asyncio
 import time
 from datetime import datetime, timedelta
+import sentry_sdk
 from fastapi import FastAPI, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from typing import Callable
 from contextlib import asynccontextmanager
+
+# Initialize Sentry
+sentry_sdk.init(
+    dsn="https://348b613d688cab3b34c8b9f6b259bd15@o4509033743646720.ingest.de.sentry.io/4509033752887376",
+    # Add data like request headers and IP for users
+    send_default_pii=True,
+)
 
 # Set up logging first
 logging.basicConfig(
@@ -68,11 +76,12 @@ from fastapi.staticfiles import StaticFiles
 
 # Import API routes and config
 from api import upload, generate, format, edit, download, agent_loop, utils, documents, reports, templates, metrics
+from api.upload_chunked import router as upload_chunked_router
 from config import settings
 from api.agent_loop import router as agent_loop_router
 from api.cleanup import router as cleanup_router
 from .config import get_settings
-from .utils.supabase_helper import initialize_supabase_tables, cleanup_database
+from .utils.supabase_helper import initialize_supabase_tables, cleanup_database, cleanup_expired_connections, close_all_connections
 from .tasks.cleanup import start_cleanup_tasks
 from api import share
 
@@ -107,39 +116,78 @@ if missing_vars:
 else:
     logger.info("✅ All required environment variables are properly configured.")
 
+# Define lifespan to handle startup/shutdown events
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup and shutdown events"""
-    # Startup
+    """
+    Handle application startup and shutdown events
+    
+    Args:
+        app: FastAPI application instance
+    """
+    # Startup - run initialization
     logger.info("Starting application...")
     
     # Initialize monitoring
-    init_monitoring(os.getenv("SENTRY_DSN"))
-    
-    # Start rate limiter
-    await rate_limiter.start()
-    
-    # Start cleanup scheduler
-    cleanup_task = asyncio.create_task(start_cleanup_scheduler())
-    
     try:
-        yield
-    finally:
-        # Shutdown
-        logger.info("Shutting down application...")
-        await rate_limiter.stop()
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
+        logger.info("Initializing monitoring...")
+        metrics.initialize()
+    except Exception as e:
+        logger.error(f"Error initializing monitoring: {e}")
+    
+    # Initialize rate limiter
+    try:
+        from utils.api_rate_limiter import ApiRateLimiter
+        logger.info("Initializing API rate limiter...")
+        ApiRateLimiter.get_instance().start()
+    except Exception as e:
+        logger.error(f"Error initializing API rate limiter: {e}")
+    
+    # Create cleanup tasks
+    logger.info("Creating background tasks...")
+    try:
+        # Task for Supabase connection cleanup
+        supabase_cleanup_task = asyncio.create_task(
+            start_supabase_connection_cleanup_scheduler()
+        )
+        
+        # Task for rate limiter cleanup
+        rate_limiter_cleanup_task = asyncio.create_task(
+            start_rate_limiter_cleanup_scheduler()
+        )
+    except Exception as e:
+        logger.error(f"Error creating background tasks: {e}")
+        
+    yield
+    
+    # Shutdown - cleanup resources
+    logger.info("Shutting down application...")
+    
+    # Stop the rate limiter
+    try:
+        from utils.api_rate_limiter import ApiRateLimiter
+        logger.info("Stopping API rate limiter...")
+        ApiRateLimiter.get_instance().stop()
+    except Exception as e:
+        logger.error(f"Error stopping API rate limiter: {e}")
+    
+    # Cancel cleanup tasks
+    try:
+        logger.info("Canceling background tasks...")
+        if 'supabase_cleanup_task' in locals():
+            supabase_cleanup_task.cancel()
+            
+        if 'rate_limiter_cleanup_task' in locals():
+            rate_limiter_cleanup_task.cancel()
+    except Exception as e:
+        logger.error(f"Error canceling background tasks: {e}")
 
-# Create FastAPI application
+# Create FastAPI app with lifespan manager
 app = FastAPI(
     title="Insurance Report Generator API",
-    description="API for generating insurance reports using AI",
+    description="API for the Insurance Report Generator",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add CORS middleware first
@@ -172,6 +220,7 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(share.router, prefix="/api/share", tags=["share"])
+app.include_router(upload_chunked_router, prefix="/api/upload-chunked", tags=["uploads"])
 
 # Serve static files
 upload_dir = Path("./uploads")
@@ -296,6 +345,37 @@ async def start_cleanup_scheduler():
         await cleanup_old_data(settings.DATA_RETENTION_HOURS)
         await asyncio.sleep(3600)  # Wait for 1 hour
 
+# Configure background task for periodic Supabase connection cleanup
+async def start_supabase_connection_cleanup_scheduler():
+    """Start a background task that cleans up stale Supabase connections"""
+    while True:
+        try:
+            removed = cleanup_expired_connections()
+            if removed > 0:
+                logger.info(f"Cleaned up {removed} expired Supabase connections")
+        except Exception as e:
+            logger.error(f"Error in Supabase connection cleanup: {str(e)}")
+        
+        await asyncio.sleep(300)  # Run every 5 minutes
+
+# Configure background task for rate limiter cleanup
+async def start_rate_limiter_cleanup_scheduler():
+    """Start a background task that cleans up stale rate limiters and resets metrics"""
+    while True:
+        try:
+            # Cleanup stale limiters
+            rate_limiter.cleanup_stale_limiters(max_age_seconds=3600)  # 1 hour
+            
+            # Reset metrics once a day (at midnight)
+            current_hour = datetime.now().hour
+            if current_hour == 0 and datetime.now().minute < 5:  # First 5 minutes of the day
+                rate_limiter.reset_metrics()
+                logger.info("Daily rate limiter metrics reset completed")
+        except Exception as e:
+            logger.error(f"Error in rate limiter cleanup: {str(e)}")
+        
+        await asyncio.sleep(1800)  # Run every 30 minutes
+
 @app.get("/", tags=["Root"])
 async def root():
     """Root endpoint"""
@@ -313,6 +393,14 @@ async def health_check():
         "version": app.version,
         "timestamp": datetime.now().isoformat()
     }
+
+# Sentry test endpoint
+@app.get("/sentry-debug")
+async def trigger_error():
+    """
+    Test endpoint to trigger a Sentry error
+    """
+    division_by_zero = 1 / 0
 
 # For local development
 if __name__ == "__main__":

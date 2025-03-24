@@ -8,6 +8,7 @@ import logging
 import asyncio
 import time
 from hashlib import md5
+from .api_rate_limiter import rate_limiter, rate_limited
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -114,7 +115,7 @@ class AIAgentLoop:
             return f.read()
         
     async def _call_model(self, prompt: str, system_prompt: str, retries: int = None) -> str:
-        """Make an API call to the configured model via OpenRouter with retries."""
+        """Make an API call to the configured model via OpenRouter with rate limiting and retries."""
         if retries is None:
             retries = self.max_retries
             
@@ -124,6 +125,12 @@ class AIAgentLoop:
             
         last_error = None
         start_time = time.time()
+        
+        # Get a token from the rate limiter before proceeding
+        allowed = await rate_limiter.wait_for_token("openrouter", tokens=1.0, max_wait=10.0)
+        if not allowed:
+            self.log_event("rate_limit", {"message": "Rate limit exceeded, request dropped"})
+            raise Exception("Rate limit exceeded for OpenRouter API, please try again later")
         
         for attempt in range(retries):
             if self.is_cancelling:
@@ -158,6 +165,8 @@ class AIAgentLoop:
                     if response.status_code == 429:
                         self.log_event("rate_limit", {"attempt": attempt + 1, "delay": self.network_backoff_factor ** attempt})
                         logger.warning(f"Rate limit hit on attempt {attempt + 1}, retrying...")
+                        # Update rate limiter with this information
+                        rate_limiter.get_limiter("openrouter").metrics["throttled_requests"] += 1
                         await asyncio.sleep(self.network_backoff_factor ** attempt)  # Exponential backoff
                         continue
                         

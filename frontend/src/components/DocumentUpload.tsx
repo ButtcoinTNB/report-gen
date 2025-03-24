@@ -11,6 +11,7 @@ import { uploadApi } from '../services';
 import LoadingIndicator, { LoadingState, LoadingStage } from './LoadingIndicator';
 import { logger } from '../utils/logger';
 import { ReportResponseCamel } from '../services/api/UploadService';
+import { uploadFileChunked, shouldUseChunkedUpload } from '../utils/chunkedUploader';
 
 // Maximum total size (1GB)
 const MAX_TOTAL_SIZE = 1024 * 1024 * 1024;
@@ -131,18 +132,75 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     });
     
     try {
-      // Use the uploadFile adapter which handles progress
-      const response: ReportResponseCamel = await uploadApi.uploadFile(files, (progress) => {
-        setLoadingState(prevState => ({
-          ...prevState,
-          progress,
-          message: `Caricamento: ${progress}%`
-        }));
-      });
+      let reportIdResult: string | null = null;
       
-      logger.info('Upload response:', response);
+      // Process files one by one to track progress for each
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileIndex = i + 1;
+        
+        try {
+          setLoadingState(prevState => ({
+            ...prevState,
+            message: `Caricamento file ${fileIndex}/${files.length}: ${file.name}`
+          }));
+          
+          // Check if we should use chunked upload
+          if (shouldUseChunkedUpload(file, CHUNKED_UPLOAD_THRESHOLD)) {
+            // For large files, use chunked upload
+            logger.info(`Using chunked upload for large file: ${file.name} (${file.size} bytes)`);
+            
+            const result = await uploadFileChunked({
+              file,
+              reportId: reportIdResult || reportId,
+              onProgress: (progress) => {
+                setLoadingState(prevState => ({
+                  ...prevState,
+                  progress: (((i / files.length) + (progress / 100 / files.length)) * 100),
+                  message: `Caricamento file ${fileIndex}/${files.length}: ${file.name} (${progress.toFixed(0)}%)`
+                }));
+              },
+              onError: (error) => {
+                logger.error(`Error uploading file ${file.name}:`, error);
+              }
+            });
+            
+            if (result && result.success) {
+              reportIdResult = result.reportId;
+            } else {
+              throw new Error(`Chunked upload failed for file: ${file.name}`);
+            }
+          } else {
+            // For smaller files, use regular upload
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            if (reportIdResult || reportId) {
+              formData.append('reportId', reportIdResult || reportId!);
+            }
+            
+            // Use the uploadFile adapter which handles progress
+            const response: ReportResponseCamel = await uploadApi.uploadFile([file], (progress) => {
+              setLoadingState(prevState => ({
+                ...prevState,
+                progress: (((i / files.length) + (progress / 100 / files.length)) * 100),
+                message: `Caricamento file ${fileIndex}/${files.length}: ${file.name} (${progress.toFixed(0)}%)`
+              }));
+            });
+            
+            if (response && response.reportId) {
+              reportIdResult = response.reportId;
+            } else {
+              throw new Error('Risposta del server non valida. Impossibile ottenere l\'ID del report.');
+            }
+          }
+        } catch (error) {
+          logger.error(`Error uploading file ${file.name}:`, error);
+          throw error; // Re-throw to be caught by outer try/catch
+        }
+      }
       
-      if (response && response.reportId) {
+      if (reportIdResult) {
         setLoadingState({
           isLoading: false,
           progress: 100,
@@ -150,9 +208,9 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
           message: 'Caricamento completato!'
         });
         
-        onUploadComplete(response.reportId);
+        onUploadComplete(reportIdResult);
       } else {
-        throw new Error('Risposta del server non valida. Impossibile ottenere l\'ID del report.');
+        throw new Error('Nessun ID report ricevuto dopo il caricamento.');
       }
     } catch (error) {
       logger.error('Error uploading files:', error);
@@ -168,7 +226,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         message: 'Errore di caricamento'
       });
     }
-  }, [files, onUploadComplete]);
+  }, [files, onUploadComplete, reportId]);
 
   /**
    * Retry upload after failure

@@ -9,263 +9,246 @@ import {
   Alert,
   Divider,
   Link,
-  Tooltip
+  Tooltip,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  useTheme
 } from '@mui/material';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import CloseIcon from '@mui/icons-material/Close';
-import LightbulbIcon from '@mui/icons-material/Lightbulb';
-import InfoIcon from '@mui/icons-material/Info';
-import { useTask } from '../context/TaskContext';
+import {
+  HelpOutline as HelpIcon,
+  InfoOutlined as InfoIcon,
+  TipsAndUpdatesOutlined as TipsIcon,
+  WarningAmberOutlined as WarningIcon,
+  ArrowDropDown as ExpandIcon,
+  ArrowRight as CollapseIcon,
+  CheckCircleOutline as CheckIcon,
+  ErrorOutline as ErrorIcon
+} from '@mui/icons-material';
+import { useTask, ProcessStage } from '../context/TaskContext';
+import { withWindow } from '../utils/environment';
 
-// Define help content by processing stage
-const helpContent: Record<string, {
+// Help content by stage
+export interface HelpContent {
   title: string;
   description: string;
   tips: string[];
-  actions?: Array<{
-    label: string;
-    description: string;
-  }>;
-}> = {
-  // Stage-specific help
-  'upload': {
+  warnings?: string[];
+  requirements?: string[];
+}
+
+const helpContentByStage: Record<ProcessStage, HelpContent> = {
+  idle: {
+    title: 'Benvenuto nel Generatore di Report Assicurativi',
+    description: 'Questo strumento ti aiuterà a creare report professionali da documenti assicurativi e medici.',
+    tips: [
+      'Puoi caricare diversi tipi di documenti: PDF, immagini, file di Word, etc.',
+      'Seleziona i documenti cliccando o trascinandoli nell\'area di caricamento.'
+    ]
+  },
+  upload: {
     title: 'Caricamento Documenti',
-    description: 'In questa fase, i tuoi documenti vengono caricati sul server per l\'elaborazione.',
+    description: 'Carica i documenti necessari per generare il report.',
     tips: [
-      'I formati supportati includono PDF, DOCX, XLSX e JPG/PNG.',
-      'I documenti più grandi possono richiedere più tempo per il caricamento.',
-      'Assicurati che i file non siano danneggiati o protetti da password.'
+      'Assicurati che i documenti siano leggibili e completi.',
+      'Puoi caricare fino a 5 file contemporaneamente.',
+      'Formati supportati: PDF, DOC, DOCX, JPG, PNG'
     ],
-    actions: [
-      { label: 'Annulla', description: 'Puoi annullare il caricamento in qualsiasi momento cliccando su "Annulla".' }
-    ]
-  },
-  'extraction': {
-    title: 'Estrazione Contenuto',
-    description: 'Il sistema sta analizzando i documenti per estrarre testo, tabelle e altri dati rilevanti.',
-    tips: [
-      'I documenti scansionati richiedono OCR, che potrebbe richiedere più tempo.',
-      'I documenti ben formattati producono risultati migliori.',
-      'Le tabelle e i moduli vengono analizzati automaticamente.'
-    ]
-  },
-  'analysis': {
-    title: 'Analisi Documenti',
-    description: 'Il sistema sta identificando informazioni chiave nei documenti come clausole, dettagli della polizza e dati del cliente.',
-    tips: [
-      'Questa fase è ottimizzata per l\'identificazione di termini assicurativi.',
-      'L\'intelligenza artificiale riconosce pattern comuni nei documenti assicurativi.',
-      'Le relazioni tra diversi documenti vengono analizzate per coerenza.'
-    ]
-  },
-  'writer': {
-    title: 'Generazione Bozza',
-    description: 'L\'AI Writer sta creando una bozza professionale del report basata sui documenti analizzati.',
-    tips: [
-      'La bozza segue standard e best practices del settore assicurativo.',
-      'Il contenuto viene strutturato in sezioni logiche per facilità di lettura.',
-      'Vengono generate spiegazioni per termini tecnici e clausole complesse.'
+    warnings: [
+      'I file non devono superare i 10MB ciascuno.',
+      'Documenti protetti da password non possono essere elaborati.'
     ],
-    actions: [
-      { label: 'Visualizza anteprima', description: 'Quando disponibile, potrai vedere l\'anteprima della bozza in tempo reale.' }
+    requirements: [
+      'È necessario caricare almeno un documento per procedere.'
     ]
   },
-  'reviewer': {
-    title: 'Revisione Qualità',
-    description: 'L\'AI Reviewer sta valutando la qualità e la completezza della bozza generata.',
+  extraction: {
+    title: 'Estrazione del Contenuto',
+    description: 'Stiamo estraendo le informazioni dai documenti caricati...',
     tips: [
-      'Il reviewer verifica che tutte le informazioni chiave siano incluse.',
-      'Controlla la correttezza delle informazioni rispetto ai documenti originali.',
-      'Valuta la chiarezza e la professionalità del linguaggio utilizzato.'
+      'Questo processo è automatico e può richiedere alcuni minuti.',
+      'La durata dipende dalla complessità e dal numero dei documenti.'
     ]
   },
-  'refinement': {
-    title: 'Raffinamento',
-    description: 'La bozza viene ottimizzata in base al feedback del Reviewer per migliorarne la qualità.',
+  analysis: {
+    title: 'Analisi dei Dati',
+    description: 'Stiamo analizzando le informazioni estratte per identificare le sezioni chiave per il report.',
     tips: [
-      'Questa fase può richiedere più iterazioni per documenti complessi.',
-      'Ogni iterazione migliora la qualità complessiva del report.',
-      'Il sistema applica automaticamente correzioni e miglioramenti.'
+      'Vengono riconosciuti automaticamente i dati fondamentali come sinistri, clausole, coperture.',
+      'Il sistema identifica anche le relazioni tra i diversi documenti.'
     ]
   },
-  'formatting': {
-    title: 'Formattazione',
-    description: 'Il sistema sta applicando una formattazione professionale al documento.',
+  writer: {
+    title: 'Generazione della Bozza',
+    description: 'L\'intelligenza artificiale sta generando una bozza del report con tutte le informazioni rilevanti.',
     tips: [
-      'Vengono applicati stili e intestazioni consistenti.',
-      'Le tabelle e i grafici vengono formattati per massima leggibilità.',
-      'Il documento segue standard professionali di layout.'
+      'La bozza seguirà la struttura standard dei report assicurativi.',
+      'Vengono inclusi solo i dati pertinenti per il report finale.'
     ]
   },
-  'finalization': {
-    title: 'Finalizzazione',
-    description: 'Il documento finale viene preparato per la consegna.',
+  reviewer: {
+    title: 'Revisione della Bozza',
+    description: 'Il sistema sta revisionando la bozza per verificarne la completezza e la correttezza.',
     tips: [
-      'Viene creato un indice e una struttura di navigazione.',
-      'I metadati del documento vengono aggiornati con informazioni rilevanti.',
-      'Il documento viene ottimizzato per la stampa e la visualizzazione digitale.'
+      'Questa fase migliora la qualità del report finale.',
+      'Vengono verificati il formato, il tono e la precisione dei dati.'
+    ]
+  },
+  refinement: {
+    title: 'Miglioramento del Report',
+    description: 'Ora puoi fornire istruzioni per migliorare il report generato.',
+    tips: [
+      'Inserisci istruzioni specifiche come "Aggiungi più dettagli sulla clausola X" o "Riorganizza la sezione Y".',
+      'Puoi richiedere modifiche multiple in un\'unica istruzione.',
+      'L\'AI cercherà di applicare tutte le modifiche richieste mantenendo la coerenza del documento.'
     ],
-    actions: [
-      { label: 'Anteprima', description: 'Puoi visualizzare un\'anteprima del documento finale prima di scaricarlo.' },
-      { label: 'Download', description: 'Quando pronto, potrai scaricare il documento in formato DOCX o PDF.' }
+    requirements: [
+      'Inserisci istruzioni chiare e specifiche per ottenere i migliori risultati.'
     ]
   },
-  // Default help for unknown stages
-  'default': {
-    title: 'Elaborazione in Corso',
-    description: 'Il sistema sta elaborando i tuoi documenti per generare un report professionale.',
+  formatting: {
+    title: 'Formattazione del Report',
+    description: 'Stiamo applicando la formattazione finale al report per renderlo professionale e pronto all\'uso.',
     tips: [
-      'Il tempo di elaborazione dipende dalla complessità e dal numero di documenti.',
-      'Potrai visualizzare e modificare il report una volta completato il processo.',
-      'Il sistema applica automaticamente best practices del settore assicurativo.'
+      'Viene applicato lo stile standard per i report assicurativi.',
+      'Vengono formattati correttamente intestazioni, tabelle e riferimenti.'
+    ]
+  },
+  finalization: {
+    title: 'Report Pronto',
+    description: 'Il tuo report è pronto per essere scaricato e utilizzato.',
+    tips: [
+      'Puoi scaricare il report in formato DOCX o PDF.',
+      'Il report è modificabile se scaricato in formato DOCX.'
     ]
   }
 };
 
-// Main component
-const ContextualHelp: React.FC = () => {
-  const [expanded, setExpanded] = useState<boolean>(false);
-  const [lastStage, setLastStage] = useState<string>('default');
-  const [showHint, setShowHint] = useState<boolean>(false);
-  const { activeTask } = useTask();
+interface ContextualHelpProps {
+  stage?: ProcessStage;
+  content?: HelpContent;
+  autoCollapse?: boolean;
+}
+
+export const ContextualHelp: React.FC<ContextualHelpProps> = ({
+  stage: propStage,
+  content: propContent,
+  autoCollapse = true
+}) => {
+  const theme = useTheme();
+  const { task } = useTask();
+  const [expanded, setExpanded] = useState(!autoCollapse);
+  const [currentStage, setCurrentStage] = useState<ProcessStage>(propStage || task.stage);
   
-  // Get current stage or default
-  const currentStage = activeTask?.stage || 'default';
+  // Use provided content or get content based on current stage
+  const content = propContent || helpContentByStage[currentStage];
   
-  // Show hint after 10 seconds of inactivity in a new stage
+  // Update when task stage changes
   useEffect(() => {
-    if (currentStage !== lastStage) {
-      setLastStage(currentStage);
-      setShowHint(false);
+    if (!propStage && task.stage !== currentStage) {
+      setCurrentStage(task.stage);
       
-      const timer = setTimeout(() => {
-        if (!expanded) {
-          setShowHint(true);
-        }
-      }, 10000);
-      
-      return () => clearTimeout(timer);
+      // Auto-expand when stage changes
+      if (autoCollapse) {
+        setExpanded(true);
+        
+        // Auto-collapse after 10 seconds
+        const timer = setTimeout(() => {
+          setExpanded(false);
+        }, 10000);
+        
+        return () => clearTimeout(timer);
+      }
     }
-  }, [currentStage, lastStage, expanded]);
-  
-  // Hide hint when help is expanded
-  useEffect(() => {
-    if (expanded) {
-      setShowHint(false);
-    }
-  }, [expanded]);
-  
-  // Get help content for current stage
-  const help = helpContent[currentStage] || helpContent.default;
+  }, [task.stage, currentStage, propStage, autoCollapse]);
   
   return (
-    <Box sx={{ position: 'relative', mb: 3 }}>
-      {/* Help button */}
-      <Box sx={{ position: 'absolute', top: -10, right: 10, zIndex: 10 }}>
-        <Tooltip title={expanded ? "Chiudi guida" : "Mostra guida"}>
-          <IconButton 
-            onClick={() => setExpanded(!expanded)}
-            color="primary"
-            sx={{ 
-              bgcolor: 'background.paper',
-              boxShadow: 1,
-              '&:hover': {
-                bgcolor: 'primary.50'
-              }
-            }}
-          >
-            {expanded ? <CloseIcon /> : <HelpOutlineIcon />}
-          </IconButton>
-        </Tooltip>
+    <Paper 
+      elevation={2} 
+      sx={{ 
+        p: 2, 
+        position: 'relative',
+        mb: 3,
+        bgcolor: theme.palette.background.paper,
+        borderLeft: `4px solid ${theme.palette.primary.main}`
+      }}
+    >
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <HelpIcon color="primary" sx={{ mr: 1 }} />
+          <Typography variant="h6">{content.title}</Typography>
+        </Box>
+        <IconButton onClick={() => setExpanded(!expanded)} size="small">
+          {expanded ? <ExpandIcon /> : <CollapseIcon />}
+        </IconButton>
       </Box>
       
-      {/* Hint notification */}
-      <Fade in={showHint} timeout={500}>
-        <Alert 
-          severity="info" 
-          icon={<LightbulbIcon />}
-          sx={{ 
-            position: 'absolute', 
-            top: -15, 
-            right: 60,
-            maxWidth: 250,
-            boxShadow: 2,
-            zIndex: 5
-          }}
-          onClose={() => setShowHint(false)}
-        >
-          Hai bisogno di aiuto con la fase di <strong>{help.title.toLowerCase()}</strong>?
-        </Alert>
-      </Fade>
-      
-      {/* Main help content */}
-      <Collapse in={expanded} timeout={300}>
-        <Paper
-          elevation={3}
-          sx={{
-            p: 3,
-            mt: 2,
-            borderRadius: 2,
-            borderLeft: '4px solid',
-            borderColor: 'primary.main'
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <InfoIcon color="primary" sx={{ mr: 1 }} />
-            <Typography variant="h6" color="primary" fontWeight="medium">
-              {help.title}
-            </Typography>
-          </Box>
-          
+      <Collapse in={expanded}>
+        <Box sx={{ mt: 2 }}>
           <Typography variant="body1" paragraph>
-            {help.description}
+            {content.description}
           </Typography>
           
-          <Divider sx={{ my: 2 }} />
-          
-          <Typography variant="subtitle2" gutterBottom color="text.secondary">
-            Suggerimenti utili:
-          </Typography>
-          
-          <Box component="ul" sx={{ pl: 2, mt: 1 }}>
-            {help.tips.map((tip, index) => (
-              <Typography component="li" variant="body2" key={index} sx={{ mb: 1 }}>
-                {tip}
-              </Typography>
-            ))}
-          </Box>
-          
-          {help.actions && help.actions.length > 0 && (
+          {content.tips.length > 0 && (
             <>
-              <Divider sx={{ my: 2 }} />
-              
-              <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                Azioni disponibili:
-              </Typography>
-              
-              <Box sx={{ mt: 1 }}>
-                {help.actions.map((action, index) => (
-                  <Box key={index} sx={{ mb: 1 }}>
-                    <Typography variant="body2" fontWeight="medium">
-                      {action.label}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {action.description}
-                    </Typography>
-                  </Box>
-                ))}
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <TipsIcon fontSize="small" color="primary" sx={{ mr: 0.5 }} />
+                <Typography variant="subtitle2">Suggerimenti</Typography>
               </Box>
+              <List dense disablePadding sx={{ mb: 2 }}>
+                {content.tips.map((tip, index) => (
+                  <ListItem key={index} disableGutters sx={{ py: 0.5 }}>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <CheckIcon fontSize="small" color="success" />
+                    </ListItemIcon>
+                    <ListItemText primary={tip} />
+                  </ListItem>
+                ))}
+              </List>
             </>
           )}
           
-          <Divider sx={{ my: 2 }} />
+          {content.warnings && content.warnings.length > 0 && (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <WarningIcon fontSize="small" color="warning" sx={{ mr: 0.5 }} />
+                <Typography variant="subtitle2">Avvertenze</Typography>
+              </Box>
+              <List dense disablePadding sx={{ mb: 2 }}>
+                {content.warnings.map((warning, index) => (
+                  <ListItem key={index} disableGutters sx={{ py: 0.5 }}>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <WarningIcon fontSize="small" color="warning" />
+                    </ListItemIcon>
+                    <ListItemText primary={warning} />
+                  </ListItem>
+                ))}
+              </List>
+            </>
+          )}
           
-          <Typography variant="body2" color="text.secondary">
-            Hai bisogno di ulteriore assistenza? <Link href="#" underline="hover">Consulta la guida completa</Link> o <Link href="#" underline="hover">contatta il supporto</Link>.
-          </Typography>
-        </Paper>
+          {content.requirements && content.requirements.length > 0 && (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <InfoIcon fontSize="small" color="info" sx={{ mr: 0.5 }} />
+                <Typography variant="subtitle2">Requisiti</Typography>
+              </Box>
+              <List dense disablePadding>
+                {content.requirements.map((requirement, index) => (
+                  <ListItem key={index} disableGutters sx={{ py: 0.5 }}>
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <ErrorIcon fontSize="small" color="info" />
+                    </ListItemIcon>
+                    <ListItemText primary={requirement} />
+                  </ListItem>
+                ))}
+              </List>
+            </>
+          )}
+        </Box>
       </Collapse>
-    </Box>
+    </Paper>
   );
 };
 

@@ -31,4 +31,5 @@ export { default as LoadingIndicator } from './LoadingIndicator';
 export { default as PDFPreview } from './PDFPreview';
 export { default as AgentInitializationTracker } from './AgentInitializationTracker';
 export { default as ReportPreview } from './ReportPreview';
-export { default as DownloadReport } from './DownloadReport'; 
+export { default as DownloadReport } from './DownloadReport';
+export { default as SentryDebug } from './SentryDebug'; 

@@ -18,6 +18,7 @@ import { store } from '../../store';
 import { beginTransaction, completeTransaction } from '../../store/reportSlice';
 import { v4 as uuidv4 } from 'uuid';
 import { ApiService } from './ApiService';
+import apiClient from '../api';
 
 /**
  * Additional information for report generation
@@ -145,13 +146,38 @@ interface ProgressCallback {
  * @interface
  */
 export interface ReportVersion {
-  id: string;
-  report_id: string;
+  version_id: string;
   version_number: number;
-  content: string;
   created_at: string;
-  created_by?: string;
-  changes_description?: string;
+  created_by: string;
+  created_by_ai: boolean;
+  changes_description: string;
+  content: string;
+}
+
+/**
+ * Define the report interface
+ * @interface
+ */
+export interface Report {
+  report_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  current_version: number;
+  status: 'draft' | 'review' | 'final';
+  content: string;
+  metadata: Record<string, any>;
+}
+
+/**
+ * Define the version history response
+ * @interface
+ */
+export interface VersionHistoryResponse {
+  report_id: string;
+  current_version: number;
+  versions: ReportVersion[];
 }
 
 /**
@@ -852,91 +878,117 @@ export class ReportService extends ApiService {
   }
 
   /**
-   * Update a report and optionally create a new version
-   * @param reportId - The ID of the report to update
-   * @param data - Data to update (title, content, etc.)
-   * @param createVersion - Whether to create a new version record (default: false)
-   * @param versionDescription - Optional description of changes in this version
-   * @returns Promise resolving to the updated report
+   * Get a report by its ID
    */
-  public async updateReportWithVersion(reportId: string, content: string, description?: string): Promise<ReportVersion> {
+  async getReport(reportId: string): Promise<Report> {
     try {
-      const response = await this.client.put<ReportVersion>('/api/edit/update-with-version', {
-        reportId,
+      return await apiClient.get<Report>(`/api/reports/${reportId}`);
+    } catch (error) {
+      logger.error('Error fetching report:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all versions of a report
+   */
+  async getReportVersions(reportId: string): Promise<VersionHistoryResponse> {
+    try {
+      return await apiClient.get<VersionHistoryResponse>(`/api/reports/${reportId}/versions`);
+    } catch (error) {
+      logger.error('Error fetching report versions:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update a report, optionally creating a new version
+   */
+  async updateReportWithVersion(
+    reportId: string, 
+    content: string,
+    description: string = 'Updated report content'
+  ): Promise<Report> {
+    try {
+      return await apiClient.put<Report>(`/api/reports/${reportId}`, {
         content,
+        create_version: true,
         changes_description: description
       });
-      return response.data;
     } catch (error) {
+      logger.error('Error updating report:', error);
       throw error;
     }
   }
 
   /**
-   * Get version history for a report
-   * @param reportId - The ID of the report
-   * @returns Promise resolving to the list of report versions
+   * Revert to a specific version of a report
    */
-  public async getReportVersions(reportId: string): Promise<ReportVersionResponse> {
+  async revertToVersion(reportId: string, versionNumber: number): Promise<Report> {
     try {
-      const response = await this.client.get<ReportVersionResponse>('/api/edit/versions', {
-        params: { reportId }
+      return await apiClient.post<Report>(`/api/reports/${reportId}/revert`, {
+        version_number: versionNumber
       });
-      return response.data;
     } catch (error) {
+      logger.error('Error reverting to version:', error);
       throw error;
     }
   }
 
   /**
-   * Get a specific version of a report
-   * @param reportId - The ID of the report
-   * @param versionNumber - The version number to retrieve
-   * @returns Promise resolving to the report version
+   * Submit report for refinement with AI
    */
-  public async getReportVersion(reportId: string, versionNumber: number): Promise<ReportVersion> {
+  async refineReport(
+    reportId: string, 
+    content: string, 
+    instructions: string
+  ): Promise<{ task_id: string }> {
     try {
-      const response = await this.client.get<ReportVersion>('/api/edit/version', {
-        params: { reportId, versionNumber }
-      });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Revert a report to a previous version
-   * @param reportId - The ID of the report
-   * @param versionNumber - The version number to revert to
-   * @returns Promise resolving to the updated report
-   */
-  public async revertToVersion(reportId: string, versionNumber: number): Promise<ReportVersion> {
-    try {
-      const response = await this.client.post<ReportVersion>('/api/edit/revert', {
-        reportId,
-        versionNumber
-      });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Refine a report with AI assistance
-   * @param reportId - The ID of the report
-   * @param instructions - Instructions for refining the report
-   * @returns Promise resolving to the refined report data
-   */
-  public async refineReportWithAI(reportId: string, instructions: string): Promise<{ taskId: string }> {
-    try {
-      const response = await this.client.post<{ taskId: string }>('/api/agent-loop/refine-report', {
-        reportId,
+      return await apiClient.post<{ task_id: string }>('/api/agent-loop/refine-report', {
+        report_id: reportId,
+        content,
         instructions
       });
-      return response.data;
     } catch (error) {
+      logger.error('Error submitting report for refinement:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export report to a specified format
+   */
+  async exportReport(
+    reportId: string, 
+    format: 'docx' | 'pdf' = 'docx'
+  ): Promise<{ download_url: string }> {
+    try {
+      return await apiClient.get<{ download_url: string }>(
+        `/api/reports/${reportId}/export?format=${format}`
+      );
+    } catch (error) {
+      logger.error('Error exporting report:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Download a report directly
+   */
+  async downloadReport(
+    reportId: string, 
+    format: 'docx' | 'pdf' = 'docx',
+    onProgress?: (progress: number) => void
+  ): Promise<void> {
+    try {
+      const fileName = `report-${reportId}.${format}`;
+      await apiClient.downloadFile(
+        `/api/reports/${reportId}/download?format=${format}`,
+        fileName,
+        onProgress
+      );
+    } catch (error) {
+      logger.error('Error downloading report:', error);
       throw error;
     }
   }

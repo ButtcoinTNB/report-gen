@@ -3,20 +3,24 @@
  */
 
 /**
- * Check if code is running in a browser environment
- * This safely detects if window and navigator are available
+ * Determine if code is running in a browser environment
  */
-export const isBrowser = typeof window !== 'undefined' && typeof navigator !== 'undefined';
+export const isBrowser = typeof window !== 'undefined';
 
 /**
- * Check if code is running in a server environment (Node.js)
+ * Determine if code is running in a server environment
  */
 export const isServer = !isBrowser;
 
 /**
- * Check if code is running in development mode
+ * Determine if we're in a development environment
  */
 export const isDevelopment = process.env.NODE_ENV === 'development';
+
+/**
+ * Determine if we're in a production environment
+ */
+export const isProduction = process.env.NODE_ENV === 'production';
 
 /**
  * Checks if we should use mock data instead of real API/Supabase calls
@@ -27,22 +31,32 @@ export const isDevelopment = process.env.NODE_ENV === 'development';
 export const useMocks = isDevelopment && process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
 
 /**
- * Safe wrapper for accessing browser APIs
- * @param callback Function that uses browser APIs
- * @param fallback Value to return when not in browser
+ * Safely access window object (only in browser)
+ * @param callback Function to execute with window object
+ * @param fallback Fallback value if not in browser
  */
-export function browserOnly<T>(callback: () => T, fallback: T): T {
-  return isBrowser ? callback() : fallback;
+export function withWindow<T>(callback: (w: Window) => T, fallback: T): T {
+  if (isBrowser) {
+    return callback(window);
+  }
+  return fallback;
 }
 
 /**
- * Safe wrapper for running browser-only code
- * @param callback Function to execute only in browser environment
+ * Safely access localStorage (only in browser)
+ * @param callback Function to execute with localStorage
+ * @param fallback Fallback value if not in browser
  */
-export function runInBrowser(callback: () => void): void {
-  if (isBrowser) {
-    callback();
+export function withLocalStorage<T>(callback: (storage: Storage) => T, fallback: T): T {
+  if (isBrowser && window.localStorage) {
+    try {
+      return callback(window.localStorage);
+    } catch (error) {
+      console.error('localStorage error:', error);
+      return fallback;
+    }
   }
+  return fallback;
 }
 
 /**
@@ -73,4 +87,17 @@ export const getClientLocale = (): string => {
   } catch {
     return 'it-IT';
   }
-}; 
+};
+
+/**
+ * Get base URL for API calls
+ */
+export function getApiBaseUrl(): string {
+  if (isServer) {
+    // Server-side rendering - use the environment variable
+    return process.env.NEXT_PUBLIC_API_URL || '';
+  }
+  
+  // Client-side - use the public environment variable
+  return process.env.NEXT_PUBLIC_API_URL || '';
+} 
