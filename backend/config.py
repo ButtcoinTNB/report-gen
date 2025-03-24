@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import sys
 from typing import List, Optional
 from functools import lru_cache
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,13 +18,9 @@ load_dotenv()
 # If running on Render with backend as root, we need to adjust paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Import logger
-try:
-    from utils.error_handler import logger
-except ImportError:
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
+# Set up logger directly instead of importing from error_handler to avoid circular imports
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Check if we're in production mode
 IS_PRODUCTION = os.getenv("NODE_ENV") == "production"
