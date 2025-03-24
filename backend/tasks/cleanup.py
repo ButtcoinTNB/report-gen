@@ -1,7 +1,15 @@
 from datetime import datetime
 import asyncio
-from ..utils.supabase_helper import create_supabase_client
-from ..config import get_settings
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from utils.supabase_helper import create_supabase_client
+    from config import get_settings
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.utils.supabase_helper import create_supabase_client
+    from backend.config import get_settings
 
 async def cleanup_expired_share_links():
     """

@@ -5,7 +5,14 @@ import asyncio
 from collections import defaultdict
 from typing import Dict, Tuple, Optional
 from datetime import datetime, timedelta
-from ..utils.monitoring import logger
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from utils.monitoring import logger
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.utils.monitoring import logger
 
 class RateLimiter:
     def __init__(

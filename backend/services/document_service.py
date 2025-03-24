@@ -3,12 +3,23 @@ from urllib.parse import urlparse
 import aiohttp
 import PyPDF2
 from io import BytesIO
-from ..models import DocumentMetadata
-from ..config import get_settings
-from ..models.document import DocumentMetadataUpdate
-from ..database import get_db
 from datetime import datetime
-from ..storage import get_storage
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models import DocumentMetadata
+    from config import get_settings
+    from models.document import DocumentMetadataUpdate
+    from database import get_db
+    from storage import get_storage
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.models import DocumentMetadata
+    from backend.config import get_settings
+    from backend.models.document import DocumentMetadataUpdate
+    from backend.database import get_db
+    from backend.storage import get_storage
 
 class DocumentService:
     def __init__(self, db=None, storage=None):

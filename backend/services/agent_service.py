@@ -5,10 +5,19 @@ import uuid
 import logging
 from datetime import datetime
 
-from ..models.report import ReportCreate, Report
-from ..models.agent import AgentRequest, AgentResponse
-from ..config import get_settings
-from .task_manager import task_manager
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models.report import ReportCreate, Report
+    from models.agent import AgentRequest, AgentResponse
+    from config import get_settings
+    from services.task_manager import task_manager
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.models.report import ReportCreate, Report
+    from backend.models.agent import AgentRequest, AgentResponse
+    from backend.config import get_settings
+    from backend.services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 

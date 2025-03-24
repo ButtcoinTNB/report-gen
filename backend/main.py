@@ -77,12 +77,11 @@ from fastapi.staticfiles import StaticFiles
 # Import API routes and config
 from api import upload, generate, format, edit, download, agent_loop, utils, documents, reports, templates, metrics
 from api.upload_chunked import router as upload_chunked_router
-from config import settings
+from config import settings, get_settings
 from api.agent_loop import router as agent_loop_router
 from api.cleanup import router as cleanup_router
-from .config import get_settings
-from .utils.supabase_helper import initialize_supabase_tables, cleanup_database, cleanup_expired_connections, close_all_connections
-from .tasks.cleanup import start_cleanup_tasks
+from utils.supabase_helper import initialize_supabase_tables, cleanup_database, cleanup_expired_connections, close_all_connections
+from tasks.cleanup import start_cleanup_tasks
 from api import share
 
 # Import utilities

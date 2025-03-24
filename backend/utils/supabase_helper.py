@@ -11,10 +11,17 @@ from contextlib import contextmanager, asynccontextmanager
 from typing import Optional, Dict, Any, Tuple
 from functools import lru_cache
 from supabase import create_client, Client
-from config import settings
-from utils.error_handler import logger
-from ..config import get_settings
 from datetime import datetime, timedelta
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from config import settings, get_settings
+    from utils.error_handler import logger
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.config import settings, get_settings
+    from backend.utils.error_handler import logger
 
 # Configure logger
 logger = logging.getLogger(__name__)

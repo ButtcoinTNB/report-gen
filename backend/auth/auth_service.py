@@ -4,7 +4,14 @@ Authentication service for handling user authentication with Supabase.
 
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from ..utils.supabase_client import supabase
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from utils.supabase_client import supabase
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.utils.supabase_client import supabase
 
 security = HTTPBearer()
 

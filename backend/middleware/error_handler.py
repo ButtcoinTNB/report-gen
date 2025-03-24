@@ -4,7 +4,14 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from typing import Union, Dict, Any
 import traceback
-from ..utils.monitoring import logger
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from utils.monitoring import logger
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.utils.monitoring import logger
 
 class ErrorResponse:
     def __init__(

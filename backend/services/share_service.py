@@ -1,10 +1,20 @@
 from typing import Optional
 from datetime import datetime, timedelta
 import secrets
-from ..models import ShareLink, ShareLinkResponse
-from ..config import get_settings
-from ..utils.validation import validate_token
-from ..utils.supabase_helper import create_supabase_client
+
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from models import ShareLink, ShareLinkResponse
+    from config import get_settings
+    from utils.validation import validate_token
+    from utils.supabase_helper import create_supabase_client
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.models import ShareLink, ShareLinkResponse
+    from backend.config import get_settings
+    from backend.utils.validation import validate_token
+    from backend.utils.supabase_helper import create_supabase_client
 
 class ShareService:
     def __init__(self):
