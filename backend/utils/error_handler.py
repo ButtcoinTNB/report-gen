@@ -34,6 +34,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Define custom status code that's not in starlette.status
+HTTP_499_CLIENT_CLOSED_REQUEST = 499
+
 # Exception mapping for converting standard exceptions to our custom exceptions
 EXCEPTION_MAPPING = {
     ValidationError: lambda e: ValidationException(str(e), details=str(e.errors())),
@@ -129,7 +132,7 @@ class ErrorHandler:
             "message": "Resource conflict",
         },
         "cancelled": {
-            "status_code": status.HTTP_499_CLIENT_CLOSED_REQUEST,
+            "status_code": HTTP_499_CLIENT_CLOSED_REQUEST,
             "retryable": False,
             "message": "Operation cancelled",
         },
