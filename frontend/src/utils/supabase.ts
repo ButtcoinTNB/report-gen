@@ -13,6 +13,25 @@ const CACHE_DURATION = {
   LONG: 1800, // 30 minutes
 };
 
+// Helper to generate random IDs that works in both browser and Node environments
+const generateUUID = () => {
+  if (isBrowser && window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID();
+  } else if (isServer) {
+    try {
+      // Using require to avoid bundling crypto in client
+      const nodeCrypto = require('crypto');
+      return nodeCrypto.randomUUID();
+    } catch (error) {
+      // Fallback for older Node versions or if crypto isn't available
+      return `id-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    }
+  } else {
+    // Fallback for browsers without crypto support
+    return `id-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+  }
+};
+
 // Type for metadata structure stored in Supabase
 export interface DocumentMetadata {
   size: number;
@@ -245,9 +264,7 @@ export const shareService = {
     expirationDate.setDate(expirationDate.getDate() + expirationDays);
     
     // Generate a random token
-    const token = isBrowser ? 
-      crypto.randomUUID() : 
-      require('crypto').randomUUID();
+    const token = generateUUID();
     
     // Insert the share link into Supabase
     const { error } = await supabase

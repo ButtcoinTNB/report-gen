@@ -79,13 +79,11 @@ const nextConfig = {
     }
     return config;
   },
-  // Enable Automatic Static Optimization where possible
-  // This will pre-render pages to static HTML when possible
+  // Experimental features compatible with Next.js 12.3.4
   experimental: {
-    optimizeCss: true, // Optimize CSS
-    optimizeImages: true, // Optimize images
-    scrollRestoration: true, // Restore scroll position on navigation
-    workerThreads: true, // Use worker threads for improved performance
+    // Remove incompatible options
+    scrollRestoration: true,
+    // Some enabled options might cause warnings but should still work
   }
 };
 

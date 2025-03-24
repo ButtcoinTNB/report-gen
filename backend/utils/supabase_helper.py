@@ -10,6 +10,8 @@ from typing import Optional
 from supabase import create_client, Client
 from config import settings
 from utils.error_handler import logger
+from ..config import get_settings
+from datetime import datetime
 
 # Define specific exceptions for better error handling
 class SupabaseConnectionError(Exception):
@@ -132,3 +134,91 @@ def get_supabase_storage_url(bucket: str, path: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error getting storage URL for {bucket}/{path}: {str(e)}")
         return None 
+
+def create_supabase_client() -> Client:
+    """
+    Create and return a configured Supabase client.
+    
+    Returns:
+        Supabase Client instance
+    
+    Raises:
+        Exception: If Supabase configuration is missing or invalid
+    """
+    settings = get_settings()
+    
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        raise Exception("Supabase configuration is missing")
+        
+    try:
+        return create_client(
+            supabase_url=settings.SUPABASE_URL,
+            supabase_key=settings.SUPABASE_KEY
+        )
+    except Exception as e:
+        raise Exception(f"Failed to create Supabase client: {str(e)}")
+
+async def initialize_supabase_tables():
+    """
+    Initialize required Supabase tables if they don't exist.
+    This should be called during application startup.
+    """
+    client = create_supabase_client()
+    
+    try:
+        # Create share_links table if it doesn't exist
+        await client.rpc(
+            'create_share_links_table',
+            {
+                'table_name': 'share_links',
+                'columns': '''
+                    token text primary key,
+                    document_id text not null,
+                    expires_at timestamp with time zone not null,
+                    max_downloads integer not null,
+                    remaining_downloads integer not null,
+                    created_at timestamp with time zone not null default now(),
+                    last_downloaded_at timestamp with time zone
+                '''
+            }
+        ).execute()
+        
+        # Create indexes for better query performance
+        await client.rpc(
+            'create_index',
+            {
+                'table_name': 'share_links',
+                'index_name': 'idx_share_links_expires_at',
+                'column_name': 'expires_at'
+            }
+        ).execute()
+        
+        await client.rpc(
+            'create_index',
+            {
+                'table_name': 'share_links',
+                'index_name': 'idx_share_links_document_id',
+                'column_name': 'document_id'
+            }
+        ).execute()
+        
+    except Exception as e:
+        # Log the error but don't raise it, as the tables might already exist
+        print(f"Error initializing Supabase tables: {str(e)}")
+
+async def cleanup_database():
+    """
+    Perform any necessary database cleanup operations.
+    This should be called during application shutdown.
+    """
+    client = create_supabase_client()
+    
+    try:
+        # Delete expired share links
+        now = datetime.utcnow()
+        await client.table("share_links").delete().lt(
+            "expires_at", now.isoformat()
+        ).execute()
+        
+    except Exception as e:
+        print(f"Error cleaning up database: {str(e)}") 

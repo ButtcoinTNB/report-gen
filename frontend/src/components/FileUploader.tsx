@@ -19,6 +19,7 @@ import { UploadService, CHUNKED_UPLOAD_SIZE_THRESHOLD } from '../services/api/Up
 import { logger } from '../utils/logger';
 import UploadProgressTracker from './UploadProgressTracker';
 import { formatErrorForUser } from '../utils/errorHandler';
+import { generateUUID } from '../utils/common';
 
 // Define the FileUploader props interface
 export interface FileUploaderProps {
@@ -86,7 +87,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({
       uploadedFiles: 0,
       error: null,
       uploadStartTime: Date.now(),
-      uploadSessionId: crypto.randomUUID?.() || `session-${Date.now()}`
+      uploadSessionId: generateUUID()
     }));
 
     try {

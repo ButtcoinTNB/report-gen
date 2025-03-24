@@ -1,340 +1,265 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Box, 
-  Paper, 
-  Typography, 
-  IconButton, 
-  Tooltip,
-  Divider,
-  Pagination,
-  CircularProgress,
-  Skeleton,
-  Alert,
-  useTheme,
-  useMediaQuery,
-  Button
-} from '@mui/material';
-import ZoomInIcon from '@mui/icons-material/ZoomIn';
-import ZoomOutIcon from '@mui/icons-material/ZoomOut';
-import FullscreenIcon from '@mui/icons-material/Fullscreen';
-import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
-import PrintIcon from '@mui/icons-material/Print';
-import NavigateNextIcon from '@mui/icons-material/NavigateNext';
-import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
-import { isBrowser } from '../utils/environment';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
+import { Box, IconButton, Typography, CircularProgress, Alert, Button } from '@mui/material';
+import {
+  Fullscreen as FullscreenIcon,
+  FullscreenExit as FullscreenExitIcon,
+  NavigateBefore as NavigateBeforeIcon,
+  NavigateNext as NavigateNextIcon,
+  Refresh as RefreshIcon
+} from '@mui/icons-material';
+import { ZoomIn, ZoomOut } from '@mui/icons-material';
+import { PREVIEW, UI, ERROR_MESSAGES } from '../constants/app';
+import { debounce } from '../utils/common';
 
 interface DocumentPreviewProps {
-  previewUrl?: string;
-  title?: string;
-  isLoading?: boolean;
-  error?: string | null;
-  onRefresh?: () => void;
+  previewUrl: string;
+  title: string;
+  isLoading: boolean;
+  error: string;
+  onRefresh: () => Promise<void>;
+  className?: string;
 }
 
-/**
- * A high-fidelity document preview component with print layout view and navigation controls
- */
-const DocumentPreview: React.FC<DocumentPreviewProps> = ({
+export const DocumentPreview: React.FC<DocumentPreviewProps> = ({
   previewUrl,
-  title = 'Report Preview',
-  isLoading = false,
-  error = null,
-  onRefresh
+  title,
+  isLoading,
+  error,
+  onRefresh,
+  className
 }) => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [zoom, setZoom] = useState(100);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+
   const previewRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState<number>(100);
-  const [page, setPage] = useState<number>(1);
-  const [totalPages, setTotalPages] = useState<number>(1);
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [isImageLoaded, setIsImageLoaded] = useState<boolean>(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Toggle fullscreen mode
-  const toggleFullscreen = () => {
-    if (!isBrowser) return;
-    
-    if (!document.fullscreenElement) {
-      if (previewRef.current?.requestFullscreen) {
-        previewRef.current.requestFullscreen()
-          .then(() => setIsFullscreen(true))
-          .catch(err => console.error(`Error attempting to enable fullscreen: ${err.message}`));
+  const handleZoomIn = useCallback(debounce(() => {
+    setZoom(prev => Math.min(prev + PREVIEW.ZOOM_STEP, PREVIEW.MAX_ZOOM));
+  }, UI.DEBOUNCE_DELAY), []);
+
+  const handleZoomOut = useCallback(debounce(() => {
+    setZoom(prev => Math.max(prev - PREVIEW.ZOOM_STEP, PREVIEW.MIN_ZOOM));
+  }, UI.DEBOUNCE_DELAY), []);
+
+  const handlePageChange = useCallback((delta: number) => {
+    setCurrentPage(prev => {
+      const newPage = prev + delta;
+      return Math.max(1, Math.min(newPage, totalPages));
+    });
+  }, [totalPages]);
+
+  const handleFullscreen = useCallback(async () => {
+    if (!previewRef.current) return;
+
+    try {
+      if (!isFullscreen) {
+        await previewRef.current.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
       }
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen()
-          .then(() => setIsFullscreen(false))
-          .catch(err => console.error(`Error attempting to exit fullscreen: ${err.message}`));
-      }
+    } catch (err) {
+      console.error('Fullscreen error:', err);
     }
-  };
+  }, [isFullscreen]);
 
-  // Listen for fullscreen change events
   useEffect(() => {
-    if (!isBrowser) return;
-
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
 
-  // Increase zoom level
-  const zoomIn = () => {
-    setZoom(prev => Math.min(prev + 10, 200));
-  };
-
-  // Decrease zoom level
-  const zoomOut = () => {
-    setZoom(prev => Math.max(prev - 10, 50));
-  };
-
-  // Navigate to previous page
-  const prevPage = () => {
-    setPage(prev => Math.max(prev - 1, 1));
-  };
-
-  // Navigate to next page
-  const nextPage = () => {
-    setPage(prev => Math.min(prev + 1, totalPages));
-  };
-
-  // Handle page change
-  const handlePageChange = (_: React.ChangeEvent<unknown>, value: number) => {
-    setPage(value);
-  };
-
-  // Print preview
-  const handlePrint = () => {
-    if (!isBrowser) return;
-    
-    const printWindow = window.open(previewUrl, '_blank');
-    if (printWindow) {
-      printWindow.onload = () => {
-        printWindow.print();
-      };
-    }
-  };
-
-  // Mock detection of total pages (in a real implementation, this would come from the backend)
   useEffect(() => {
+    const fetchDocumentMetadata = async () => {
+      try {
+        const response = await fetch(`/api/documents/metadata?url=${encodeURIComponent(previewUrl)}`);
+        if (!response.ok) throw new Error('Failed to load document metadata');
+        
+        const data = await response.json();
+        setTotalPages(data.pageCount || 1);
+      } catch (err) {
+        console.error('Error fetching document metadata:', err);
+      }
+    };
+
     if (previewUrl) {
-      // Simulate fetching document metadata (in reality, this would be an API call)
-      const mockFetchMetadata = () => {
-        setTimeout(() => {
-          // Mock response - in a real implementation, get this from the document metadata
-          setTotalPages(Math.floor(Math.random() * 5) + 1);
-        }, 1000);
-      };
-      
-      mockFetchMetadata();
+      fetchDocumentMetadata();
     }
   }, [previewUrl]);
 
-  // Handle image load
-  const handleImageLoad = () => {
-    setIsImageLoaded(true);
+  useEffect(() => {
+    const handleKeyboard = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') handlePageChange(-1);
+      if (e.key === 'ArrowRight') handlePageChange(1);
+      if (e.key === 'Escape' && isFullscreen) handleFullscreen();
+    };
+
+    window.addEventListener('keydown', handleKeyboard);
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  }, [handlePageChange, isFullscreen, handleFullscreen]);
+
+  const handlePreviousPage = () => {
+    setCurrentPage((prev) => Math.max(1, prev - 1));
   };
 
-  return (
-    <Paper 
-      elevation={3} 
-      sx={{ 
-        p: 2, 
-        my: 2, 
-        bgcolor: 'background.paper',
-        height: isFullscreen ? '100vh' : 'auto',
-        display: 'flex',
-        flexDirection: 'column'
-      }}
-      ref={previewRef}
-    >
-      {/* Preview header with title and controls */}
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        mb: 2
-      }}>
-        <Typography variant="h6" component="h2">
-          {title}
-        </Typography>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          {/* Zoom controls */}
-          <Tooltip title="Zoom out">
-            <IconButton onClick={zoomOut} size="small" disabled={zoom <= 50}>
-              <ZoomOutIcon />
-            </IconButton>
-          </Tooltip>
-          
-          <Typography variant="body2" sx={{ mx: 1 }}>
-            {zoom}%
-          </Typography>
-          
-          <Tooltip title="Zoom in">
-            <IconButton onClick={zoomIn} size="small" disabled={zoom >= 200}>
-              <ZoomInIcon />
-            </IconButton>
-          </Tooltip>
-          
-          {/* Print button */}
-          <Tooltip title="Print">
-            <IconButton 
-              onClick={handlePrint} 
-              size="small" 
-              disabled={!previewUrl || isLoading}
-              sx={{ ml: 1 }}
-            >
-              <PrintIcon />
-            </IconButton>
-          </Tooltip>
-          
-          {/* Fullscreen toggle */}
-          <Tooltip title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
-            <IconButton 
-              onClick={toggleFullscreen} 
-              size="small"
-              sx={{ ml: 1 }}
-            >
-              {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Box>
-      
-      <Divider sx={{ mb: 2 }} />
-      
-      {/* Error message */}
-      {error && (
-        <Alert 
-          severity="error" 
-          sx={{ mb: 2 }}
-          action={
-            onRefresh && (
-              <Button color="inherit" size="small" onClick={onRefresh}>
-                Retry
-              </Button>
-            )
-          }
-        >
-          {error}
-        </Alert>
-      )}
-      
-      {/* Preview content */}
-      <Box 
-        sx={{ 
-          flex: 1,
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+  };
+
+  if (error) {
+    return (
+      <Box
+        sx={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          bgcolor: theme.palette.grey[100],
+          p: 4,
+          gap: 2,
+          bgcolor: 'background.paper',
           borderRadius: 1,
-          p: 2,
-          overflow: 'auto',
-          minHeight: isFullscreen ? 'calc(100vh - 140px)' : '500px'
+        }}
+        className={className}
+      >
+        <Typography color="error" gutterBottom>
+          {error}
+        </Typography>
+        <Button onClick={onRefresh} startIcon={<RefreshIcon />}>
+          Retry
+        </Button>
+      </Box>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 4,
+          bgcolor: 'background.paper',
+          borderRadius: 1,
+        }}
+        className={className}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Box
+      ref={containerRef}
+      className={className}
+      sx={{
+        position: 'relative',
+        width: '100%',
+        height: isFullscreen ? '100vh' : PREVIEW.DEFAULT_HEIGHT,
+        overflow: 'hidden',
+        bgcolor: 'background.paper',
+        borderRadius: 1,
+        boxShadow: 1
+      }}
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          p: 1,
+          borderBottom: 1,
+          borderColor: 'divider',
         }}
       >
-        {isLoading ? (
-          // Loading skeleton
-          <Box sx={{ width: '100%', maxWidth: '210mm', mx: 'auto' }}>
-            <Skeleton variant="rectangular" width="100%" height={isFullscreen ? '80vh' : '500px'} />
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-              <CircularProgress size={24} sx={{ mr: 1 }} />
-              <Typography>Loading preview...</Typography>
-            </Box>
-          </Box>
-        ) : previewUrl ? (
-          // Document preview
-          <>
-            {!isImageLoaded && (
-              <Box sx={{ position: 'absolute', zIndex: 1 }}>
-                <CircularProgress />
-              </Box>
-            )}
-            <Box 
-              sx={{ 
-                width: `${zoom}%`, 
-                maxWidth: zoom > 100 ? 'none' : '210mm',
-                boxShadow: 3,
-                transition: 'width 0.3s ease',
-                background: 'white',
-                border: `1px solid ${theme.palette.grey[300]}`
-              }}
-            >
-              <img 
-                src={`${previewUrl}?page=${page}`} 
-                alt={`Document preview page ${page}`}
-                style={{ 
-                  width: '100%', 
-                  height: 'auto',
-                  display: isImageLoaded ? 'block' : 'none'
-                }}
-                onLoad={handleImageLoad}
-              />
-            </Box>
-          </>
-        ) : (
-          // No preview available
-          <Box sx={{ textAlign: 'center' }}>
-            <Typography variant="body1" color="text.secondary">
-              No preview available.
-            </Typography>
-            {onRefresh && (
-              <Button 
-                variant="outlined" 
-                color="primary" 
-                onClick={onRefresh}
-                sx={{ mt: 2 }}
-              >
-                Generate Preview
-              </Button>
-            )}
-          </Box>
-        )}
-      </Box>
-      
-      {/* Page navigation */}
-      {previewUrl && totalPages > 1 && (
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center',
-          mt: 2,
-          p: 1,
-          backgroundColor: theme.palette.background.paper
-        }}>
-          <IconButton onClick={prevPage} disabled={page <= 1}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <IconButton
+            onClick={handlePreviousPage}
+            disabled={currentPage <= 1}
+            size="small"
+          >
             <NavigateBeforeIcon />
           </IconButton>
-          
-          {!isMobile ? (
-            <Pagination 
-              count={totalPages} 
-              page={page} 
-              onChange={handlePageChange}
-              sx={{ mx: 2 }}
-              color="primary"
-            />
-          ) : (
-            <Typography variant="body2" sx={{ mx: 2 }}>
-              Page {page} of {totalPages}
-            </Typography>
-          )}
-          
-          <IconButton onClick={nextPage} disabled={page >= totalPages}>
+          <Typography variant="body2">
+            Page {currentPage} of {totalPages}
+          </Typography>
+          <IconButton
+            onClick={handleNextPage}
+            disabled={currentPage >= totalPages}
+            size="small"
+          >
             <NavigateNextIcon />
           </IconButton>
         </Box>
-      )}
-    </Paper>
+        <IconButton onClick={handleFullscreen} size="small">
+          {isFullscreen ? <FullscreenExitIcon /> : <FullscreenIcon />}
+        </IconButton>
+      </Box>
+
+      <Box
+        ref={previewRef}
+        sx={{
+          position: 'relative',
+          width: '100%',
+          height: isFullscreen ? '100vh' : '70vh',
+          bgcolor: 'grey.100',
+        }}
+      >
+        <iframe
+          src={`${previewUrl}#page=${currentPage}`}
+          title={title}
+          width="100%"
+          height="100%"
+          style={{ border: 'none' }}
+        />
+      </Box>
+
+      <Box
+        sx={{
+          position: 'absolute',
+          bottom: 16,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          bgcolor: 'rgba(255, 255, 255, 0.9)',
+          borderRadius: 1,
+          padding: 1,
+          boxShadow: 1
+        }}
+      >
+        <IconButton
+          onClick={() => handleZoomOut()}
+          disabled={zoom <= PREVIEW.MIN_ZOOM}
+          aria-label="Zoom out"
+        >
+          <ZoomOut />
+        </IconButton>
+        
+        <Typography variant="body2" sx={{ minWidth: 60, textAlign: 'center' }}>
+          {zoom}%
+        </Typography>
+        
+        <IconButton
+          onClick={() => handleZoomIn()}
+          disabled={zoom >= PREVIEW.MAX_ZOOM}
+          aria-label="Zoom in"
+        >
+          <ZoomIn />
+        </IconButton>
+      </Box>
+    </Box>
   );
 };
 

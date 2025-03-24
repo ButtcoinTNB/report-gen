@@ -1,21 +1,21 @@
 from fastapi import APIRouter, HTTPException, Body
 import datetime
-from typing import Dict, Any
-from uuid import UUID
+from typing import Dict, Any, List
+from uuid import UUID, uuid4
 from pydantic import UUID4, BaseModel
 from datetime import datetime
 
 # Use imports with fallbacks for better compatibility across environments
 try:
     # First try imports without 'backend.' prefix (for Render)
-    from models import ReportUpdate, Report
+    from models import ReportUpdate, Report, ReportVersion, ReportVersionCreate, ReportVersionResponse
     from services.ai_service import refine_report_text
     from utils.supabase_helper import create_supabase_client
     from utils.error_handler import api_error_handler
     from api.schemas import APIResponse
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from models import ReportUpdate, Report
+    from models import ReportUpdate, Report, ReportVersion, ReportVersionCreate, ReportVersionResponse
     from services.ai_service import refine_report_text
     from utils.supabase_helper import create_supabase_client
     from utils.error_handler import api_error_handler
@@ -31,13 +31,16 @@ class UpdateReportResponse(BaseModel):
     content: str
     is_finalized: bool
     updated_at: str
+    current_version: int
 
 
-@router.put("/{report_id}", response_model=APIResponse[UpdateReportResponse])
+@router.put("/{report_id}", response_model=APIResponse[Report])
 @api_error_handler
 async def update_report(
     report_id: UUID4,
     data: ReportUpdate,
+    create_version: bool = False,
+    version_description: str = None,
 ):
     """
     Update a generated report with manual edits
@@ -45,11 +48,12 @@ async def update_report(
     Args:
         report_id: UUID of the report to update
         data: Update data containing title, content, and finalization status
+        create_version: Whether to create a new version record
+        version_description: Description of changes in this version
         
     Returns:
         Standardized API response with updated report data
     """
-    # Initialize Supabase client
     supabase = create_supabase_client()
     
     # Retrieve report from database
@@ -60,15 +64,29 @@ async def update_report(
     
     report = response.data[0]
     
-    # Prepare update data
-    update_data = {}
-    if data.title is not None:
-        update_data["title"] = data.title
-    if data.content is not None:
-        update_data["content"] = data.content
-    if data.is_finalized is not None:
-        update_data["is_finalized"] = data.is_finalized
+    # Create a new version if requested
+    if create_version and data.content:
+        # Get current version number
+        current_version = report.get("current_version", 1)
+        new_version_number = current_version + 1
+        
+        # Create version record
+        version_data = ReportVersionCreate(
+            report_id=report_id,
+            version_number=new_version_number,
+            content=data.content,
+            changes_description=version_description,
+        )
+        
+        version_response = supabase.table("report_versions").insert(version_data.dict()).execute()
+        if not version_response.data:
+            raise HTTPException(status_code=500, detail="Failed to create version record")
+        
+        # Update current version number in the report
+        data.current_version = new_version_number
     
+    # Prepare update data
+    update_data = data.dict(exclude_unset=True)
     update_data["updated_at"] = datetime.now().isoformat()
     
     # Update report in database
@@ -77,7 +95,7 @@ async def update_report(
     if not response.data:
         raise HTTPException(status_code=500, detail="Failed to update report")
     
-    return response.data[0]
+    return APIResponse(data=Report(**response.data[0]))
 
 
 class AIRefineResponse(BaseModel):
@@ -85,6 +103,7 @@ class AIRefineResponse(BaseModel):
     report_id: str
     content: str
     updated_at: str
+    current_version: int
 
 
 @router.post("/ai-refine", response_model=APIResponse[AIRefineResponse])
@@ -121,9 +140,31 @@ async def ai_refine_report(
     # Refine the report content using AI
     refined_content = await refine_report_text(report["content"], instructions)
     
+    # Create a new version record
+    current_version = report.get("current_version", 1)
+    new_version_number = current_version + 1
+    
+    # Create version record
+    version_id = uuid4()
+    version_data = {
+        "version_id": str(version_id),
+        "report_id": str(report_id),
+        "version_number": new_version_number,
+        "content": refined_content,
+        "title": report.get("title"),
+        "changes_description": f"AI refinement based on instructions: {instructions}",
+        "created_by_ai": True,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    version_response = supabase.table("report_versions").insert(version_data).execute()
+    if not version_response.data:
+        raise HTTPException(status_code=500, detail="Failed to create version record")
+    
     # Update the report with refined content
     update_data = {
         "content": refined_content,
+        "current_version": new_version_number,
         "updated_at": datetime.now().isoformat()
     }
     
@@ -133,3 +174,127 @@ async def ai_refine_report(
         raise HTTPException(status_code=500, detail="Failed to update report")
     
     return response.data[0]
+
+
+@router.get("/{report_id}/versions", response_model=APIResponse[ReportVersionResponse])
+@api_error_handler
+async def get_report_versions(
+    report_id: UUID4,
+):
+    """
+    Get version history for a report
+    
+    Args:
+        report_id: UUID of the report
+        
+    Returns:
+        List of report versions and current version number
+    """
+    supabase = create_supabase_client()
+    
+    # Check if report exists and get current version
+    report_response = supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+    
+    if not report_response.data:
+        raise HTTPException(status_code=404, detail=f"Report with ID {report_id} not found")
+    
+    report = Report(**report_response.data[0])
+    
+    # Get versions
+    versions_response = supabase.table("report_versions").select("*").eq("report_id", str(report_id)).order("version_number", desc=True).execute()
+    
+    versions = [ReportVersion(**v) for v in versions_response.data]
+    
+    return APIResponse(data=ReportVersionResponse(
+        versions=versions,
+        current_version=report.current_version
+    ))
+
+
+@router.get("/{report_id}/versions/{version_number}", response_model=APIResponse[ReportVersion])
+@api_error_handler
+async def get_report_version(
+    report_id: UUID4,
+    version_number: int,
+):
+    """
+    Get a specific version of a report
+    
+    Args:
+        report_id: UUID of the report
+        version_number: Version number to retrieve
+        
+    Returns:
+        Report version data
+    """
+    supabase = create_supabase_client()
+    
+    # Get specific version
+    version_response = supabase.table("report_versions").select("*").eq("report_id", str(report_id)).eq("version_number", version_number).execute()
+    
+    if not version_response.data:
+        raise HTTPException(status_code=404, detail=f"Version {version_number} not found for report {report_id}")
+    
+    return APIResponse(data=ReportVersion(**version_response.data[0]))
+
+
+@router.post("/{report_id}/revert/{version_number}", response_model=APIResponse[Report])
+@api_error_handler
+async def revert_to_version(
+    report_id: UUID4,
+    version_number: int,
+):
+    """
+    Revert a report to a previous version
+    
+    Args:
+        report_id: UUID of the report
+        version_number: Version number to revert to
+        
+    Returns:
+        Updated report data
+    """
+    supabase = create_supabase_client()
+    
+    # Get the target version
+    version_response = supabase.table("report_versions").select("*").eq("report_id", str(report_id)).eq("version_number", version_number).execute()
+    
+    if not version_response.data:
+        raise HTTPException(status_code=404, detail=f"Version {version_number} not found for report {report_id}")
+    
+    target_version = ReportVersion(**version_response.data[0])
+    
+    # Get current report data
+    report_response = supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+    
+    if not report_response.data:
+        raise HTTPException(status_code=404, detail=f"Report with ID {report_id} not found")
+    
+    report = Report(**report_response.data[0])
+    new_version_number = report.current_version + 1
+    
+    # Create a new version record for the revert action
+    version_data = ReportVersionCreate(
+        report_id=report_id,
+        version_number=new_version_number,
+        content=target_version.content,
+        changes_description=f"Reverted to version {version_number}",
+    )
+    
+    version_response = supabase.table("report_versions").insert(version_data.dict()).execute()
+    if not version_response.data:
+        raise HTTPException(status_code=500, detail="Failed to create version record")
+    
+    # Update the report content
+    update_data = {
+        "content": target_version.content,
+        "current_version": new_version_number,
+        "updated_at": datetime.now().isoformat()
+    }
+    
+    response = supabase.table("reports").update(update_data).eq("report_id", str(report_id)).execute()
+    
+    if not response.data:
+        raise HTTPException(status_code=500, detail="Failed to update report")
+    
+    return APIResponse(data=Report(**response.data[0]))

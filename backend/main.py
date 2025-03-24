@@ -10,10 +10,11 @@ from pathlib import Path
 import asyncio
 import time
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from typing import Callable
+from contextlib import asynccontextmanager
 
 # Set up logging first
 logging.basicConfig(
@@ -70,6 +71,10 @@ from api import upload, generate, format, edit, download, agent_loop, utils, doc
 from config import settings
 from api.agent_loop import router as agent_loop_router
 from api.cleanup import router as cleanup_router
+from .config import get_settings
+from .utils.supabase_helper import initialize_supabase_tables, cleanup_database
+from .tasks.cleanup import start_cleanup_tasks
+from api import share
 
 # Import utilities
 from utils.file_utils import safe_path_join
@@ -84,6 +89,11 @@ from utils.db_connector import get_db_connector
 from utils.resource_manager import resource_manager, run_periodic_cleanup
 from utils.metrics import MetricsCollector
 
+# Import our custom middleware and monitoring
+from middleware.error_handler import error_handler_middleware
+from middleware.rate_limiter import rate_limiter, rate_limit_middleware
+from utils.monitoring import init_monitoring
+
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
@@ -97,111 +107,71 @@ if missing_vars:
 else:
     logger.info("✅ All required environment variables are properly configured.")
 
-# Create FastAPI app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for startup and shutdown events"""
+    # Startup
+    logger.info("Starting application...")
+    
+    # Initialize monitoring
+    init_monitoring(os.getenv("SENTRY_DSN"))
+    
+    # Start rate limiter
+    await rate_limiter.start()
+    
+    # Start cleanup scheduler
+    cleanup_task = asyncio.create_task(start_cleanup_scheduler())
+    
+    try:
+        yield
+    finally:
+        # Shutdown
+        logger.info("Shutting down application...")
+        await rate_limiter.stop()
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+# Create FastAPI application
 app = FastAPI(
     title="Insurance Report Generator API",
-    description="API for generating insurance reports using AI agents",
-    version="2.0.0",
-    # Only show docs in non-production environment
-    docs_url="/docs" if os.getenv("NODE_ENV") != "production" else None,
-    redoc_url="/redoc" if os.getenv("NODE_ENV") != "production" else None,
+    description="API for generating insurance reports using AI",
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-# Configure CORS with proper error handling
-origins = [
-    "https://report-gen-liard.vercel.app",
-    "http://localhost:3000",
-    "http://localhost:8000",
-]
-
+# Add CORS middleware first
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # Use explicit list instead of settings
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
     allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],  # Expose all headers
-    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
-# Add error handling middleware to ensure CORS headers are set even on errors
-@app.middleware("http")
-async def cors_error_handler(request: Request, call_next):
-    try:
-        response = await call_next(request)
-        
-        # Add CORS headers to all responses
-        origin = request.headers.get("origin")
-        if origin in origins:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "*"
-            response.headers["Access-Control-Allow-Headers"] = "*"
-            response.headers["Access-Control-Expose-Headers"] = "*"
-        
-        return response
-    except Exception as e:
-        # Get origin from request headers
-        origin = request.headers.get("origin")
-        
-        # Return error response with CORS headers
-        headers = {
-            "Access-Control-Allow-Origin": origin if origin in origins else origins[0],
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Expose-Headers": "*",
-        }
-        
-        # Log the error for debugging
-        logger.error(f"Error processing request: {str(e)}", exc_info=True)
-        
-        return JSONResponse(
-            status_code=500,
-            content={"detail": str(e)},
-            headers=headers
-        )
+# Add our custom middleware
+app.middleware("http")(error_handler_middleware)
+app.middleware("http")(rate_limit_middleware)
 
-# Set up middleware
-setup_middleware(app)
+# Remove the old exception handlers as they're now handled by error_handler_middleware
+# ... remove existing exception handlers ...
 
-# Exception handlers
-@app.exception_handler(BaseAPIException)
-async def api_exception_handler(request: Request, exc: BaseAPIException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=exc.detail,
-    )
+# Keep the existing cleanup functions
+# ... keep existing cleanup_old_data and start_cleanup_scheduler ...
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    if isinstance(exc, BaseAPIException):
-        return await api_exception_handler(request, exc)
-    
-    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "code": "INTERNAL_ERROR",
-            "message": "An unexpected error occurred",
-            "details": str(exc) if os.getenv("NODE_ENV") != "production" else None
-        },
-    )
+# Keep the existing root and health check endpoints
+# ... keep existing endpoints ...
 
-# Include API routes
-app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
-app.include_router(generate.router, prefix="/api/generate", tags=["Generate"])
-app.include_router(format.router, prefix="/api/format", tags=["Format"])
-app.include_router(edit.router, prefix="/api/edit", tags=["Edit"])
-app.include_router(download.router, prefix="/api/download", tags=["Download"])
-app.include_router(agent_loop_router, prefix="/api/v2", tags=["AI Agent Loop"])
-app.include_router(cleanup_router)
-app.include_router(agent_loop.router, prefix="/api", tags=["agent-loop"])
-app.include_router(documents.router, prefix="/api", tags=["documents"])
-app.include_router(reports.router, prefix="/api", tags=["reports"])
-app.include_router(templates.router, prefix="/api", tags=["templates"])
-app.include_router(metrics.router, prefix="/api", tags=["metrics"])
-app.include_router(utils.router, prefix="/api", tags=["utilities"])
+# Import and include routers
+from api import documents, reports, templates, tasks, share
+
+app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
+app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
+app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
+app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+app.include_router(share.router, prefix="/api/share", tags=["share"])
 
 # Serve static files
 upload_dir = Path("./uploads")
@@ -326,67 +296,6 @@ async def start_cleanup_scheduler():
         await cleanup_old_data(settings.DATA_RETENTION_HOURS)
         await asyncio.sleep(3600)  # Wait for 1 hour
 
-@app.on_event("startup")
-async def startup_event():
-    """Run when the application starts up"""
-    # Run initial cleanup
-    await cleanup_old_data(settings.DATA_RETENTION_HOURS)
-    # Start periodic cleanup task
-    asyncio.create_task(start_cleanup_scheduler())
-    
-    # Initialize the task cache
-    await initialize_task_cache()
-    
-    # Initialize the database if needed
-    # This happens automatically when the connector is created
-    db = get_db_connector()
-    
-    # Start resource cleanup task
-    asyncio.create_task(run_periodic_cleanup(3600))  # Run resource cleanup every hour
-    
-    # Record startup in metrics
-    try:
-        await metrics.record_startup()
-        logger.info("Startup metrics recorded")
-    except Exception as e:
-        logger.error(f"Failed to record startup metrics: {str(e)}")
-    
-    # Initialize resource manager
-    resource_manager.initialize()
-    logger.info("Resource manager initialized")
-    
-    logger.info("Application started successfully")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources before the application stops"""
-    logger.info("Shutting down application")
-    
-    # Shut down the task cache
-    await shutdown_task_cache()
-    
-    # Close database connections
-    db = get_db_connector()
-    await db.close()
-    
-    # Shut down the dependency manager
-    dependency_manager = get_dependency_manager()
-    await dependency_manager.shutdown()
-    
-    # Clean up all resources
-    cleanup_count = resource_manager.cleanup_all()
-    logger.info(f"Cleaned up {cleanup_count} resources during shutdown")
-    
-    # Backup metrics before shutdown
-    metrics_collector.backup_metrics()
-    logger.info("Metrics backed up successfully")
-    
-    # Clean up resource manager
-    resource_manager.cleanup()
-    logger.info("Resource manager cleaned up")
-    
-    logger.info("Application shutdown complete")
-
 @app.get("/", tags=["Root"])
 async def root():
     """Root endpoint"""
@@ -409,10 +318,10 @@ async def health_check():
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info",
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", 8000)),
+        reload=os.getenv("DEBUG", "false").lower() == "true",
+        workers=int(os.getenv("WORKERS", 1))
     )
 
 logger.info("Application initialized successfully!")

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Box, 
   Container, 
@@ -11,28 +11,52 @@ import {
   CardContent,
   CardActions,
   Alert,
-  Snackbar
+  Snackbar,
+  CircularProgress,
+  LinearProgress,
+  IconButton,
+  Tooltip
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import ShareIcon from '@mui/icons-material/Share';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { RootState } from '../store';
-import { setLoading, setError, setPreviewUrl as setStorePreviewUrl } from '../store/reportSlice';
+import { setLoadingAsync, setErrorAsync, setPreviewUrlAsync } from '../store/reportSlice';
 import { DocumentPreview, DownloadProgressTracker, ReportSummary } from './DynamicComponents';
 import { isBrowser } from '../utils/environment';
-import supabase, { queryCached, clearCache, DocumentMetadata, documentService } from '../utils/supabase';
+import { DocumentService } from '../services/DocumentService';
 import { config } from '../../config';
+import { LoadingState } from '../store/types';
+import { useDispatch } from 'react-redux';
+import { AppDispatch } from '../store';
+import { ShareButton } from './ShareButton';
+import { DocumentMetadata } from '../types/document';
+import { useErrorHandler } from '../hooks/useErrorHandler';
+import { useTask } from '../context/TaskContext';
+
+interface EnhancedReportDownloaderProps {
+  reportId: string;
+  onDownloadComplete?: () => void;
+  disableMetadata?: boolean;
+}
 
 /**
  * Enhanced Report Downloader component that combines document preview,
  * report metrics, and download functionality in a single interface
  */
-const EnhancedReportDownloader: React.FC = () => {
+const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({ 
+  reportId, 
+  onDownloadComplete,
+  disableMetadata = false
+}) => {
   const dispatch = useAppDispatch();
+  const documentService = DocumentService.getInstance();
+  const { handleError, wrapPromise } = useErrorHandler();
+  const { startTask, completeTask, failTask } = useTask();
   
   // Get state from Redux
-  const { reportId, content, previewUrl, loading, error: storeError } = useAppSelector(
+  const { content, previewUrl, loading, error: storeError } = useAppSelector(
     (state: RootState) => state.report
   );
   
@@ -41,20 +65,21 @@ const EnhancedReportDownloader: React.FC = () => {
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>('report.docx');
   const [fileSize, setFileSize] = useState<number>(0);
-  const [shareUrl, setShareUrl] = useState<string>('');
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [showShareSuccess, setShowShareSuccess] = useState<boolean>(false);
   const [qualityScore, setQualityScore] = useState<number>(0);
   const [editCount, setEditCount] = useState<number>(0);
   const [iterations, setIterations] = useState<number>(0);
   const [timeSaved, setTimeSaved] = useState<number>(120); // Default 2 hours
   const [downloadReady, setDownloadReady] = useState<boolean>(false);
-  const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [documentData, setDocumentData] = useState<DocumentMetadata | null>(null);
   const [totalPages, setTotalPages] = useState<number>(1);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const [retries, setRetries] = useState<number>(0);
+  const [metadata, setMetadata] = useState<DocumentMetadata | null>(null);
   
   // Get document metadata when component mounts
   useEffect(() => {
@@ -64,60 +89,49 @@ const EnhancedReportDownloader: React.FC = () => {
     
     // Cleanup function to abort any in-progress requests
     return () => {
-      if (abortController) {
-        abortController.abort();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
     };
   }, [reportId]);
   
-  // Generate preview
-  const handleGeneratePreview = async () => {
-    if (!reportId) return;
+  // Fetch document metadata
+  const fetchMetadata = useCallback(async () => {
+    if (disableMetadata || !reportId) return;
     
     try {
-      dispatch(setLoading(true));
-      
-      // Generate preview using document service
-      const url = await documentService.generatePreview(reportId);
-      
-      // Update both local state and Redux store
-      dispatch(setStorePreviewUrl(url));
-      setPreviewError(null);
+      // Using wrapPromise will handle errors automatically
+      const response = await wrapPromise(fetch(`/api/documents/${reportId}/metadata`));
+      const data = await response.json();
+      setMetadata(data);
     } catch (err) {
-      console.error('Error generating preview:', err);
-      setPreviewError(err instanceof Error ? err.message : 'Impossibile generare l\'anteprima');
-      dispatch(setError(err instanceof Error ? err.message : 'Impossibile generare l\'anteprima'));
-    } finally {
-      dispatch(setLoading(false));
+      // Error is already handled by wrapPromise
+      console.debug('Metadata fetch failed, continuing without it');
+      // Don't set error here as it's handled by useErrorHandler
     }
-  };
+  }, [reportId, disableMetadata, wrapPromise]);
   
   // Fetch document metadata from Supabase
   const fetchDocumentMetadata = useCallback(async (documentId: string) => {
     setIsLoading(true);
     setError(null);
-    dispatch(setLoading(true));
+    const loadingState: LoadingState = {
+      isLoading: true,
+      stage: 'metadata',
+      message: 'Fetching document metadata...',
+      progress: 0
+    };
+    dispatch(setLoadingAsync(loadingState));
     
     try {
-      // Use cached query for document metadata with a 5-minute cache
-      const { data, error } = await queryCached(
-        'documents',
-        { 
-          select: '*',
-          filter: { id: documentId },
-          single: true
-        },
-        300 // 5 minutes cache
-      );
-      
-      if (error) throw error;
+      const data = await documentService.getMetadata(documentId);
       
       if (!data) {
-        throw new Error('Documento non trovato');
+        throw new Error('Document not found');
       }
       
       // Update all relevant state with the document data
-      setDocumentData(data as DocumentMetadata);
+      setDocumentData(data);
       setFileName(data.filename || 'report.docx');
       setFileSize(data.size || 0);
       setQualityScore(data.quality_score || 0);
@@ -133,51 +147,103 @@ const EnhancedReportDownloader: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching document metadata:', error);
-      setError(error instanceof Error ? error.message : 'Errore nel recupero dei dati del documento');
-      dispatch(setError(error instanceof Error ? error.message : 'Errore nel recupero dei dati del documento'));
+      setError(error instanceof Error ? error.message : 'Error fetching document metadata');
+      dispatch(setErrorAsync(error instanceof Error ? error.message : 'Error fetching document metadata'));
     } finally {
       setIsLoading(false);
-      dispatch(setLoading(false));
+      const loadingState: LoadingState = {
+        isLoading: false,
+        stage: undefined,
+        message: undefined,
+        progress: undefined
+      };
+      dispatch(setLoadingAsync(loadingState));
     }
   }, [dispatch, handleGeneratePreview]);
   
-  // Download the document with progress tracking
-  const handleDownload = async (format: string = 'docx') => {
+  // Generate preview of the document
+  const handleGeneratePreview = useCallback(async () => {
     if (!reportId) {
-      dispatch(setError('Nessun ID report disponibile. Impossibile scaricare il report.'));
+      handleError(new Error('Report ID is required for preview'));
       return;
     }
     
-    setIsDownloading(true);
-    setDownloadProgress(0);
-    setDownloadError(null);
+    setGeneratingPreview(true);
+    setPreviewError(null);
     
     try {
-      const downloadUrl = `${config.API_URL}/api/download/${format}/${reportId}`;
+      const loadingState: LoadingState = {
+        isLoading: true,
+        stage: 'preview',
+        message: 'Generating preview...',
+        progress: 0
+      };
+      dispatch(setLoadingAsync(loadingState));
       
-      // Use fetch with a ReadableStream to track download progress
+      const url = await documentService.generatePreview(reportId);
+      if (url) {
+        dispatch(setPreviewUrlAsync(url));
+        setPreviewError(null);
+      }
+    } catch (err) {
+      // Use handleError from useErrorHandler
+      handleError(err, {
+        showNotification: true,
+        onError: (error) => {
+          setPreviewError(error.message);
+          setGeneratingPreview(false);
+        }
+      });
+    } finally {
+      const loadingState: LoadingState = {
+        isLoading: false,
+        stage: undefined,
+        message: undefined,
+        progress: undefined
+      };
+      dispatch(setLoadingAsync(loadingState));
+    }
+  }, [reportId, handleError]);
+  
+  // Download the document with progress tracking
+  const handleDownload = useCallback(async (format: 'docx' | 'pdf' = 'docx') => {
+    if (!reportId) {
+      handleError(new Error('Report ID is required for download'));
+      return;
+    }
+
+    // Create a unique task ID for this download
+    const taskId = `download-${reportId}-${Date.now()}`;
+    startTask(taskId, 'download');
+    
+    setIsDownloading(true);
+    setDownloadProgress(0);
+    
+    try {
+      // We'll use TaskContext for tracking instead of dispatch
+      // dispatch(setLoadingAsync(true));
+      
+      const downloadUrl = `/api/documents/${reportId}/download?format=${format}`;
+      
+      // Fetch with progress tracking
       const response = await fetch(downloadUrl);
       
       if (!response.ok) {
-        throw new Error(`Errore nel download: ${response.status} ${response.statusText}`);
+        throw new Error(`Download failed: ${response.statusText}`);
       }
       
-      // Get total file size from headers
       const contentLength = response.headers.get('content-length');
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
+      const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
       
-      // Create a reader from the response body stream
       const reader = response.body?.getReader();
-      
       if (!reader) {
-        throw new Error('Streaming non supportato dal browser');
+        throw new Error('Unable to read response body');
       }
       
-      // Initialize variables for tracking progress
-      let receivedLength = 0;
+      let receivedBytes = 0;
       const chunks: Uint8Array[] = [];
       
-      // Read the stream
+      // Process the stream
       while (true) {
         const { done, value } = await reader.read();
         
@@ -186,121 +252,112 @@ const EnhancedReportDownloader: React.FC = () => {
         }
         
         chunks.push(value);
-        receivedLength += value.length;
+        receivedBytes += value.length;
         
-        // Update progress
-        if (total > 0) {
-          setDownloadProgress((receivedLength / total) * 100);
+        if (totalBytes > 0) {
+          const progress = Math.round((receivedBytes / totalBytes) * 100);
+          setDownloadProgress(progress);
         }
       }
       
-      // Concatenate chunks into a single Uint8Array
-      const chunksAll = new Uint8Array(receivedLength);
+      // Combine chunks into a single Uint8Array
+      const chunksAll = new Uint8Array(receivedBytes);
       let position = 0;
       for (const chunk of chunks) {
         chunksAll.set(chunk, position);
         position += chunk.length;
       }
       
-      // Create a blob from the data
       const blob = new Blob([chunksAll], { 
         type: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
       });
       
-      // Set progress to 100% before triggering download
-      setDownloadProgress(100);
-      
-      // Create a download link
+      // Create object URL and trigger download
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = fileName;
+      a.download = `Report-${reportId}.${format}`;
       document.body.appendChild(a);
       a.click();
-      
-      // Clean up
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       
-      // Delay closing the progress modal to show 100% completion
-      setTimeout(() => {
-        setIsDownloading(false);
-      }, 1000);
+      // Update download count
+      try {
+        await fetch(`/api/documents/${reportId}/track-download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ format })
+        });
+      } catch (err) {
+        console.warn('Failed to track download:', err);
+        // Non-fatal error, continue
+      }
+      
+      // Mark the task as complete
+      completeTask();
+      
+      setIsDownloading(false);
+      setRetries(0);
+      
+      if (onDownloadComplete) {
+        onDownloadComplete();
+      }
       
     } catch (err) {
-      console.error('Error downloading report:', err);
-      setDownloadError(err instanceof Error ? err.message : 'Impossibile scaricare il report');
-      setIsDownloading(false);
+      handleError(err, {
+        showNotification: true,
+        onError: (error) => {
+          setIsDownloading(false);
+          // Mark the task as failed
+          failTask(error.message);
+          
+          // Increment retry counter
+          setRetries(prev => prev + 1);
+        }
+      });
     }
-  };
+  }, [reportId, handleError, startTask, completeTask, failTask, onDownloadComplete]);
   
   // Generate and copy share link
   const handleShareLink = async () => {
-    if (!reportId) {
-      dispatch(setError('Nessun ID report disponibile. Impossibile generare link di condivisione.'));
-      return;
-    }
-    
-    // Create a new AbortController for this request
-    const controller = new AbortController();
-    setAbortController(controller);
+    if (!reportId) return;
     
     try {
-      dispatch(setLoading({
+      const loadingState: LoadingState = {
         isLoading: true,
-        message: 'Generazione link di condivisione...'
-      }));
+        stage: 'share',
+        message: 'Generating share link...',
+        progress: 0
+      };
+      dispatch(setLoadingAsync(loadingState));
       
-      // Call the API to create a shareable link with abort signal
-      const response = await fetch(`${config.API_URL}/api/share/create`, {
+      const response = await fetch('/api/share/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
-          report_id: reportId,
-          expiration_days: 7 // Default to 7-day expiration
-        }),
-        signal: controller.signal
+        body: JSON.stringify({ reportId })
       });
       
       if (!response.ok) {
-        throw new Error('Impossibile generare link di condivisione');
+        throw new Error('Failed to generate share link');
       }
       
       const data = await response.json();
-      
-      if (data.share_url) {
-        setShareUrl(data.share_url);
-        
-        // Copy to clipboard only in browser environment
-        if (isBrowser && navigator.clipboard) {
-          try {
-            await navigator.clipboard.writeText(data.share_url);
-            setShowShareSuccess(true);
-          } catch (clipboardErr) {
-            console.error('Failed to copy to clipboard:', clipboardErr);
-          }
-        }
-      }
-      
-      dispatch(setLoading({
-        isLoading: false
-      }));
-      
+      setShareUrl(data.url);
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        // Request was aborted, do nothing
-        return;
-      }
-      
       console.error('Error generating share link:', err);
-      dispatch(setError(err instanceof Error ? err.message : 'Impossibile generare link di condivisione'));
-      dispatch(setLoading({
-        isLoading: false
-      }));
+      const errorMessage = err instanceof Error ? err.message : 'Failed to generate share link';
+      dispatch(setErrorAsync(errorMessage));
     } finally {
-      setAbortController(null);
+      const loadingState: LoadingState = {
+        isLoading: false,
+        stage: undefined,
+        message: undefined,
+        progress: undefined
+      };
+      dispatch(setLoadingAsync(loadingState));
     }
   };
   
@@ -342,6 +399,16 @@ const EnhancedReportDownloader: React.FC = () => {
       invalidateDocumentCache();
     };
   }, [invalidateDocumentCache]);
+  
+  // Handle download error notification closing
+  const handleCloseDownloadError = () => {
+    setDownloadError(null);
+  };
+  
+  // Handle preview error notification closing
+  const handleClosePreviewError = () => {
+    setPreviewError(null);
+  };
   
   if (!reportId) {
     return (
@@ -387,27 +454,19 @@ const EnhancedReportDownloader: React.FC = () => {
         
         {/* Download Options Section */}
         <Grid item xs={12} md={4}>
-          <Paper elevation={3} sx={{ p: 3, height: '100%' }}>
+          <Paper sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
-              Opzioni di Download
+              Download Options
             </Typography>
             
-            <Divider sx={{ mb: 2 }} />
-            
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                Il tuo report è pronto per il download. Scegli il formato preferito.
-              </Typography>
-            </Box>
-            
-            {/* DOCX Download Card */}
-            <Card variant="outlined" sx={{ mb: 2 }}>
+            {/* DOCX Download */}
+            <Card variant="outlined" sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="subtitle1" fontWeight="medium">
-                  Microsoft Word (DOCX)
+                  Documento Word
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Documento completamente modificabile.
+                  Formato DOCX editabile, ideale per modifiche successive.
                 </Typography>
               </CardContent>
               <CardActions>
@@ -419,12 +478,19 @@ const EnhancedReportDownloader: React.FC = () => {
                   onClick={() => handleDownload('docx')}
                   disabled={isDownloading || !downloadReady}
                 >
-                  Scarica DOCX
+                  {isDownloading ? (
+                    <>
+                      <CircularProgress size={20} sx={{ mr: 1 }} />
+                      Downloading...
+                    </>
+                  ) : (
+                    'Scarica DOCX'
+                  )}
                 </Button>
               </CardActions>
             </Card>
             
-            {/* PDF Download Card */}
+            {/* PDF Download */}
             <Card variant="outlined" sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="subtitle1" fontWeight="medium">
@@ -443,7 +509,14 @@ const EnhancedReportDownloader: React.FC = () => {
                   onClick={() => handleDownload('pdf')}
                   disabled={isDownloading || !downloadReady}
                 >
-                  Scarica PDF
+                  {isDownloading ? (
+                    <>
+                      <CircularProgress size={20} sx={{ mr: 1 }} />
+                      Downloading...
+                    </>
+                  ) : (
+                    'Scarica PDF'
+                  )}
                 </Button>
               </CardActions>
             </Card>
@@ -468,50 +541,91 @@ const EnhancedReportDownloader: React.FC = () => {
             </Button>
             
             {shareUrl && (
-              <Card variant="outlined" sx={{ mb: 2, bgcolor: 'background.subtle' }}>
-                <CardContent sx={{ py: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" sx={{ mr: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {shareUrl}
-                    </Typography>
-                    <Button
-                      size="small"
-                      startIcon={<ContentCopyIcon />}
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Link di condivisione:
+                </Typography>
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  bgcolor: 'grey.100',
+                  p: 1,
+                  borderRadius: 1
+                }}>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {shareUrl}
+                  </Typography>
+                  <Tooltip title="Copia link">
+                    <IconButton 
+                      size="small" 
                       onClick={copyShareUrl}
+                      sx={{ ml: 1 }}
                     >
-                      Copia
-                    </Button>
-                  </Box>
-                </CardContent>
-              </Card>
+                      <ContentCopyIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              </Box>
             )}
             
-            <Typography variant="caption" color="text.secondary">
-              I link di condivisione scadono dopo 7 giorni per motivi di sicurezza.
-            </Typography>
+            {/* Download Progress and Retry */}
+            {isDownloading && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2" gutterBottom>
+                  Download in corso...
+                </Typography>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={downloadProgress} 
+                  sx={{ mb: 1 }}
+                />
+                <Typography variant="body2" color="text.secondary">
+                  {downloadProgress}% completato
+                </Typography>
+              </Box>
+            )}
+            
+            {downloadError && (
+              <Alert 
+                severity="error" 
+                sx={{ mt: 2 }}
+                action={
+                  <Button 
+                    color="inherit" 
+                    size="small" 
+                    onClick={() => handleDownload('docx')}
+                  >
+                    Riprova
+                  </Button>
+                }
+              >
+                {downloadError}
+              </Alert>
+            )}
           </Paper>
         </Grid>
       </Grid>
       
-      {/* Download Progress Tracker */}
-      <DownloadProgressTracker 
-        isDownloading={isDownloading}
-        fileName={fileName}
-        fileSize={fileSize}
-        progress={downloadProgress}
-        error={downloadError}
-        onClose={() => setIsDownloading(false)}
-        onRetry={() => handleDownload()}
+      {/* Success Notification */}
+      <Snackbar
+        open={showShareSuccess}
+        autoHideDuration={3000}
+        onClose={handleCloseShareNotification}
+        message="Link copiato negli appunti!"
       />
-      
-      {/* Success notification for share link copy */}
-      {isBrowser && (
-        <Snackbar
-          open={showShareSuccess}
-          autoHideDuration={4000}
-          onClose={handleCloseShareNotification}
-          message="Link copiato negli appunti!"
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+
+      {reportId && (
+        <ShareButton
+          documentId={reportId}
+          disabled={!reportId || isLoading || isDownloading}
         />
       )}
     </Container>

@@ -5,8 +5,8 @@ import datetime
 # Pydantic Models for API and Supabase
 class SupabaseModel(BaseModel):
     """Base model for Supabase tables"""
-    created_at: Optional[datetime.datetime] = None
-    updated_at: Optional[datetime.datetime] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     is_deleted: bool = False
     
     class Config:
@@ -60,12 +60,14 @@ class Report(SupabaseModel):
     files_cleaned: bool = False
     template_id: Optional[UUID4] = None
     user_id: Optional[UUID4] = None
+    current_version: int = 1
 
 class ReportUpdate(BaseModel):
     """Model for updating a report"""
     title: Optional[str] = None
     content: Optional[str] = None
     is_finalized: Optional[bool] = None
+    current_version: Optional[int] = None
 
 class ReportCreate(BaseModel):
     """Model for creating a new report"""
@@ -73,6 +75,28 @@ class ReportCreate(BaseModel):
     content: Optional[str] = None
     template_id: Optional[UUID4] = None
     user_id: Optional[UUID4] = None
+
+class ReportVersion(SupabaseModel):
+    """Model for tracking report versions"""
+    id: UUID4
+    report_id: UUID4
+    version_number: int
+    content: str
+    created_by: Optional[UUID4] = None
+    changes_description: Optional[str] = None
+
+class ReportVersionCreate(BaseModel):
+    """Model for creating a new report version"""
+    report_id: UUID4
+    version_number: int
+    content: str
+    changes_description: Optional[str] = None
+    created_by: Optional[UUID4] = None
+
+class ReportVersionResponse(BaseModel):
+    """Response model for report version endpoints"""
+    versions: List[ReportVersion]
+    current_version: int
 
 class FileCreate(BaseModel):
     """Model for creating a new file"""
@@ -127,12 +151,11 @@ def supabase_to_pydantic(table_name: str, row: Dict[str, Any]) -> SupabaseModel:
         return Report(**row)
     elif table_name == "reference_reports":
         return ReferenceReport(**row)
+    elif table_name == "report_versions":
+        return ReportVersion(**row)
     else:
         raise ValueError(f"Unknown table name: {table_name}")
 
 def pydantic_to_supabase(model: SupabaseModel) -> Dict[str, Any]:
-    """Convert a Pydantic model to a Supabase-compatible dict"""
-    data = model.dict(exclude_unset=True)
-    
-    # Remove None values as Supabase prefers not having them
-    return {k: v for k, v in data.items() if v is not None}
+    """Convert a Pydantic model to a Supabase row"""
+    return model.dict(exclude_unset=True)

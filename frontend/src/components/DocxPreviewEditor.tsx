@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { 
   Box, 
   Button, 
@@ -11,10 +11,37 @@ import {
   Typography,
   Divider,
   Paper,
-  LinearProgress
+  LinearProgress,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  ListItemButton,
+  IconButton,
+  Collapse,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
-import { Download as DownloadIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+import { 
+  Download as DownloadIcon, 
+  Refresh as RefreshIcon, 
+  History as HistoryIcon,
+  RestoreOutlined as RestoreIcon,
+  PersonOutline as UserIcon,
+  SmartToy as AIIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  Compare as CompareIcon,
+  Close as CloseIcon
+} from '@mui/icons-material';
 import { logger } from '../utils/logger';
+import { reportService, ReportVersion } from '../services/api/ReportService';
+import { formatDistanceToNow } from 'date-fns';
+import { it } from 'date-fns/locale';
+import { diffLines } from 'diff';
 
 interface DocxPreviewEditorProps {
   initialContent?: string;
@@ -47,6 +74,18 @@ export function DocxPreviewEditor({
   const [successMessage, setSuccessMessage] = useState('');
   const [refinementFeedback, setRefinementFeedback] = useState<{score: number; suggestions: string[]} | null>(null);
   const [missingReportIdWarning, setMissingReportIdWarning] = useState(false);
+  
+  // Version history related states
+  const [versions, setVersions] = useState<ReportVersion[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [selectedVersion, setSelectedVersion] = useState<ReportVersion | null>(null);
+  const [isReverting, setIsReverting] = useState(false);
+  const [showCompareDialog, setShowCompareDialog] = useState(false);
+  const [compareContent, setCompareContent] = useState<{current: string, selected: string}>({
+    current: '',
+    selected: ''
+  });
 
   // Update content when initialContent prop changes
   useEffect(() => {
@@ -64,6 +103,117 @@ export function DocxPreviewEditor({
       setMissingReportIdWarning(false);
     }
   }, [showRefinementOptions, reportId]);
+
+  // Load version history when reportId is available
+  const loadVersionHistory = useCallback(async () => {
+    if (!reportId) return;
+    
+    setLoadingVersions(true);
+    setError(null);
+    
+    try {
+      const versionData = await reportService.getReportVersions(reportId);
+      setVersions(versionData.versions);
+    } catch (err) {
+      logger.error('Error loading version history:', err);
+      setError('Impossibile caricare la cronologia delle versioni. Riprova più tardi.');
+    } finally {
+      setLoadingVersions(false);
+    }
+  }, [reportId]);
+
+  useEffect(() => {
+    if (showVersionHistory) {
+      loadVersionHistory();
+    }
+  }, [showVersionHistory, loadVersionHistory]);
+
+  // Format a date relative to now (e.g., "2 hours ago")
+  const formatRelativeDate = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      return formatDistanceToNow(date, { addSuffix: true, locale: it });
+    } catch (error) {
+      return 'Data sconosciuta';
+    }
+  };
+
+  // Handle manual content update with version tracking
+  const handleUpdateContent = async () => {
+    if (!reportId) {
+      setError('ID del report mancante. Impossibile salvare le modifiche.');
+      return;
+    }
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      // Create a version description prompt dialog
+      const description = window.prompt('Inserisci una breve descrizione delle modifiche apportate (opzionale)');
+      
+      // Update the report with a new version
+      await reportService.updateReportWithVersion(
+        reportId,
+        { content },
+        true, // create a new version
+        description || 'Modifiche manuali'
+      );
+      
+      setSuccessMessage('Modifiche salvate con successo!');
+      setShowSuccess(true);
+      
+      // Reload the version history
+      await loadVersionHistory();
+    } catch (err) {
+      logger.error('Error updating report content:', err);
+      setError('Impossibile salvare le modifiche. Riprova più tardi.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle reverting to a previous version
+  const handleRevertToVersion = async (version: ReportVersion) => {
+    if (!reportId) {
+      setError('ID del report mancante. Impossibile ripristinare la versione.');
+      return;
+    }
+    
+    setIsReverting(true);
+    setError(null);
+    
+    try {
+      // Revert to the selected version
+      const result = await reportService.revertToVersion(reportId, version.version_number);
+      
+      // Update the content in the editor
+      setContent(result.content);
+      
+      setSuccessMessage(`Versione ${version.version_number} ripristinata con successo!`);
+      setShowSuccess(true);
+      
+      // Reload the version history
+      await loadVersionHistory();
+      
+      // Close the version history panel
+      setSelectedVersion(null);
+    } catch (err) {
+      logger.error('Error reverting to version:', err);
+      setError(`Impossibile ripristinare la versione ${version.version_number}. Riprova più tardi.`);
+    } finally {
+      setIsReverting(false);
+    }
+  };
+
+  // Open the compare dialog to show differences
+  const handleCompareVersion = (version: ReportVersion) => {
+    setCompareContent({
+      current: content,
+      selected: version.content
+    });
+    setCompareDialogOpen(true);
+  };
 
   const handleDownload = async () => {
     setIsLoading(true);
@@ -165,6 +315,9 @@ export function DocxPreviewEditor({
           setProgressMessage('');
         }
         
+        // Reload version history after AI refinement
+        await loadVersionHistory();
+        
         logger.info('Report refined successfully');
       } else {
         throw new Error('Invalid response format: missing draft content');
@@ -243,6 +396,37 @@ export function DocxPreviewEditor({
     });
   };
 
+  // Simple diff function to highlight added/removed content
+  const generateDiff = (original: string, modified: string) => {
+    const lines1 = original.split('\n');
+    const lines2 = modified.split('\n');
+    const result: JSX.Element[] = [];
+    
+    // Very simple line-by-line diff visualization
+    // A more sophisticated diff algorithm would be better for production
+    for (let i = 0; i < Math.max(lines1.length, lines2.length); i++) {
+      const line1 = lines1[i] || '';
+      const line2 = lines2[i] || '';
+      
+      if (line1 === line2) {
+        result.push(<div key={i}>{line1}</div>);
+      } else {
+        result.push(
+          <div key={i} style={{ display: 'flex', marginBottom: '8px' }}>
+            <div style={{ backgroundColor: '#ffecec', textDecoration: 'line-through', flex: 1, padding: '4px', marginRight: '8px', color: '#ff0000' }}>
+              {line1}
+            </div>
+            <div style={{ backgroundColor: '#eaffea', flex: 1, padding: '4px', color: '#008000' }}>
+              {line2}
+            </div>
+          </div>
+        );
+      }
+    }
+    
+    return result;
+  };
+
   return (
     <Box sx={{ width: '100%' }}>
       {error && (
@@ -255,6 +439,108 @@ export function DocxPreviewEditor({
         <Alert severity="warning" sx={{ mb: 3 }}>
           Avviso: ID report mancante. La funzionalità di miglioramento non sarà disponibile.
         </Alert>
+      )}
+
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h6">Editor Report</Typography>
+        <Box>
+          {reportId && (
+            <Tooltip title="Cronologia versioni">
+              <IconButton 
+                color={showVersionHistory ? 'primary' : 'default'} 
+                onClick={() => setShowVersionHistory(!showVersionHistory)}
+                disabled={loadingVersions}
+              >
+                {loadingVersions ? <CircularProgress size={24} /> : <HistoryIcon />}
+              </IconButton>
+            </Tooltip>
+          )}
+          <Button
+            variant="outlined"
+            color="primary"
+            onClick={handleUpdateContent}
+            disabled={isLoading || !reportId}
+            sx={{ ml: 1 }}
+          >
+            Salva versione
+          </Button>
+        </Box>
+      </Box>
+
+      {showVersionHistory && (
+        <Paper elevation={2} sx={{ p: 2, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Cronologia Versioni
+          </Typography>
+          {versions.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              Nessuna versione precedente disponibile.
+            </Typography>
+          ) : (
+            <List sx={{ maxHeight: '300px', overflowY: 'auto' }}>
+              {versions.map((version) => (
+                <ListItem 
+                  key={version.version_id}
+                  secondaryAction={
+                    <Box>
+                      <Tooltip title="Confronta con versione attuale">
+                        <IconButton 
+                          edge="end" 
+                          aria-label="compare" 
+                          onClick={() => handleCompareVersion(version)}
+                        >
+                          <CompareIcon />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Ripristina questa versione">
+                        <IconButton 
+                          edge="end" 
+                          aria-label="restore" 
+                          onClick={() => handleRevertToVersion(version.version_number)}
+                          disabled={isReverting}
+                          sx={{ ml: 1 }}
+                        >
+                          {isReverting ? <CircularProgress size={24} /> : <RestoreIcon />}
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  }
+                  disablePadding
+                >
+                  <ListItemButton 
+                    onClick={() => 
+                      setSelectedVersion(selectedVersion?.version_id === version.version_id ? null : version)
+                    }
+                  >
+                    <ListItemIcon>
+                      {version.created_by_ai ? <AIIcon color="primary" /> : <UserIcon />}
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary={
+                        <Typography variant="body1">
+                          Versione {version.version_number}
+                          {version.created_by_ai && ' (AI)'}
+                        </Typography>
+                      }
+                      secondary={
+                        <>
+                          <Typography variant="caption" display="block">
+                            {formatRelativeDate(version.created_at)}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap>
+                            {version.changes_description || 'Nessuna descrizione'}
+                          </Typography>
+                        </>
+                      }
+                    />
+                    {selectedVersion?.version_id === version.version_id ? 
+                      <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  </ListItemButton>
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Paper>
       )}
 
       <TextField
@@ -407,6 +693,24 @@ export function DocxPreviewEditor({
           {successMessage}
         </Alert>
       </Snackbar>
+
+      {/* Compare dialog for showing differences between versions */}
+      <Dialog
+        open={showCompareDialog}
+        onClose={() => setShowCompareDialog(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>Confronto Versioni</DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ maxHeight: '500px', overflowY: 'auto' }}>
+            {generateDiff(compareContent.selected, compareContent.current)}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowCompareDialog(false)}>Chiudi</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 } 

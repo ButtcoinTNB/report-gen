@@ -16,6 +16,8 @@ import { ApiClient, createApiClient, ApiRequestOptions } from './ApiClient';
 import { adaptApiResponse, adaptApiRequest } from '../../utils/adapters';
 import { store } from '../../store';
 import { beginTransaction, completeTransaction } from '../../store/reportSlice';
+import { v4 as uuidv4 } from 'uuid';
+import { ApiService } from './ApiService';
 
 /**
  * Additional information for report generation
@@ -139,9 +141,23 @@ interface ProgressCallback {
 }
 
 /**
+ * Add this interface for report versions
+ * @interface
+ */
+export interface ReportVersion {
+  id: string;
+  report_id: string;
+  version_number: number;
+  content: string;
+  created_at: string;
+  created_by?: string;
+  changes_description?: string;
+}
+
+/**
  * Report service for generating and analyzing reports
  */
-export class ReportService extends ApiClient {
+export class ReportService extends ApiService {
   // Use configurable timeout values
   private readonly DEFAULT_AGENT_INIT_TIMEOUT = apiConfig.timeouts.agentInit;
   
@@ -833,6 +849,118 @@ export class ReportService extends ApiClient {
       error.message.includes('timeout') ||
       error.message.includes('network')
     );
+  }
+
+  /**
+   * Update a report and optionally create a new version
+   * @param reportId - The ID of the report to update
+   * @param data - Data to update (title, content, etc.)
+   * @param createVersion - Whether to create a new version record (default: false)
+   * @param versionDescription - Optional description of changes in this version
+   * @returns Promise resolving to the updated report
+   */
+  public async updateReportWithVersion(reportId: string, content: string, description?: string): Promise<ReportVersion> {
+    try {
+      const response = await this.client.put<ReportVersion>('/api/edit/update-with-version', {
+        reportId,
+        content,
+        changes_description: description
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get version history for a report
+   * @param reportId - The ID of the report
+   * @returns Promise resolving to the list of report versions
+   */
+  public async getReportVersions(reportId: string): Promise<ReportVersionResponse> {
+    try {
+      const response = await this.client.get<ReportVersionResponse>('/api/edit/versions', {
+        params: { reportId }
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Get a specific version of a report
+   * @param reportId - The ID of the report
+   * @param versionNumber - The version number to retrieve
+   * @returns Promise resolving to the report version
+   */
+  public async getReportVersion(reportId: string, versionNumber: number): Promise<ReportVersion> {
+    try {
+      const response = await this.client.get<ReportVersion>('/api/edit/version', {
+        params: { reportId, versionNumber }
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Revert a report to a previous version
+   * @param reportId - The ID of the report
+   * @param versionNumber - The version number to revert to
+   * @returns Promise resolving to the updated report
+   */
+  public async revertToVersion(reportId: string, versionNumber: number): Promise<ReportVersion> {
+    try {
+      const response = await this.client.post<ReportVersion>('/api/edit/revert', {
+        reportId,
+        versionNumber
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Refine a report with AI assistance
+   * @param reportId - The ID of the report
+   * @param instructions - Instructions for refining the report
+   * @returns Promise resolving to the refined report data
+   */
+  public async refineReportWithAI(reportId: string, instructions: string): Promise<{ taskId: string }> {
+    try {
+      const response = await this.client.post<{ taskId: string }>('/api/agent-loop/refine-report', {
+        reportId,
+        instructions
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  subscribeToTaskEvents(taskId: string, onEvent: (event: any) => void, onError?: (error: any) => void): () => void {
+    const eventSource = new EventSource(`/api/agent-loop/task-events/${taskId}`);
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        onEvent(data);
+      } catch (error) {
+        onError?.(error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      onError?.(error);
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }
 }
 

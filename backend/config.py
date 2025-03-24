@@ -3,7 +3,8 @@ from pydantic_settings import BaseSettings
 from pydantic import validator, Field
 from dotenv import load_dotenv
 import sys
-from typing import List
+from typing import List, Optional
+from functools import lru_cache
 
 # Load environment variables from .env file
 load_dotenv()
@@ -45,6 +46,24 @@ def get_data_dirs():
 UPLOADS_DIR, REPORTS_DIR = get_data_dirs()
 
 class Settings(BaseSettings):
+    """Application settings."""
+    
+    # Base configuration
+    APP_NAME: str = "Insurance Report Generator"
+    DEBUG: bool = False
+    BASE_URL: str = "http://localhost:8000"
+    
+    # Supabase configuration
+    SUPABASE_URL: str
+    SUPABASE_KEY: str
+    
+    # Share link configuration
+    DEFAULT_SHARE_LINK_EXPIRY: int = 86400  # 24 hours
+    MAX_SHARE_LINK_EXPIRY: int = 2592000  # 30 days
+    MIN_SHARE_LINK_EXPIRY: int = 300  # 5 minutes
+    DEFAULT_MAX_DOWNLOADS: int = 1
+    MAX_DOWNLOADS_LIMIT: int = 100
+    
     # API Keys
     OPENROUTER_API_KEY: str = Field(
         default=os.getenv("OPENROUTER_API_KEY", ""), 
@@ -56,24 +75,10 @@ class Settings(BaseSettings):
         default=os.getenv("OPENROUTER_API_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"),
         description="OpenRouter API endpoint URL"
     )
-    APP_NAME: str = Field(
-        default=os.getenv("APP_NAME", "Insurance Report Generator"),
-        description="Application name for API headers"
-    )
     APP_DOMAIN: str = Field(
         # Use FRONTEND_URL if APP_DOMAIN is not set explicitly
         default=os.getenv("APP_DOMAIN", os.getenv("FRONTEND_URL", "https://insurance-report-generator.vercel.app").rstrip('/')),
         description="Application domain for API referrer headers"
-    )
-
-    # Supabase - Primary database and storage solution
-    SUPABASE_URL: str = Field(
-        default=os.getenv("SUPABASE_URL", ""), 
-        description="Supabase project URL"
-    )
-    SUPABASE_KEY: str = Field(
-        default=os.getenv("SUPABASE_KEY", ""), 
-        description="Supabase API key"
     )
 
     # Important: We are no longer using direct DATABASE_URL connections
@@ -202,9 +207,19 @@ class Settings(BaseSettings):
             
         return missing
 
+@lru_cache()
+def get_settings() -> Settings:
+    """
+    Get application settings, using environment variables and defaults.
+    The result is cached to avoid reading the environment each time.
+    
+    Returns:
+        Settings instance
+    """
+    return Settings()
 
 # Create settings instance
-settings = Settings()
+settings = get_settings()
 
 # Ensure upload directory exists
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

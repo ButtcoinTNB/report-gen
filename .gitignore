@@ -6,6 +6,9 @@
 .env.production.local
 .env*.local
 
+# Cursor
+.cursor/
+
 # Python
 __pycache__/
 *.py[cod]
