@@ -4,7 +4,7 @@ from pydantic import BaseModel, UUID4
 from datetime import datetime, timedelta
 import asyncio
 from uuid import UUID
-from models.task import TaskRequest, TaskUpdateRequest, TaskStatus, TaskList, ProcessStage, TaskStatusEnum
+from models.task import TaskRequest, TaskUpdateRequest, TaskStatus, TaskList, ProcessStage
 from services.task_manager import TaskManager, TaskNotFoundException
 from utils.validation import validate_object_id
 from database import get_db, Database, AsyncSession

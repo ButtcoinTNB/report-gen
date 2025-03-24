@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Any, List
 import uuid
 from datetime import datetime, timedelta
-from models.task import TaskStatus, TaskStatusEnum, ProcessStage, TaskUpdateRequest
+from models.task import TaskStatus, ProcessStage, TaskUpdateRequest
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class TaskManager:
         
         Args:
             stage: The initial stage of the task
-            metadata: Additional metadata for the task
+            metadata: Optional metadata to store with the task
             
         Returns:
             The created task
@@ -36,7 +36,7 @@ class TaskManager:
         
         task = TaskStatus(
             task_id=task_id,
-            status=TaskStatusEnum.PENDING,
+            status=TaskStatus.PENDING.value,
             stage=stage,
             progress=0,
             message=f"Task created, ready to start {stage.value} process",
@@ -99,9 +99,9 @@ class TaskManager:
         task.updated_at = datetime.now()
         
         # Handle task completion automatically if progress reaches 100%
-        if task.progress >= 100 and task.status == TaskStatusEnum.IN_PROGRESS:
+        if task.progress >= 100 and task.status == TaskStatus.IN_PROGRESS.value:
             task.progress = 100
-            task.status = TaskStatusEnum.COMPLETED
+            task.status = TaskStatus.COMPLETED.value
             task.can_proceed = True
             task.message = f"{task.stage.value.capitalize()} process completed"
             
@@ -128,13 +128,13 @@ class TaskManager:
         task = cls.get_task(task_id)
         
         # Only start pending tasks
-        if task.status != TaskStatusEnum.PENDING:
+        if task.status != TaskStatus.PENDING.value:
             logger.warning(f"Attempted to start task {task_id} which is not in PENDING state (current: {task.status})")
             return task
         
         # Update task
         update = TaskUpdateRequest(
-            status=TaskStatusEnum.IN_PROGRESS,
+            status=TaskStatus.IN_PROGRESS.value,
             progress=0,
             message=f"Starting {task.stage.value} process",
             can_proceed=False
@@ -161,7 +161,7 @@ class TaskManager:
         
         # Update task
         update = TaskUpdateRequest(
-            status=TaskStatusEnum.COMPLETED,
+            status=TaskStatus.COMPLETED.value,
             progress=100,
             message=f"{task.stage.value.capitalize()} process completed",
             can_proceed=True
@@ -191,7 +191,7 @@ class TaskManager:
         
         # Update task
         update = TaskUpdateRequest(
-            status=TaskStatusEnum.FAILED,
+            status=TaskStatus.FAILED.value,
             message=f"Process failed: {error}",
             error=error,
             can_proceed=True
@@ -217,7 +217,7 @@ class TaskManager:
         
         # Update task
         update = TaskUpdateRequest(
-            status=TaskStatusEnum.CANCELLED,
+            status=TaskStatus.CANCELLED.value,
             message="Process cancelled by user",
             can_proceed=True
         )
