@@ -5,9 +5,10 @@ import os
 import asyncio
 import uuid
 import re
+import logging
 from config import settings
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Tuple
 from utils.error_handler import handle_exception, logger
 from .docx_service import docx_service
 import docx
