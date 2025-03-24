@@ -57,3 +57,6 @@ next-env.d.ts
 .temp/
 .cache/
 .eslintcache
+
+# Sentry Config File
+.sentryclirc
