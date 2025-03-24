@@ -4,8 +4,9 @@
 
 /**
  * Determine if code is running in a browser environment
+ * Checks both window and document to be extra safe
  */
-export const isBrowser = typeof window !== 'undefined';
+export const isBrowser = typeof window !== 'undefined' && window.document !== undefined;
 
 /**
  * Determine if code is running in a server environment
@@ -15,12 +16,12 @@ export const isServer = !isBrowser;
 /**
  * Determine if we're in a development environment
  */
-export const isDevelopment = process.env.NODE_ENV === 'development';
+export const isDevelopment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development';
 
 /**
  * Determine if we're in a production environment
  */
-export const isProduction = process.env.NODE_ENV === 'production';
+export const isProduction = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production';
 
 /**
  * Checks if we should use mock data instead of real API/Supabase calls
@@ -28,7 +29,8 @@ export const isProduction = process.env.NODE_ENV === 'production';
  * 1. Development mode AND
  * 2. NEXT_PUBLIC_USE_MOCKS environment variable set to 'true'
  */
-export const useMocks = isDevelopment && process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
+export const useMocks = isDevelopment && typeof process !== 'undefined' && 
+  process.env && process.env.NEXT_PUBLIC_USE_MOCKS === 'true';
 
 /**
  * Safely access window object (only in browser)
@@ -37,7 +39,12 @@ export const useMocks = isDevelopment && process.env.NEXT_PUBLIC_USE_MOCKS === '
  */
 export function withWindow<T>(callback: (w: Window) => T, fallback: T): T {
   if (isBrowser) {
-    return callback(window);
+    try {
+      return callback(window);
+    } catch (error) {
+      console.error('Window access error:', error);
+      return fallback;
+    }
   }
   return fallback;
 }
@@ -69,7 +76,9 @@ export const getBaseUrl = (): string => {
   }
 
   // When on the server, use environment variables
-  const url = process.env.VERCEL_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+  const url = typeof process !== 'undefined' && process.env ? 
+    (process.env.VERCEL_URL || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000') :
+    'http://localhost:3000';
 
   // Return the URL with https if not localhost
   return url.startsWith('http') ? url : `https://${url}`;
@@ -95,9 +104,11 @@ export const getClientLocale = (): string => {
 export function getApiBaseUrl(): string {
   if (isServer) {
     // Server-side rendering - use the environment variable
-    return process.env.NEXT_PUBLIC_API_URL || '';
+    return typeof process !== 'undefined' && process.env ? 
+      (process.env.NEXT_PUBLIC_API_URL || '') : '';
   }
   
   // Client-side - use the public environment variable
-  return process.env.NEXT_PUBLIC_API_URL || '';
+  return typeof process !== 'undefined' && process.env ? 
+    (process.env.NEXT_PUBLIC_API_URL || '') : '';
 } 

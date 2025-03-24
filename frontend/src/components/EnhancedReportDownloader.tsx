@@ -24,9 +24,8 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { RootState } from '../store';
 import { setLoadingAsync, setErrorAsync, setPreviewUrlAsync } from '../store/reportSlice';
 import { DocumentPreview, DownloadProgressTracker, ReportSummary } from './DynamicComponents';
-import { isBrowser } from '../utils/environment';
+import { isBrowser, withWindow } from '../utils/environment';
 import { DocumentService } from '../services/DocumentService';
-import { config } from '../../config';
 import { LoadingState } from '../store/types';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../store';
@@ -34,6 +33,7 @@ import { ShareButton } from './ShareButton';
 import { DocumentMetadata } from '../types/document';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useTask } from '../context/TaskContext';
+import { apiConfig } from '../config/api.config';
 
 interface EnhancedReportDownloaderProps {
   reportId: string;
@@ -53,7 +53,7 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
   const dispatch = useAppDispatch();
   const documentService = DocumentService.getInstance();
   const { handleError, wrapPromise } = useErrorHandler();
-  const { startTask, completeTask, failTask } = useTask();
+  const { task, updateTask } = useTask();
   
   // Get state from Redux
   const { content, previewUrl, loading, error: storeError } = useAppSelector(
@@ -77,6 +77,8 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [documentData, setDocumentData] = useState<DocumentMetadata | null>(null);
   const [totalPages, setTotalPages] = useState<number>(1);
+  const [error, setError] = useState<string | null>(null);
+  const [generatingPreview, setGeneratingPreview] = useState<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [retries, setRetries] = useState<number>(0);
   const [metadata, setMetadata] = useState<DocumentMetadata | null>(null);
@@ -110,6 +112,51 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
       // Don't set error here as it's handled by useErrorHandler
     }
   }, [reportId, disableMetadata, wrapPromise]);
+  
+  // Generate preview of the document
+  const handleGeneratePreview = useCallback(async () => {
+    if (!reportId) {
+      handleError(new Error('Report ID is required for preview'));
+      return;
+    }
+    
+    setGeneratingPreview(true);
+    setPreviewError(null);
+    
+    try {
+      const loadingState: LoadingState = {
+        isLoading: true,
+        stage: 'preview',
+        message: 'Generating preview...',
+        progress: 0
+      };
+      dispatch(setLoadingAsync(loadingState));
+      
+      const url = await documentService.generatePreview(reportId);
+      if (url) {
+        dispatch(setPreviewUrlAsync(url));
+        setPreviewError(null);
+      }
+    } catch (err) {
+      // Use handleError from useErrorHandler
+      handleError(err, {
+        showToUser: true,
+        onError: (error) => {
+          setPreviewError(error.message);
+          setGeneratingPreview(false);
+        }
+      });
+    } finally {
+      setGeneratingPreview(false);
+      const loadingState: LoadingState = {
+        isLoading: false,
+        stage: undefined,
+        message: undefined,
+        progress: undefined
+      };
+      dispatch(setLoadingAsync(loadingState));
+    }
+  }, [reportId, handleError, dispatch, documentService]);
   
   // Fetch document metadata from Supabase
   const fetchDocumentMetadata = useCallback(async (documentId: string) => {
@@ -159,51 +206,7 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
       };
       dispatch(setLoadingAsync(loadingState));
     }
-  }, [dispatch, handleGeneratePreview]);
-  
-  // Generate preview of the document
-  const handleGeneratePreview = useCallback(async () => {
-    if (!reportId) {
-      handleError(new Error('Report ID is required for preview'));
-      return;
-    }
-    
-    setGeneratingPreview(true);
-    setPreviewError(null);
-    
-    try {
-      const loadingState: LoadingState = {
-        isLoading: true,
-        stage: 'preview',
-        message: 'Generating preview...',
-        progress: 0
-      };
-      dispatch(setLoadingAsync(loadingState));
-      
-      const url = await documentService.generatePreview(reportId);
-      if (url) {
-        dispatch(setPreviewUrlAsync(url));
-        setPreviewError(null);
-      }
-    } catch (err) {
-      // Use handleError from useErrorHandler
-      handleError(err, {
-        showNotification: true,
-        onError: (error) => {
-          setPreviewError(error.message);
-          setGeneratingPreview(false);
-        }
-      });
-    } finally {
-      const loadingState: LoadingState = {
-        isLoading: false,
-        stage: undefined,
-        message: undefined,
-        progress: undefined
-      };
-      dispatch(setLoadingAsync(loadingState));
-    }
-  }, [reportId, handleError]);
+  }, [dispatch, documentService, handleGeneratePreview]);
   
   // Download the document with progress tracking
   const handleDownload = useCallback(async (format: 'docx' | 'pdf' = 'docx') => {
@@ -211,18 +214,28 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
       handleError(new Error('Report ID is required for download'));
       return;
     }
+    
+    // Check if we're in a browser environment
+    if (!isBrowser) {
+      console.warn('Download attempted in non-browser environment');
+      return;
+    }
 
     // Create a unique task ID for this download
     const taskId = `download-${reportId}-${Date.now()}`;
-    startTask(taskId, 'download');
+    // Update task state to indicate download is starting
+    updateTask({
+      id: taskId,
+      stage: 'finalization',
+      status: 'in_progress',
+      message: `Downloading ${format} document...`,
+      progress: 0
+    });
     
     setIsDownloading(true);
     setDownloadProgress(0);
     
     try {
-      // We'll use TaskContext for tracking instead of dispatch
-      // dispatch(setLoadingAsync(true));
-      
       const downloadUrl = `/api/documents/${reportId}/download?format=${format}`;
       
       // Fetch with progress tracking
@@ -257,30 +270,38 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
         if (totalBytes > 0) {
           const progress = Math.round((receivedBytes / totalBytes) * 100);
           setDownloadProgress(progress);
+          
+          // Update task progress
+          updateTask({
+            progress
+          });
         }
       }
       
-      // Combine chunks into a single Uint8Array
-      const chunksAll = new Uint8Array(receivedBytes);
-      let position = 0;
-      for (const chunk of chunks) {
-        chunksAll.set(chunk, position);
-        position += chunk.length;
-      }
-      
-      const blob = new Blob([chunksAll], { 
-        type: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
-      });
-      
-      // Create object URL and trigger download
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Report-${reportId}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Safely create and trigger download using withWindow helper
+      withWindow((window) => {
+        // Combine chunks into a single Uint8Array
+        const chunksAll = new Uint8Array(receivedBytes);
+        let position = 0;
+        for (const chunk of chunks) {
+          chunksAll.set(chunk, position);
+          position += chunk.length;
+        }
+        
+        const blob = new Blob([chunksAll], { 
+          type: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+        });
+        
+        // Create object URL and trigger download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Report-${reportId}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, null);
       
       // Update download count
       try {
@@ -289,13 +310,20 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ format })
         });
+        
+        // Also update through the service
+        documentService.updateDownloadCount(reportId).catch(console.error);
       } catch (err) {
         console.warn('Failed to track download:', err);
         // Non-fatal error, continue
       }
       
       // Mark the task as complete
-      completeTask();
+      updateTask({
+        status: 'completed',
+        progress: 100,
+        message: `${format.toUpperCase()} download completed`
+      });
       
       setIsDownloading(false);
       setRetries(0);
@@ -306,18 +334,22 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
       
     } catch (err) {
       handleError(err, {
-        showNotification: true,
+        showToUser: true,
         onError: (error) => {
           setIsDownloading(false);
           // Mark the task as failed
-          failTask(error.message);
+          updateTask({
+            status: 'failed',
+            message: error.message,
+            error: error.message
+          });
           
           // Increment retry counter
           setRetries(prev => prev + 1);
         }
       });
     }
-  }, [reportId, handleError, startTask, completeTask, failTask, onDownloadComplete]);
+  }, [reportId, handleError, updateTask, onDownloadComplete, documentService]);
   
   // Generate and copy share link
   const handleShareLink = async () => {
@@ -363,14 +395,28 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
   
   // Copy share URL to clipboard
   const copyShareUrl = async () => {
-    if (!isBrowser || !navigator.clipboard || !shareUrl) return;
+    if (!isBrowser || !shareUrl) return;
     
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setShowShareSuccess(true);
-    } catch (err) {
-      console.error('Failed to copy to clipboard:', err);
-    }
+    withWindow(async (window) => {
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(shareUrl);
+          setShowShareSuccess(true);
+        } else {
+          // Fallback method
+          const textArea = document.createElement('textarea');
+          textArea.value = shareUrl;
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+          setShowShareSuccess(true);
+        }
+      } catch (err) {
+        console.error('Failed to copy to clipboard:', err);
+      }
+    }, null);
   };
   
   // Close the share success notification
@@ -380,17 +426,22 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
   
   // When a document is updated, clear the cache to ensure fresh data
   const invalidateDocumentCache = useCallback(() => {
-    if (reportId) {
-      const cacheKey = `supabase_documents_${JSON.stringify({
-        select: '*',
-        filter: { id: reportId },
-        single: true
-      })}`;
-      
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(cacheKey);
+    if (!reportId || !isBrowser) return;
+    
+    withWindow((window) => {
+      if (window.localStorage) {
+        try {
+          const cacheKey = `supabase_documents_${JSON.stringify({
+            select: '*',
+            filter: { id: reportId },
+            single: true
+          })}`;
+          localStorage.removeItem(cacheKey);
+        } catch (e) {
+          console.warn('Could not access localStorage', e);
+        }
       }
-    }
+    }, null);
   }, [reportId]);
   
   // When component unmounts, invalidate the document cache
@@ -632,4 +683,4 @@ const EnhancedReportDownloader: React.FC<EnhancedReportDownloaderProps> = ({
   );
 };
 
-export default EnhancedReportDownloader; 
+export default EnhancedReportDownloader;
