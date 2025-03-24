@@ -5,9 +5,9 @@ This module contains example request and response data for API endpoints,
 which are used to enhance the OpenAPI documentation.
 """
 
-from typing import Dict, Any
-import uuid
 import datetime
+import uuid
+from typing import Any, Dict
 
 # Generate examples for the generate report endpoint
 GENERATE_REPORT_EXAMPLES = {
@@ -17,15 +17,13 @@ GENERATE_REPORT_EXAMPLES = {
             "value": {
                 "document_ids": [str(uuid.uuid4()), str(uuid.uuid4())],
                 "additional_info": "Include analysis of water damage in bathroom",
-                "template_id": str(uuid.uuid4())
-            }
+                "template_id": str(uuid.uuid4()),
+            },
         },
         "Minimal request": {
             "summary": "Minimal report generation request",
-            "value": {
-                "document_ids": [str(uuid.uuid4())]
-            }
-        }
+            "value": {"document_ids": [str(uuid.uuid4())]},
+        },
     },
     "responses": {
         "200": {
@@ -33,10 +31,8 @@ GENERATE_REPORT_EXAMPLES = {
                 "summary": "Report successfully generated",
                 "value": {
                     "status": "success",
-                    "data": {
-                        "report_id": str(uuid.uuid4())
-                    }
-                }
+                    "data": {"report_id": str(uuid.uuid4())},
+                },
             }
         },
         "404": {
@@ -48,9 +44,9 @@ GENERATE_REPORT_EXAMPLES = {
                     "message": "One or more documents not found",
                     "details": {
                         "resource_type": "document",
-                        "resource_id": str(uuid.uuid4())
-                    }
-                }
+                        "resource_id": str(uuid.uuid4()),
+                    },
+                },
             }
         },
         "500": {
@@ -62,12 +58,12 @@ GENERATE_REPORT_EXAMPLES = {
                     "message": "Error communicating with AI service",
                     "details": {
                         "error_type": "AIConnectionError",
-                        "original_error": "Failed to connect to AI service: timeout"
-                    }
-                }
+                        "original_error": "Failed to connect to AI service: timeout",
+                    },
+                },
             }
-        }
-    }
+        },
+    },
 }
 
 # Examples for the upload endpoint
@@ -84,12 +80,12 @@ UPLOAD_EXAMPLES = {
                                 "file_id": str(uuid.uuid4()),
                                 "filename": "example.pdf",
                                 "file_size": 1024567,
-                                "mime_type": "application/pdf"
+                                "mime_type": "application/pdf",
                             }
                         ],
-                        "report_id": str(uuid.uuid4())
-                    }
-                }
+                        "report_id": str(uuid.uuid4()),
+                    },
+                },
             }
         },
         "413": {
@@ -99,11 +95,8 @@ UPLOAD_EXAMPLES = {
                     "status": "error",
                     "code": "VALIDATION_ERROR",
                     "message": "File too large. The maximum allowed size is 1GB.",
-                    "details": {
-                        "file_size": 1073741825,
-                        "max_size": 1073741824
-                    }
-                }
+                    "details": {"file_size": 1073741825, "max_size": 1073741824},
+                },
             }
         },
         "422": {
@@ -115,11 +108,11 @@ UPLOAD_EXAMPLES = {
                     "message": "Invalid file type",
                     "details": {
                         "file_extension": "exe",
-                        "allowed_extensions": ["pdf", "docx", "jpg", "png"]
-                    }
-                }
+                        "allowed_extensions": ["pdf", "docx", "jpg", "png"],
+                    },
+                },
             }
-        }
+        },
     }
 }
 
@@ -133,9 +126,9 @@ DOWNLOAD_EXAMPLES = {
                     "status": "success",
                     "data": {
                         "file_path": "/path/to/report.docx",
-                        "download_url": "/api/download/file/123456"
-                    }
-                }
+                        "download_url": "/api/download/file/123456",
+                    },
+                },
             }
         },
         "404": {
@@ -147,11 +140,11 @@ DOWNLOAD_EXAMPLES = {
                     "message": "Report not found",
                     "details": {
                         "resource_type": "report",
-                        "resource_id": str(uuid.uuid4())
-                    }
-                }
+                        "resource_id": str(uuid.uuid4()),
+                    },
+                },
             }
-        }
+        },
     }
 }
 
@@ -162,7 +155,7 @@ REFINE_EXAMPLES = {
             "summary": "Refine report request",
             "value": {
                 "instructions": "Expand on the water damage section and add more detail about estimated repair costs."
-            }
+            },
         }
     },
     "responses": {
@@ -174,9 +167,9 @@ REFINE_EXAMPLES = {
                     "data": {
                         "report_id": str(uuid.uuid4()),
                         "content": "The refined report content with expanded sections...",
-                        "updated_at": datetime.datetime.now().isoformat()
-                    }
-                }
+                        "updated_at": datetime.datetime.now().isoformat(),
+                    },
+                },
             }
         },
         "503": {
@@ -186,14 +179,11 @@ REFINE_EXAMPLES = {
                     "status": "error",
                     "code": "SERVICE_UNAVAILABLE",
                     "message": "AI service is currently unavailable",
-                    "details": {
-                        "retry_after": 60,
-                        "service": "OpenAI API"
-                    }
-                }
+                    "details": {"retry_after": 60, "service": "OpenAI API"},
+                },
             }
-        }
-    }
+        },
+    },
 }
 
 # Common error response examples that can be shared across endpoints
@@ -204,8 +194,8 @@ COMMON_ERROR_EXAMPLES = {
             "value": {
                 "status": "error",
                 "code": "UNAUTHORIZED",
-                "message": "Authentication required to access this resource"
-            }
+                "message": "Authentication required to access this resource",
+            },
         }
     },
     "403": {
@@ -215,10 +205,8 @@ COMMON_ERROR_EXAMPLES = {
                 "status": "error",
                 "code": "FORBIDDEN",
                 "message": "You don't have permission to access this resource",
-                "details": {
-                    "required_role": "admin"
-                }
-            }
+                "details": {"required_role": "admin"},
+            },
         }
     },
     "429": {
@@ -228,12 +216,8 @@ COMMON_ERROR_EXAMPLES = {
                 "status": "error",
                 "code": "TOO_MANY_REQUESTS",
                 "message": "Rate limit exceeded. Please try again later.",
-                "details": {
-                    "retry_after": 30,
-                    "limit": 100,
-                    "period": "1 hour"
-                }
-            }
+                "details": {"retry_after": 30, "limit": 100, "period": "1 hour"},
+            },
         }
     },
     "500": {
@@ -242,24 +226,16 @@ COMMON_ERROR_EXAMPLES = {
             "value": {
                 "status": "error",
                 "code": "INTERNAL_SERVER_ERROR",
-                "message": "An unexpected error occurred"
-            }
+                "message": "An unexpected error occurred",
+            },
         }
-    }
+    },
 }
 
 # Mapping of endpoints to examples
 ENDPOINT_EXAMPLES: Dict[str, Dict[str, Any]] = {
-    "/api/generate": {
-        "post": GENERATE_REPORT_EXAMPLES
-    },
-    "/api/upload": {
-        "post": UPLOAD_EXAMPLES
-    },
-    "/api/download/{report_id}": {
-        "get": DOWNLOAD_EXAMPLES
-    },
-    "/api/edit/refine/{report_id}": {
-        "post": REFINE_EXAMPLES
-    }
-} 
+    "/api/generate": {"post": GENERATE_REPORT_EXAMPLES},
+    "/api/upload": {"post": UPLOAD_EXAMPLES},
+    "/api/download/{report_id}": {"get": DOWNLOAD_EXAMPLES},
+    "/api/edit/refine/{report_id}": {"post": REFINE_EXAMPLES},
+}

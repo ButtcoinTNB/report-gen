@@ -4,13 +4,17 @@ Insurance Report Generator API Routes
 """
 
 from fastapi import APIRouter
-# Import only routers that actually exist
-from .reports import router as reports_router
+
+from .agent_loop import (
+    router as agents_router,
+)  # Changed from agents.py to agent_loop.py
 from .documents import router as documents_router
 from .format import router as formats_router  # Changed from formats.py to format.py
-from .agent_loop import router as agents_router  # Changed from agents.py to agent_loop.py
-from .upload import router as uploads_router
+
+# Import only routers that actually exist
+from .reports import router as reports_router
 from .tasks import router as tasks_router
+from .upload import router as uploads_router
 
 # Create the main API router
 api_router = APIRouter()

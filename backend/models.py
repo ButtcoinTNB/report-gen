@@ -1,27 +1,33 @@
-from typing import Dict, Optional, List, Any
-from pydantic import BaseModel, UUID4
-import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import UUID4, BaseModel
+
 
 # Pydantic Models for API and Supabase
 class SupabaseModel(BaseModel):
     """Base model for Supabase tables"""
+
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     is_deleted: bool = False
-    
+
     class Config:
         orm_mode = True
 
+
 class User(SupabaseModel):
     """User model for the 'users' table in Supabase"""
+
     user_id: UUID4
     email: str
     username: str
     hashed_password: Optional[str] = None
     is_active: bool = True
 
+
 class File(SupabaseModel):
     """File model for the 'files' table in Supabase"""
+
     file_id: UUID4
     report_id: UUID4
     filename: str
@@ -32,16 +38,20 @@ class File(SupabaseModel):
     mime_type: Optional[str] = None
     user_id: Optional[UUID4] = None
 
+
 class FormatMetadata(BaseModel):
     """Format metadata for templates"""
+
     header: Optional[str] = None
     footer: Optional[str] = None
     fonts: Dict[str, str] = {}
     margins: Dict[str, int] = {}
     logo_path: Optional[str] = None
 
+
 class Template(SupabaseModel):
     """Template model for the 'templates' table in Supabase"""
+
     template_id: UUID4
     name: str
     content: str
@@ -50,8 +60,10 @@ class Template(SupabaseModel):
     meta_data: Optional[FormatMetadata] = None
     user_id: Optional[UUID4] = None
 
+
 class Report(SupabaseModel):
     """Report model for the 'reports' table in Supabase"""
+
     report_id: UUID4
     title: Optional[str] = None
     content: Optional[str] = None
@@ -62,22 +74,28 @@ class Report(SupabaseModel):
     user_id: Optional[UUID4] = None
     current_version: int = 1
 
+
 class ReportUpdate(BaseModel):
     """Model for updating a report"""
+
     title: Optional[str] = None
     content: Optional[str] = None
     is_finalized: Optional[bool] = None
     current_version: Optional[int] = None
 
+
 class ReportCreate(BaseModel):
     """Model for creating a new report"""
+
     title: Optional[str] = None
     content: Optional[str] = None
     template_id: Optional[UUID4] = None
     user_id: Optional[UUID4] = None
 
+
 class ReportVersion(SupabaseModel):
     """Model for tracking report versions"""
+
     id: UUID4
     report_id: UUID4
     version_number: int
@@ -85,21 +103,27 @@ class ReportVersion(SupabaseModel):
     created_by: Optional[UUID4] = None
     changes_description: Optional[str] = None
 
+
 class ReportVersionCreate(BaseModel):
     """Model for creating a new report version"""
+
     report_id: UUID4
     version_number: int
     content: str
     changes_description: Optional[str] = None
     created_by: Optional[UUID4] = None
 
+
 class ReportVersionResponse(BaseModel):
     """Response model for report version endpoints"""
+
     versions: List[ReportVersion]
     current_version: int
 
+
 class FileCreate(BaseModel):
     """Model for creating a new file"""
+
     filename: str
     file_type: str
     content: Optional[str] = None
@@ -108,8 +132,10 @@ class FileCreate(BaseModel):
     report_id: Optional[UUID4] = None
     user_id: Optional[UUID4] = None
 
+
 class TemplateCreate(BaseModel):
     """Model for creating a new template"""
+
     name: str
     content: str
     version: str
@@ -117,8 +143,10 @@ class TemplateCreate(BaseModel):
     meta_data: Optional[FormatMetadata] = None
     user_id: Optional[UUID4] = None
 
+
 class ReferenceReport(SupabaseModel):
     """Reference report model for the 'reference_reports' table in Supabase"""
+
     reference_id: UUID4
     title: str
     content: str
@@ -129,14 +157,17 @@ class ReferenceReport(SupabaseModel):
     public_url: Optional[str] = None
     user_id: Optional[UUID4] = None
 
+
 class ReferenceReportCreate(BaseModel):
     """Model for creating a new reference report"""
+
     title: str
     content: str
     category: str
     tags: List[str] = []
     metadata: Optional[Dict[str, Any]] = None
     user_id: Optional[UUID4] = None
+
 
 # Helper functions for converting between Supabase rows and Pydantic models
 def supabase_to_pydantic(table_name: str, row: Dict[str, Any]) -> SupabaseModel:
@@ -155,6 +186,7 @@ def supabase_to_pydantic(table_name: str, row: Dict[str, Any]) -> SupabaseModel:
         return ReportVersion(**row)
     else:
         raise ValueError(f"Unknown table name: {table_name}")
+
 
 def pydantic_to_supabase(model: SupabaseModel) -> Dict[str, Any]:
     """Convert a Pydantic model to a Supabase row"""

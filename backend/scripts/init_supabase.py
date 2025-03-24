@@ -6,16 +6,18 @@ This script creates the necessary tables in Supabase:
 2. reports - For storing uploaded document metadata
 """
 
-import sys
 import os
-import time
+import sys
+
 import requests
 
 # Add parent directory to path to import from project
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from supabase import create_client, Client
 from config import settings
+
+from supabase import Client, create_client
+
 
 def create_bucket_if_not_exists(supabase: Client, bucket_name: str):
     """Create a storage bucket if it doesn't already exist."""
@@ -23,19 +25,16 @@ def create_bucket_if_not_exists(supabase: Client, bucket_name: str):
         # Check if bucket exists first
         buckets = supabase.storage.list_buckets()
         bucket_exists = any(bucket.name == bucket_name for bucket in buckets)
-        
+
         if not bucket_exists:
             print(f"Creating storage bucket: {bucket_name}")
             supabase.storage.create_bucket(
-                bucket_name,
-                options={
-                    'public': True  # Make bucket publicly accessible
-                }
+                bucket_name, options={"public": True}  # Make bucket publicly accessible
             )
             print(f"Successfully created bucket: {bucket_name}")
         else:
             print(f"Bucket already exists: {bucket_name}")
-            
+
     except Exception as e:
         print(f"Error creating bucket {bucket_name}: {str(e)}")
 
@@ -44,82 +43,90 @@ def create_table_if_not_exists(supabase: Client, table_name: str, definition: di
     """Create a table if it doesn't already exist."""
     try:
         # Check if we can query the table (which would indicate it exists)
-        test_query = supabase.table(table_name).select("*").limit(1).execute()
+        supabase.table(table_name).select("*").limit(1).execute()
         print(f"Table already exists: {table_name}")
         return True
     except Exception:
         # Table doesn't exist, try to create it
         pass
-    
+
     try:
         print(f"Creating table: {table_name}")
-        
+
         # We'll use raw SQL via the REST API to create the table
         # This approach works with service role key
-        
+
         # Construct the SQL statement
         sql = f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
-        sql += ",\n".join([f"  {col_name} {col_def}" for col_name, col_def in definition.items()])
+        sql += ",\n".join(
+            [f"  {col_name} {col_def}" for col_name, col_def in definition.items()]
+        )
         sql += "\n);"
-        
+
         # Execute the SQL via the REST API
         headers = {
             "apikey": settings.SUPABASE_KEY,
             "Authorization": f"Bearer {settings.SUPABASE_KEY}",
             "Content-Type": "application/json",
-            "Prefer": "return=minimal"
+            "Prefer": "return=minimal",
         }
-        
+
         response = requests.post(
             f"{settings.SUPABASE_URL}/rest/v1/rpc/execute_sql",
             json={"query": sql},
-            headers=headers
+            headers=headers,
         )
-        
+
         if response.status_code == 200:
             print(f"✅ Successfully created table: {table_name}")
             return True
         else:
             print(f"❌ Failed to create table via REST API: {response.status_code}")
             print(f"  Response: {response.text}")
-            
+
             # Provide fallback instructions for manual creation
-            print("\nPlease create the table manually in your Supabase dashboard with these columns:")
+            print(
+                "\nPlease create the table manually in your Supabase dashboard with these columns:"
+            )
             for col_name, col_def in definition.items():
                 print(f"  - {col_name}: {col_def}")
-            
+
             print("\nAlternatively, run this SQL in the Supabase SQL editor:")
             print(sql)
             return False
-        
+
     except Exception as e:
         print(f"Error creating table {table_name}: {str(e)}")
-        
+
         # Provide fallback instructions
-        print("\nPlease create the table manually in your Supabase dashboard with these columns:")
+        print(
+            "\nPlease create the table manually in your Supabase dashboard with these columns:"
+        )
         for col_name, col_def in definition.items():
             print(f"  - {col_name}: {col_def}")
-        
+
         print("\nAlternatively, run this SQL in the Supabase SQL editor:")
         sql = f"CREATE TABLE IF NOT EXISTS {table_name} (\n"
-        sql += ",\n".join([f"  {col_name} {col_def}" for col_name, col_def in definition.items()])
+        sql += ",\n".join(
+            [f"  {col_name} {col_def}" for col_name, col_def in definition.items()]
+        )
         sql += "\n);"
         print(sql)
-        
+
         return False
 
 
 def main():
     print("Initializing Supabase for the Scrittore Automatico di Perizie...")
-    
+
     try:
         # Initialize Supabase client
         supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         print("Connected to Supabase successfully")
-        
+
         # Create storage buckets
         create_bucket_if_not_exists(supabase, "reports")
-        
+
         # Define tables
         reference_reports_def = {
             "id": "bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY",
@@ -129,28 +136,28 @@ def main():
             "updated_at": "timestamp with time zone DEFAULT now()",
             "source": "text",
             "size_bytes": "integer",
-            "page_count": "integer"
+            "page_count": "integer",
         }
-        
+
         reports_def = {
             "id": "bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY",
             "report_id": "text NOT NULL UNIQUE",
             "template_id": "integer",
             "files": "jsonb",
             "status": "text DEFAULT 'uploaded'",
-            "created_at": "timestamp with time zone DEFAULT now()"
+            "created_at": "timestamp with time zone DEFAULT now()",
         }
-        
+
         # Create tables if they don't exist
         create_table_if_not_exists(supabase, "reference_reports", reference_reports_def)
         create_table_if_not_exists(supabase, "reports", reports_def)
-        
+
         print("\nDatabase initialization instructions generated.")
         print("Please follow the SQL instructions above to create the required tables.")
-        
+
     except Exception as e:
         print(f"Error initializing Supabase: {str(e)}")
 
 
 if __name__ == "__main__":
-    main() 
+    main()

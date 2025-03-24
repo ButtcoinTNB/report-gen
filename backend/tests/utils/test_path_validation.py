@@ -8,20 +8,16 @@ Usage:
 """
 
 import os
-import sys
-import pytest
-from typing import Dict, List, Tuple
-from pathlib import Path
 
 # Import the functions we want to test
-from utils.storage import validate_path, get_safe_file_path
+from utils.storage import get_safe_file_path, validate_path
 
 
 def test_valid_paths():
     """Test cases with valid paths."""
     test_base_dir = os.path.join(os.getcwd(), "tmp", "path_test")
     os.makedirs(test_base_dir, exist_ok=True)
-    
+
     # Valid test cases
     test_cases = [
         ("Simple valid path", "file.txt"),
@@ -33,7 +29,7 @@ def test_valid_paths():
         ("Path with redundant slashes", "dir//file.txt"),
         ("Path with current dir notation", "./file.txt"),
     ]
-    
+
     for name, path in test_cases:
         is_valid, validated_path = validate_path(path, test_base_dir)
         assert is_valid, f"Test case failed: {name}"
@@ -43,7 +39,7 @@ def test_invalid_paths():
     """Test cases with invalid paths that should be rejected."""
     test_base_dir = os.path.join(os.getcwd(), "tmp", "path_test")
     os.makedirs(test_base_dir, exist_ok=True)
-    
+
     # Invalid test cases
     test_cases = [
         ("Simple traversal", "../file.txt"),
@@ -58,7 +54,7 @@ def test_invalid_paths():
         ("UUID with path traversal", "../550e8400-e29b-41d4-a716-446655440000"),
         ("Path with combined issues", "dir/.//../file.txt"),
     ]
-    
+
     for name, path in test_cases:
         is_valid, validated_path = validate_path(path, test_base_dir)
         assert not is_valid, f"Test case should fail: {name}"
@@ -68,12 +64,12 @@ def test_safe_file_path():
     """Test the get_safe_file_path function."""
     test_base_dir = os.path.join(os.getcwd(), "tmp", "path_test")
     os.makedirs(test_base_dir, exist_ok=True)
-    
+
     # Valid paths
     safe_path = get_safe_file_path("file.txt", test_base_dir)
     assert safe_path is not None
     assert test_base_dir in str(safe_path)
-    
+
     # Invalid paths should return None
     unsafe_path = get_safe_file_path("../file.txt", test_base_dir)
-    assert unsafe_path is None 
+    assert unsafe_path is None

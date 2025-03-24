@@ -1,14 +1,17 @@
 import os
-import sys
-from supabase import create_client
+
 from dotenv import load_dotenv
+
+from supabase import create_client
 
 # Load environment variables from .env file if it exists
 load_dotenv()
 
 # Get Supabase credentials (either from .env or user input)
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # This should be the service_role key for admin operations
+SUPABASE_KEY = os.getenv(
+    "SUPABASE_KEY"
+)  # This should be the service_role key for admin operations
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     print("Supabase credentials not found in environment variables.")
@@ -101,60 +104,48 @@ CREATE INDEX IF NOT EXISTS reports_id_idx ON reports(id);
 CREATE INDEX IF NOT EXISTS reports_report_id_idx ON reports(report_id);
 """
 
+
 def setup_supabase_functions():
     """Set up necessary Supabase database functions"""
     try:
         # Initialize Supabase client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        
+
         # Execute SQL to set up helper functions
         print("Setting up schema_check function...")
-        result = supabase.rpc(
-            'run_sql',
-            {
-                'query': SCHEMA_CHECK_FUNCTION
-            }
-        ).execute()
+        supabase.rpc("run_sql", {"query": SCHEMA_CHECK_FUNCTION}).execute()
         print("✅ Schema check function created")
-        
+
         print("Setting up run_sql function...")
-        result = supabase.rpc(
-            'run_sql',
-            {
-                'query': RUN_SQL_FUNCTION
-            }
-        ).execute()
+        supabase.rpc("run_sql", {"query": RUN_SQL_FUNCTION}).execute()
         print("✅ Run SQL function created")
-        
+
         return True
     except Exception as e:
         print(f"Error setting up Supabase helper functions: {str(e)}")
         return False
+
 
 def setup_report_id():
     """Set up report_id column and related constraints/triggers"""
     try:
         # Initialize Supabase client
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        
+
         # Execute SQL to set up report_id
         print("Setting up report_id column and related objects...")
-        result = supabase.rpc(
-            'run_sql',
-            {
-                'query': SETUP_REPORT_ID
-            }
-        ).execute()
+        supabase.rpc("run_sql", {"query": SETUP_REPORT_ID}).execute()
         print("✅ report_id column and related objects created")
-        
+
         return True
     except Exception as e:
         print(f"Error setting up report_id: {str(e)}")
         return False
 
+
 if __name__ == "__main__":
     print("Setting up Supabase helper functions and report_id column...")
-    
+
     # First try to set up the helper functions
     if setup_supabase_functions():
         # Then set up the report_id column
@@ -165,4 +156,6 @@ if __name__ == "__main__":
             print("\n❌ Failed to set up report_id column.")
     else:
         print("\n❌ Failed to set up helper functions.")
-        print("This might be due to insufficient permissions. Make sure you're using the service_role key.") 
+        print(
+            "This might be due to insufficient permissions. Make sure you're using the service_role key."
+        )
