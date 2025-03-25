@@ -83,11 +83,11 @@ def handle_exception(
 ) -> JSONResponse:
     """
     Handle an exception and return a standardized error response
-    
+
     Args:
         exception: The exception to handle
         message: Custom message to use instead of the exception message
-        
+
     Returns:
         JSONResponse with standardized error format
     """
@@ -287,11 +287,11 @@ def retry_operation(
 
     # If we get here, all retries failed
     if last_exception is not None:
-        api_exception = extended_handle_exception(
-            last_exception,
-            f"{operation_name} after {max_retries} retries",
-            include_traceback=True,
-        )
+    api_exception = extended_handle_exception(
+        last_exception,
+        f"{operation_name} after {max_retries} retries",
+        include_traceback=True,
+    )
         raise api_exception
     else:
         # This should never happen, but just in case

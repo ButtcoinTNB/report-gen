@@ -5,12 +5,12 @@ This module contains Pydantic models for validating API requests and responses.
 """
 
 from typing import Any, Dict, Generic, List, Optional, TypeVar
-from uuid import UUID
 from datetime import datetime
+from uuid import UUID
 from pydantic import BaseModel, Field
 
 # Import core types
-from core.types import DataResponse, ErrorResponse
+from core.types import DataResponse
 
 # Generic type variable for data
 T = TypeVar('T')
@@ -100,15 +100,15 @@ class PaginatedResponse(BaseModel, Generic[T]):
 
 
 class AdditionalInfoRequest(BaseModel):
-    document_ids: List[UUID4]
+    document_ids: List[UUID]
     additional_info: str
-    template_id: Optional[UUID4] = None
+    template_id: Optional[UUID] = None
 
 
 class GenerateReportRequest(BaseModel):
-    document_ids: List[UUID4]
+    document_ids: List[UUID]
     additional_info: Optional[str] = ""
-    template_id: Optional[UUID4] = None
+    template_id: Optional[UUID] = None
 
 
 class ReportFileResponse(BaseModel):

@@ -180,6 +180,7 @@ app.middleware("http")(rate_limit_middleware)
 
 # Import and include routers
 from api import tasks
+from api.agent_loop import router as agent_loop_router, register_startup_tasks
 
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
@@ -189,6 +190,10 @@ app.include_router(share.router, prefix="/api/share", tags=["share"])
 app.include_router(
     upload_chunked_router, prefix="/api/upload-chunked", tags=["uploads"]
 )
+app.include_router(agent_loop_router, prefix="/api/agent-loop", tags=["agent-loop"])
+
+# Register the agent_loop startup tasks
+register_startup_tasks(app)
 
 # Serve static files
 upload_dir = Path("./uploads")

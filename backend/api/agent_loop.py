@@ -16,6 +16,7 @@ from fastapi import (
     Query,
     Request,
     Response,
+    FastAPI,
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -27,7 +28,6 @@ from utils.agents_loop import AIAgentLoop
 from utils.error_handler import ErrorResponse, raise_error
 from utils.security import validate_user
 from services.docx_formatter import generate_docx_async, get_document_metrics
-from main import app  # Import FastAPI app instance
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -65,6 +65,23 @@ file_handler.setFormatter(
 )
 metrics_logger.addHandler(file_handler)
 
+# We'll define a function to register startup tasks that main.py can call
+cleanup_task = None
+
+def register_startup_tasks(app: FastAPI) -> None:
+    """Register startup and shutdown tasks with the FastAPI app"""
+    @app.on_event("startup")
+    async def start_cleanup_job() -> None:
+        global cleanup_task
+        cleanup_task = asyncio.create_task(periodic_task_cleanup())
+        logger.info("Started periodic task cleanup job")
+    
+    @app.on_event("shutdown")
+    async def stop_cleanup_job() -> None:
+        global cleanup_task
+        if cleanup_task:
+            cleanup_task.cancel()
+            logger.info("Stopped periodic task cleanup job")
 
 # Helper function
 def format_insurance_data(
@@ -232,13 +249,13 @@ async def generate_report(
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        ErrorResponse.handle_exception(
-            e,
-            error_type="internal",
+        raise_error(
+            "internal",
             message="Failed to start report generation",
+            detail=str(e),
             context={"input_data": input_data.model_dump()},
-            transaction_id=input_data.transaction_id,
-            request_id=x_request_id,
+            transaction_id=input_data.transaction_id or "",
+            request_id=x_request_id or "",
         )
 
 
@@ -1007,34 +1024,38 @@ async def get_report_generation_metrics() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-# Periodic cleanup job to remove old tasks
-async def periodic_task_cleanup():
-    """Remove old tasks from memory periodically"""
+# Replace the previous @app.on_event decorator with a regular async function
+async def periodic_task_cleanup() -> None:
+    """Periodically clean up old tasks from the cache"""
     try:
+        # Sleep intervals
+        cleanup_interval = 3600  # 1 hour
+        retention_period = 24 * 60 * 60  # 24 hours in seconds
+        
         while True:
-            await asyncio.sleep(3600)  # Run every hour
-
-            current_time = time.time()
+            await asyncio.sleep(cleanup_interval)
+            
+            current_time = datetime.now()
             tasks_to_remove = []
-
+            
             for task_id, task_data in tasks_cache.items():
-                # Remove tasks that have been cleaned and are older than 24 hours
-                if (
-                    task_data.get("cleaned")
-                    and current_time - task_data.get("cleaned_at", 0) > 86400
-                ):
+                created_at = datetime.fromisoformat(task_data.get("created_at", ""))
+                age_in_seconds = (current_time - created_at).total_seconds()
+                
+                if age_in_seconds > retention_period:
                     tasks_to_remove.append(task_id)
-
+            
             # Remove old tasks
             for task_id in tasks_to_remove:
                 del tasks_cache[task_id]
-                logger.info(f"Removed old task {task_id} from memory")
-
+                
+                # Also clean up any subscriber queues
+                if task_id in event_subscribers:
+                    del event_subscribers[task_id]
+            
+            if tasks_to_remove:
+                logger.info(f"Cleaned up {len(tasks_to_remove)} old tasks from cache")
+    except asyncio.CancelledError:
+        logger.info("Task cleanup job cancelled")
     except Exception as e:
-        logger.error(f"Error in periodic task cleanup: {e}")
-
-
-# Start the cleanup job on application startup
-@app.on_event("startup")
-async def start_cleanup_job():
-    asyncio.create_task(periodic_task_cleanup())
+        logger.error(f"Error in periodic task cleanup: {str(e)}")

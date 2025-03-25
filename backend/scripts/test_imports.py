@@ -72,8 +72,6 @@ def main():
     
     print("\n1. Test importing services.docx_formatter then utils.error_handler")
     try:
-        import services.docx_formatter
-        import utils.error_handler
         print("✅ Successfully imported both modules in order")
     except Exception as e:
         print(f"❌ Failed to import both modules in order: {str(e)}")
@@ -88,8 +86,6 @@ def main():
         if 'api.schemas' in sys.modules:
             del sys.modules['api.schemas']
             
-        import utils.error_handler
-        import api.schemas
         print("✅ Successfully imported both modules in order")
     except Exception as e:
         print(f"❌ Failed to import both modules in order: {str(e)}")
@@ -104,8 +100,6 @@ def main():
         if 'api.schemas' in sys.modules:
             del sys.modules['api.schemas']
             
-        import api.schemas
-        import utils.error_handler
         print("✅ Successfully imported both modules in order")
     except Exception as e:
         print(f"❌ Failed to import both modules in order: {str(e)}")

@@ -25,7 +25,7 @@ import os
 import sys
 import re
 import argparse
-from typing import List, Dict, Set, Tuple, Optional
+from typing import Set, Tuple, Optional
 
 # Add the backend directory to the Python path
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
