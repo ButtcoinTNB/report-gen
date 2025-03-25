@@ -14,16 +14,17 @@ from typing import (
     TypeVar,
     Union,
     Type,
-    ClassVar,
     NoReturn,
+    cast,
+    Awaitable,
 )
-from typing_extensions import TypedDict
 
-# Import the standard APIResponse model
-from api.schemas import APIResponse
+# Import from core package - using the correct path with backend as root
+from core.types import ErrorResponse, ErrorDetail, ErrorSeverity
+
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
 # Import our custom exceptions
 from utils.exceptions import (
@@ -47,8 +48,8 @@ logger = logging.getLogger(__name__)
 HTTP_499_CLIENT_CLOSED_REQUEST = 499
 
 # Exception mapping for converting standard exceptions to our custom exceptions
-EXCEPTION_MAPPING = {
-    ValidationError: lambda e: ValidationException(str(e), details=str(e.errors())),
+EXCEPTION_MAPPING: Dict[Type[Exception], Callable[[Exception], BaseAPIException]] = {
+    ValidationError: lambda e: ValidationException(str(e), details=str(getattr(e, 'errors', lambda: 'Validation error')())),
     ValueError: lambda e: BadRequestException(str(e)),
     KeyError: lambda e: BadRequestException(f"Missing required key: {str(e)}"),
     FileNotFoundError: lambda e: NotFoundException(f"File not found: {str(e)}"),
@@ -63,185 +64,51 @@ EXCEPTION_MAPPING = {
 }
 
 T = TypeVar("T")
-ErrorType = str
-StatusCode = int
-
-
-class ErrorConfig(TypedDict):
-    status_code: int
-    message: str
-    retryable: bool
-
-
-class ErrorResponse(BaseModel):
-    """Standardized error response model"""
-
-    error_type: ErrorType = Field(description="Type of error that occurred")
-    message: str = Field(description="Human-readable error message")
-    code: StatusCode = Field(description="HTTP status code")
-    retryable: bool = Field(
-        default=False, description="Whether the operation can be retried"
-    )
-    detail: Optional[str] = Field(default=None, description="Additional error details")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Error context")
-    transaction_id: Optional[str] = Field(
-        default=None, description="Transaction ID for tracing"
-    )
-    request_id: Optional[str] = Field(
-        default=None, description="Request ID for tracing"
-    )
-
-    ERROR_TYPES: ClassVar[Dict[ErrorType, ErrorConfig]] = {
-        "VALIDATION_ERROR": {
-            "status_code": status.HTTP_400_BAD_REQUEST,
-            "message": "Invalid request parameters",
-            "retryable": False,
-        },
-        "INTERNAL_ERROR": {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "message": "An internal error occurred",
-            "retryable": True,
-        },
-    }
-
-    def to_dict(self) -> Dict[str, Any]:
-        return self.model_dump()
-
-    @classmethod
-    def format_error(
-        cls,
-        error_type: ErrorType,
-        message: str,
-        code: StatusCode,
-        retryable: bool = False,
-        detail: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        transaction_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        log_error: bool = True,
-    ) -> Dict[str, Any]:
-        if error_type not in cls.ERROR_TYPES:
-            error_type = "INTERNAL_ERROR"
-            detail = f"Unknown error type: {error_type}"
-
-        error_config = cls.ERROR_TYPES[error_type]
-        try:
-            error_response = cls(
-                error_type=error_type,
-                message=str(message),
-                code=code or error_config["status_code"],
-                retryable=(
-                    retryable if retryable is not None else error_config["retryable"]
-                ),
-                detail=detail,
-                context=context or {},
-                transaction_id=transaction_id,
-                request_id=request_id,
-            )
-        except ValidationError as e:
-            logger.error(f"Error creating error response: {e}")
-            error_response = cls(
-                error_type="INTERNAL_ERROR",
-                message="Error creating error response",
-                code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(e),
-            )
-
-        if log_error:
-            logger.error(
-                f"Error occurred: {error_response.error_type} - {error_response.message}",
-                extra={"error_details": error_response.to_dict()},
-            )
-            if error_type == "INTERNAL_ERROR":
-                logger.error(f"Stack trace: {traceback.format_exc()}")
-
-        return error_response.to_dict()
-
-    @classmethod
-    def raise_error(
-        cls,
-        error_type: ErrorType,
-        message: str,
-        code: StatusCode = status.HTTP_500_INTERNAL_SERVER_ERROR,
-        retryable: bool = False,
-        detail: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        transaction_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        log_error: bool = True,
-    ) -> NoReturn:
-        error_dict = cls.format_error(
-            error_type=error_type,
-            message=message,
-            code=code,
-            retryable=retryable,
-            detail=detail,
-            context=context,
-            transaction_id=transaction_id,
-            request_id=request_id,
-            log_error=log_error,
-        )
-        raise HTTPException(status_code=code, detail=error_dict)
-
-    @classmethod
-    def handle_exception(
-        cls,
-        exception: Exception,
-        error_type: ErrorType = "INTERNAL_ERROR",
-        message: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        transaction_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-    ) -> JSONResponse:
-        error_dict = cls.format_error(
-            error_type=error_type,
-            message=message or str(exception),
-            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            retryable=False,
-            detail=str(exception),
-            context=context or {},
-            transaction_id=transaction_id,
-            request_id=request_id,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_dict
-        )
-
 
 # Convenience function for raising errors
-def raise_error(*args, **kwargs):
-    """Convenience function for raising standardized errors"""
-    return ErrorResponse.raise_error(*args, **kwargs)
-
-
-# Convenience function for formatting errors
-def format_error(*args, **kwargs):
-    """Convenience function for formatting standardized errors"""
-    return ErrorResponse.format_error(*args, **kwargs)
+def raise_error(
+    message: str,
+    detail: Optional[ErrorDetail] = None,
+    status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR
+) -> NoReturn:
+    """Raise an HTTP exception with a standardized error response"""
+    error_response = ErrorResponse(message=message, detail=detail)
+    raise HTTPException(status_code=status_code, detail=error_response.model_dump())
 
 
 # Convenience function for handling exceptions
-def handle_exception(*args, **kwargs):
-    """Convenience function for handling exceptions"""
-    return ErrorResponse.handle_exception(*args, **kwargs)
-
-
-# Original error handler (kept for backward compatibility)
-def legacy_handle_exception(
-    exception: Exception, request: Request, error_info: Dict[str, Any] = None
+def handle_exception(
+    exception: Exception,
+    message: Optional[str] = None,
 ) -> JSONResponse:
     """
-    Handle exceptions and return standardized error responses
-
+    Handle an exception and return a standardized error response
+    
     Args:
         exception: The exception to handle
-        request: The FastAPI request object
-        error_info: Additional error information
-
+        message: Custom message to use instead of the exception message
+        
     Returns:
-        JSONResponse: Standardized error response
+        JSONResponse with standardized error format
     """
-    # ... rest of existing legacy function ...
+    error_detail = ErrorDetail(
+        code="internal_error",
+        message=str(exception),
+        severity=ErrorSeverity.ERROR
+    )
+    
+    error_response = ErrorResponse(
+        message=message or str(exception),
+        detail=error_detail
+    )
+    
+    logger.error(f"Error occurred: {str(exception)}")
+    logger.error(f"Stack trace: {traceback.format_exc()}")
+    
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=error_response.model_dump()
+    )
 
 
 def extended_handle_exception(
@@ -287,7 +154,7 @@ def extended_handle_exception(
     )
 
 
-def api_error_handler(func: Callable):
+def api_error_handler(func: Callable[..., Any]):
     """
     Decorator that standardizes error handling for API endpoints.
     Catches exceptions, converts them to appropriate responses using our custom exceptions.
@@ -300,7 +167,7 @@ def api_error_handler(func: Callable):
     """
 
     @wraps(func)
-    async def wrapper(*args, **kwargs):
+    async def wrapper(*args: Any, **kwargs: Any):
         try:
             return await func(*args, **kwargs)
         except Exception as e:
@@ -309,21 +176,34 @@ def api_error_handler(func: Callable):
 
             # Convert to our custom exception
             api_exception = extended_handle_exception(e, operation)
+            
+            # Extract the error message - api_exception.detail is a dict
+            detail_dict = api_exception.detail if isinstance(api_exception.detail, dict) else {}
+            error_message = detail_dict.get("message", str(e)) if detail_dict else str(e)
+            
+            # Create error detail with proper typing
+            error_detail: ErrorDetail = {
+                "code": api_exception.code,
+                "message": error_message,
+                "severity": ErrorSeverity.ERROR
+            }
+            
+            # Create an error response using our core ErrorResponse type
+            error_response = ErrorResponse(
+                message=error_message,
+                detail=error_detail
+            )
 
             # Return standardized error response
             return JSONResponse(
                 status_code=api_exception.status_code,
-                content=APIResponse(
-                    status="error",
-                    message=api_exception.detail["message"],
-                    code=api_exception.code,
-                ).dict(),
+                content=error_response.model_dump()
             )
 
     return wrapper
 
 
-async def api_exception_handler(request: Request, exc: BaseAPIException):
+async def api_exception_handler(request: Request, exc: BaseAPIException) -> JSONResponse:
     """
     Global exception handler for FastAPI that handles our custom exceptions.
     Ensures consistent error responses even for unhandled exceptions.
@@ -333,23 +213,39 @@ async def api_exception_handler(request: Request, exc: BaseAPIException):
         app.add_exception_handler(BaseAPIException, api_exception_handler)
     """
     logger.error(f"API Exception: {exc.detail}")
+    
+    # Extract the error message - exc.detail is a dict
+    detail_dict = exc.detail if isinstance(exc.detail, dict) else {}
+    error_message = detail_dict.get("message", "An error occurred") if detail_dict else "An error occurred"
+    
+    # Create error detail with proper typing
+    error_detail: ErrorDetail = {
+        "code": exc.code,
+        "message": error_message,
+        "severity": ErrorSeverity.ERROR
+    }
+    
+    # Add any additional details if available
+    if exc.details:
+        error_detail["params"] = exc.details
+    
+    # Create a standardized error response
+    error_response = ErrorResponse(
+        message=error_message,
+        detail=error_detail
+    )
 
     return JSONResponse(
         status_code=exc.status_code,
-        content=APIResponse(
-            status="error",
-            message=exc.detail["message"],
-            code=exc.code,
-            data=exc.details,
-        ).dict(),
+        content=error_response.model_dump()
     )
 
 
 def retry_operation(
-    operation_func,
+    operation_func: Callable[[], Any],
     max_retries: int = 3,
     operation_name: str = "API operation",
-    retry_exceptions: Optional[Union[Type[Exception], tuple]] = None,
+    retry_exceptions: Optional[Union[Type[Exception], tuple[Type[Exception], ...]]] = None,
 ):
     """
     Retry helper that attempts to execute an operation multiple times before giving up.
@@ -371,7 +267,7 @@ def retry_operation(
         retry_exceptions = (ConnectionError, TimeoutError)
 
     retry_count = 0
-    last_exception = None
+    last_exception: Optional[Exception] = None
 
     while retry_count < max_retries:
         try:
@@ -390,21 +286,40 @@ def retry_operation(
                 break
 
     # If we get here, all retries failed
-    api_exception = extended_handle_exception(
-        last_exception,
-        f"{operation_name} after {max_retries} retries",
-        include_traceback=True,
-    )
+    if last_exception is not None:
+        api_exception = extended_handle_exception(
+            last_exception,
+            f"{operation_name} after {max_retries} retries",
+            include_traceback=True,
+        )
+        raise api_exception
+    else:
+        # This should never happen, but just in case
+        raise InternalServerException(f"Failed to execute {operation_name} after {max_retries} retries")
 
-    raise api_exception
 
+# Type for functions that can be synchronous or asynchronous
+SyncOrAsyncCallable = Callable[..., Union[T, Awaitable[T]]]
 
-def error_handler(func: Callable[..., T]) -> Callable[..., Union[T, JSONResponse]]:
+def error_handler(func: SyncOrAsyncCallable[T]) -> Callable[..., Awaitable[Union[T, JSONResponse]]]:
+    """
+    Decorator for function-based views that handles exceptions and returns standardized error responses.
+    
+    Args:
+        func: The function to wrap with error handling
+        
+    Returns:
+        A wrapped function that handles exceptions
+    """
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Union[T, JSONResponse]:
         try:
-            return await func(*args, **kwargs)
+            result = func(*args, **kwargs)
+            # If it's awaitable, await it
+            if hasattr(result, '__await__'):
+                return await cast(Awaitable[T], result)
+            return cast(T, result)
         except Exception as e:
-            return ErrorResponse.handle_exception(e)
+            return handle_exception(e)
 
     return wrapper

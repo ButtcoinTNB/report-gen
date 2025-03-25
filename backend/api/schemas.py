@@ -1,46 +1,102 @@
+"""
+API schemas for request and response validation.
+
+This module contains Pydantic models for validating API requests and responses.
+"""
+
 from typing import Any, Dict, Generic, List, Optional, TypeVar
+from uuid import UUID
+from datetime import datetime
+from pydantic import BaseModel, Field
 
-from pydantic import UUID4, BaseModel, Field
-from pydantic.generics import GenericModel
+# Import core types
+from core.types import DataResponse, ErrorResponse
 
-# Define a generic type variable for the response data
-T = TypeVar("T")
+# Generic type variable for data
+T = TypeVar('T')
+
+# Re-export core types for backward compatibility
+APIResponse = DataResponse
+
+class HealthCheckResponse(BaseModel):
+    """Health check response schema"""
+    status: str = "ok"
+    version: str
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 
-class APIResponse(GenericModel, Generic[T]):
-    """
-    Standard API response format for all endpoints
+class DocumentMetadata(BaseModel):
+    """Document metadata schema"""
+    id: str
+    filename: str
+    size: int
+    content_type: str
+    upload_date: datetime
+    user_id: Optional[str] = None
+    status: str = "pending"
 
-    Properties:
-        status: Success or error
-        data: Response data (only for success)
-        message: Human-readable message (required for errors)
-        code: Error code (only for errors)
-        details: Additional error details
-    """
 
-    status: str = Field(
-        default="success", description="Response status (success or error)"
-    )
-    data: Optional[T] = Field(
-        default=None, description="Response data for successful operations"
-    )
-    message: Optional[str] = Field(
-        default=None, description="Human-readable message, usually for errors"
-    )
-    code: Optional[str] = Field(
-        default=None, description="Error code for programmatic handling"
-    )
-    details: Optional[Dict[str, Any]] = Field(
-        default=None, description="Additional details, usually for errors"
-    )
+class ReportRequest(BaseModel):
+    """Report generation request schema"""
+    document_id: str
+    title: Optional[str] = None
+    template_id: Optional[str] = None
+    options: Dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        """Configuration for the APIResponse model"""
 
-        schema_extra = {
-            "example": {"status": "success", "data": {"id": "123", "name": "Example"}}
-        }
+class ReportMetadata(BaseModel):
+    """Report metadata schema"""
+    id: str
+    title: str
+    document_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    progress: Optional[float] = None
+    user_id: Optional[str] = None
+    template_id: Optional[str] = None
+    
+
+class ReportContent(BaseModel):
+    """Report content schema"""
+    id: str
+    metadata: ReportMetadata
+    content: Dict[str, Any]
+    document_url: Optional[str] = None
+
+
+class UserProfile(BaseModel):
+    """User profile schema"""
+    id: str
+    email: str
+    name: Optional[str] = None
+    created_at: datetime
+    settings: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentUploadResponse(BaseModel):
+    """Document upload response schema"""
+    document_id: str
+    upload_url: str
+    expires_at: datetime
+
+
+class TaskStatus(BaseModel):
+    """Task status schema"""
+    task_id: str
+    status: str
+    progress: Optional[float] = None
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    """Paginated response schema"""
+    items: List[T]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
 
 
 class AdditionalInfoRequest(BaseModel):

@@ -6,7 +6,9 @@ import re
 import shutil
 import tempfile
 import time
+import traceback
 import uuid as uuid_lib
+import logging
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,11 +17,30 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+
+# Import the resource manager 
 from utils.resource_manager import resource_manager
-from utils.error_handler import handle_exception, logger
+
+# Setup logger directly instead of importing from error_handler
+logger = logging.getLogger(__name__)
+
+# Import metrics collector
 from utils.metrics import MetricsCollector
 
+# Import our service
 from .docx_service import docx_service
+
+# Simple local exception handler to avoid circular imports
+def local_handle_exception(e: Exception, operation: str) -> None:
+    """
+    Local exception handler to avoid circular imports with utils.error_handler
+    
+    Args:
+        e: The exception to handle
+        operation: Description of the operation that failed
+    """
+    logger.error(f"Error in {operation}: {str(e)}")
+    logger.error(f"Stack trace: {traceback.format_exc()}")
 
 
 def parse_markdown(doc: Document, markdown_text: str) -> None:
@@ -60,7 +81,7 @@ def parse_markdown(doc: Document, markdown_text: str) -> None:
             p.add_run(paragraph.strip())
 
     except Exception as e:
-        handle_exception(e, "Markdown parsing")
+        local_handle_exception(e, "Markdown parsing")
         raise
 
 
@@ -147,7 +168,7 @@ def replace_template_variables(doc: Document, variables: Dict[str, Any]) -> None
                             run.text = text
 
     except Exception as e:
-        handle_exception(e, "Template variable replacement")
+        local_handle_exception(e, "Template variable replacement")
         raise
 
 
@@ -192,7 +213,7 @@ def generate_docx(
         return str(doc_path)
 
     except Exception as e:
-        handle_exception(e, "DOCX generation")
+        local_handle_exception(e, "DOCX generation")
         raise
 
 
@@ -229,7 +250,7 @@ def format_report_as_docx(
         return doc_path
 
     except Exception as e:
-        handle_exception(e, "Report formatting")
+        local_handle_exception(e, "Report formatting")
         raise
 
 

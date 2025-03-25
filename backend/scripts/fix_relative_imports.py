@@ -1,120 +1,268 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Fix relative imports beyond top-level package.
+Script to fix relative imports that go beyond the top-level package.
 
-This script addresses the "attempted relative import beyond top-level package" error
-by changing problematic relative imports (using '..') to absolute imports.
+This script scans Python files and converts problematic relative imports to absolute imports.
+It identifies relative imports that use too many dots (..) and modifies them to use absolute paths
+relative to the backend directory.
 
 Usage:
-    python backend/scripts/fix_relative_imports.py
+    python scripts/fix_relative_imports.py [--check-only] [--verbose] [path...]
+    
+    --check-only: Only check for problematic imports without making changes
+    --verbose: Print detailed information about found imports
+    --safelist: Comma-separated list of modules to skip (to avoid breaking circular dependencies)
+    path: Optional path(s) to scan. If not provided, scans entire backend directory.
+
+Example:
+    python scripts/fix_relative_imports.py
+    python scripts/fix_relative_imports.py --check-only
+    python scripts/fix_relative_imports.py services/docx_formatter.py
+    python scripts/fix_relative_imports.py --safelist=utils.error_handler,api.schemas
 """
 
 import os
+import sys
 import re
-from pathlib import Path
+import argparse
+from typing import List, Dict, Set, Tuple, Optional
 
-# Define the backend directory as the root
-BACKEND_DIR = Path(__file__).parent.parent.absolute()
+# Add the backend directory to the Python path
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
-def fix_file_imports(file_path):
+# Regular expression to match import statements
+# Group 1: import type (from or import)
+# Group 2: the module being imported
+# Group 3: the rest of the import statement (as X or import X, Y, Z)
+IMPORT_RE = re.compile(r'^(\s*from\s+)([.]+[a-zA-Z0-9_.]+)(\s+import.*)$')
+
+# Set backend directory as the root for absolute imports
+ROOT_DIR = backend_dir
+
+def convert_relative_to_absolute_import(file_path: str, rel_import: str, file_dir: str) -> Optional[str]:
     """
-    Fix imports in a file by converting relative imports to absolute imports.
+    Convert a relative import to an absolute import.
     
     Args:
-        file_path: Path to the file to process
-    
+        file_path: Path to the file containing the import
+        rel_import: The relative import string (e.g., ..utils.helper)
+        file_dir: Directory of the file
+        
     Returns:
-        bool: True if changes were made, False otherwise
+        The absolute import path or None if conversion failed
     """
-    relative_path = os.path.relpath(file_path, BACKEND_DIR)
-    print(f"Processing {relative_path}")
+    # Count the number of dots for parent directory reference
+    dot_count = 0
+    for char in rel_import:
+        if char == '.':
+            dot_count += 1
+        else:
+            break
+    
+    # Extract the module part (without the dots)
+    module_part = rel_import[dot_count:]
+    
+    # Get the path components of the file directory relative to the root
+    rel_dir = os.path.relpath(file_dir, ROOT_DIR)
+    dir_parts = rel_dir.split(os.sep)
+    
+    # If we're going beyond the top-level package, it's a problem
+    if dot_count > len(dir_parts):
+        return None
+    
+    # Calculate how many directories to go up
+    remaining_dirs = dir_parts[:-dot_count] if dot_count > 0 else dir_parts
+    
+    # Build the absolute import path
+    if not remaining_dirs or remaining_dirs == ['.']:
+        # We're at the root, so just use the module part
+        abs_import = module_part
+    else:
+        # Combine the remaining directory parts with the module part
+        abs_import = '.'.join(remaining_dirs) + ('.' + module_part if module_part else '')
+    
+    return abs_import
+
+def fix_file_imports(file_path: str, check_only: bool = False, verbose: bool = False, 
+                    safelist: Optional[Set[str]] = None) -> Tuple[bool, int]:
+    """
+    Fix relative imports in a single file.
+    
+    Args:
+        file_path: Path to the file to fix
+        check_only: If True, only check for problematic imports without making changes
+        verbose: If True, print detailed information about found imports
+        safelist: Set of module patterns to skip (to avoid breaking circular dependencies)
+        
+    Returns:
+        Tuple of (whether file was modified, number of imports fixed)
+    """
+    file_dir = os.path.dirname(file_path)
+    file_modified = False
+    imports_fixed = 0
     
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
-        # Match relative imports that go beyond the top-level package
-        # For example: from ..utils.xyz import abc
-        original_content = content
-        
-        # Calculate the module path based on the file's location in the directory structure
-        module_parts = os.path.dirname(relative_path).split(os.path.sep)
-        
-        # Find relative imports pattern: from ..[.module] import
-        pattern = r'from \.\.(\.?[a-zA-Z0-9_\.]+)? import'
-        
-        # Process each match individually
-        modified_content = content
-        for match in re.finditer(pattern, content):
-            rel_import = match.group(0)
-            # Get the base path part
-            module_path = match.group(1) or ""
             
-            # Handle based on the depth of the directory
-            if len(module_parts) >= 2:
-                # We're in a subdirectory (e.g., 'services', 'api', etc.)
-                # Determine what's being imported and change to direct import
-                top_level = module_parts[0]  # First directory under backend
+        lines = content.splitlines()
+        new_lines = []
+        
+        for line in lines:
+            match = IMPORT_RE.match(line)
+            if match:
+                import_type, rel_import, rest = match.groups()
                 
-                if module_path.startswith('.'):
-                    # Handle deeper relative paths like '...utils'
-                    path_depth = module_path.count('.') + 2  # +2 for the '..' prefix
-                    segments = module_parts[:-path_depth] if path_depth <= len(module_parts) else []
-                    if segments:
-                        absolute_import = f'from {".".join(segments)}{module_path.lstrip(".")} import'
+                # Check if the module is in the safelist
+                if safelist:
+                    import_parts = rel_import.lstrip('.').split('.')
+                    abs_import_base = convert_relative_to_absolute_import(file_path, rel_import, file_dir)
+                    
+                    if abs_import_base:
+                        for safe_module in safelist:
+                            # Skip if this import might be part of a circular dependency
+                            if safe_module == abs_import_base or abs_import_base.startswith(safe_module + '.'):
+                                if verbose:
+                                    print(f"Skipping safelisted import in {file_path}: {rel_import} -> {abs_import_base}")
+                                new_lines.append(line)
+                                break
+                        else:
+                            # Not in safelist, proceed with conversion
+                            abs_import = convert_relative_to_absolute_import(file_path, rel_import, file_dir)
+                            if abs_import:
+                                imports_fixed += 1
+                                new_line = f"{import_type}{abs_import}{rest}"
+                                if verbose:
+                                    print(f"Fixed import in {file_path}: {line} -> {new_line}")
+                                new_lines.append(new_line)
+                                file_modified = True
+                            else:
+                                new_lines.append(line)
                     else:
-                        absolute_import = f'from {module_path.lstrip(".")} import'
+                        new_lines.append(line)
                 else:
-                    # Standard case: '..utils' becomes 'utils'
-                    absolute_import = f'from {module_path} import'
-                
-                modified_content = modified_content.replace(rel_import, absolute_import)
+                    # No safelist, proceed with all conversions
+                    abs_import = convert_relative_to_absolute_import(file_path, rel_import, file_dir)
+                    if abs_import:
+                        imports_fixed += 1
+                        new_line = f"{import_type}{abs_import}{rest}"
+                        if verbose:
+                            print(f"Fixed import in {file_path}: {line} -> {new_line}")
+                        new_lines.append(new_line)
+                        file_modified = True
+                    else:
+                        new_lines.append(line)
+            else:
+                new_lines.append(line)
         
-        # Only write back if we made changes
-        if modified_content != original_content:
+        if file_modified and not check_only:
             with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(modified_content)
-            print(f"  - Fixed imports in {relative_path}")
-            return True
-        
-        return False
+                f.write('\n'.join(new_lines))
+                
+        return file_modified, imports_fixed
     except Exception as e:
-        print(f"Error processing {relative_path}: {e}")
-        return False
+        print(f"Error processing file {file_path}: {str(e)}")
+        return False, 0
 
-def scan_directory_and_fix_imports():
+def scan_directory_and_fix_imports(start_path: str, check_only: bool = False, 
+                                 verbose: bool = False, 
+                                 safelist: Optional[Set[str]] = None) -> Tuple[int, int]:
     """
-    Scan all Python files in the backend directory and fix relative imports.
+    Scan a directory recursively and fix imports in all Python files.
     
+    Args:
+        start_path: Directory to scan
+        check_only: If True, only check for problematic imports without making changes
+        verbose: If True, print detailed information about found imports
+        safelist: Set of module patterns to skip (to avoid breaking circular dependencies)
+        
     Returns:
-        list: List of files that were modified
+        Tuple of (number of files fixed, number of imports fixed)
     """
-    fixed_files = []
+    files_fixed = 0
+    total_imports_fixed = 0
     
-    for root, _, files in os.walk(BACKEND_DIR):
+    for root, _, files in os.walk(start_path):
         for file in files:
             if file.endswith('.py'):
                 file_path = os.path.join(root, file)
-                if fix_file_imports(file_path):
-                    relative_path = os.path.relpath(file_path, BACKEND_DIR)
-                    fixed_files.append(relative_path)
+                modified, imports_fixed = fix_file_imports(file_path, check_only, verbose, safelist)
+                if modified:
+                    files_fixed += 1
+                    total_imports_fixed += imports_fixed
     
-    return fixed_files
+    return files_fixed, total_imports_fixed
 
-def main():
+def parse_safelist(safelist_str: str) -> Set[str]:
+    """
+    Parse a comma-separated string of module names into a set.
+    
+    Args:
+        safelist_str: Comma-separated list of module names
+        
+    Returns:
+        Set of module names to safelist
+    """
+    if not safelist_str:
+        return set()
+    return {module.strip() for module in safelist_str.split(',') if module.strip()}
+
+def main() -> int:
     """
     Main function to run the script.
+    
+    Returns:
+        Exit code (0 for success, 1 for error)
     """
-    print("Starting to fix relative imports that go beyond the top-level package...")
+    parser = argparse.ArgumentParser(description='Fix relative imports in Python files.')
+    parser.add_argument('--check-only', action='store_true', help='Only check for problematic imports without making changes')
+    parser.add_argument('--verbose', action='store_true', help='Print detailed information about found imports')
+    parser.add_argument('--safelist', type=str, default='', help='Comma-separated list of modules to skip')
+    parser.add_argument('paths', nargs='*', help='Paths to scan (default: entire backend directory)')
     
-    fixed_files = scan_directory_and_fix_imports()
+    args = parser.parse_args()
     
-    if fixed_files:
-        print(f"\nSuccessfully fixed imports in {len(fixed_files)} files:")
-        for file in fixed_files:
-            print(f"- {file}")
-    else:
-        print("\nNo files needed fixing.")
+    # Default known circular dependencies to safelist
+    default_safelist = {
+        'utils.error_handler',
+        'api.schemas',
+        'services.docx_formatter',
+        'utils.resource_manager'
+    }
+    
+    # Combine default safelist with user-provided safelist
+    user_safelist = parse_safelist(args.safelist)
+    safelist = default_safelist.union(user_safelist)
+    
+    if args.verbose:
+        print(f"Using safelist: {', '.join(sorted(safelist))}")
+    
+    check_only = args.check_only
+    verbose = args.verbose
+    paths = args.paths or [backend_dir]
+    
+    total_files_fixed = 0
+    total_imports_fixed = 0
+    
+    for path in paths:
+        if os.path.isdir(path):
+            files_fixed, imports_fixed = scan_directory_and_fix_imports(path, check_only, verbose, safelist)
+        else:
+            modified, imports_fixed = fix_file_imports(path, check_only, verbose, safelist)
+            files_fixed = 1 if modified else 0
+        
+        total_files_fixed += files_fixed
+        total_imports_fixed += imports_fixed
+    
+    action = "would be" if check_only else "were"
+    print(f"\nSummary: {total_imports_fixed} imports in {total_files_fixed} files {action} fixed.")
+    
+    if check_only and total_imports_fixed > 0:
+        print("Run without --check-only to apply the changes.")
+        return 1
+    return 0
 
 if __name__ == "__main__":
-    main() 
+    sys.exit(main()) 
