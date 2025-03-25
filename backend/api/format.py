@@ -6,6 +6,7 @@ import os
 import uuid
 from typing import Dict, Optional
 from uuid import UUID
+from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import FileResponse
@@ -24,14 +25,14 @@ try:
     from utils.supabase_helper import create_supabase_client
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.api.schemas import APIResponse
-    from backend.config import settings
-    from backend.services.docx_formatter import format_report_as_docx
-    from backend.services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
-    from backend.services.pdf_formatter import format_report_as_pdf
-    from backend.utils.error_handler import api_error_handler, logger
-    from backend.utils.file_utils import safe_path_join
-    from backend.utils.supabase_helper import create_supabase_client
+    from api.schemas import APIResponse
+    from config import settings
+    from services.docx_formatter import format_report_as_docx
+    from services.pdf_extractor import extract_pdf_metadata, extract_text_from_file
+    from services.pdf_formatter import format_report_as_pdf
+    from utils.error_handler import api_error_handler, logger
+    from utils.file_utils import safe_path_join
+    from utils.supabase_helper import create_supabase_client
 
 # Export key functions for other modules
 __all__ = [
@@ -201,6 +202,9 @@ def get_reference_metadata():
         if os.path.exists(path) and os.path.isdir(path):
             # Find all PDF files in the directory
             pattern = safe_path_join(path, "*.pdf")
+            # Convert Path object to string for glob
+            if isinstance(pattern, Path):
+                pattern = str(pattern)
             pdf_files.extend(glob.glob(pattern))
 
     if not pdf_files:
@@ -631,6 +635,21 @@ async def get_preview_file(preview_id: str):
         raise HTTPException(
             status_code=404, detail=f"Preview file not found: {preview_id}"
         )
+
+    # Validate that the file path is within the allowed directory
+    try:
+        # Resolve both paths to absolute paths to compare them safely
+        file_path_abs = Path(file_path).resolve()
+        previews_dir_abs = Path(settings.PREVIEWS_DIR).resolve()
+        
+        # Check that the file path is within the previews directory
+        if not file_path_abs.is_relative_to(previews_dir_abs):
+            logger.error(f"Security violation: Attempted to access file outside previews directory: {file_path}")
+            raise HTTPException(status_code=403, detail="Access denied")
+            
+    except (ValueError, RuntimeError) as e:
+        logger.error(f"Path validation error: {str(e)}")
+        raise HTTPException(status_code=403, detail="Invalid path")
 
     # Return a FileResponse directly since we can't wrap it in an APIResponse
     return FileResponse(file_path, media_type="application/pdf")

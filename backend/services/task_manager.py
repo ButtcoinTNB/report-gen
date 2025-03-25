@@ -8,7 +8,7 @@ try:
     from models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
 except ImportError:
     # Fall back to imports with 'backend.' prefix (for local development)
-    from backend.models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
+    from models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
 
 logger = logging.getLogger(__name__)
 

@@ -4,6 +4,7 @@ API endpoints for chunked file uploads.
 
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -29,8 +30,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Directory for storing temporary chunks during upload
-CHUNKS_DIR = Path("uploads/chunks")
-CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
+CHUNKS_DIR = Path(settings.UPLOAD_DIR) / "chunks"
+CHUNKS_DIR.mkdir(exist_ok=True, parents=True)
 
 # Define default chunk size if not in settings
 CHUNK_SIZE = getattr(settings, "CHUNK_SIZE", 5 * 1024 * 1024)  # 5MB default
@@ -52,40 +53,41 @@ ALLOWED_MIME_TYPES: Set[str] = {
 # Dictionary to track upload metadata
 upload_metadata: Dict[str, Dict[str, Any]] = {}
 
-
 def is_valid_filename(filename: str) -> bool:
     """
-    Validate that a filename is safe and doesn't contain path traversal characters.
-
+    Validate if a filename is safe to use.
+    
     Args:
         filename: The filename to validate
-
+        
     Returns:
-        True if the filename is valid, False otherwise
+        True if valid, False otherwise
     """
-    # Disallow directory traversal and control characters
-    if re.search(r'[\\/:*?"<>|\x00-\x1F]', filename) or ".." in filename:
+    if not filename or len(filename) > 255:
         return False
-
-    # Ensure the filename isn't too long
-    if len(filename) > 255:
+        
+    # Disallow paths with directory traversal
+    if '/' in filename or '\\' in filename:
         return False
-
+        
+    # Check for common invalid characters
+    invalid_chars = '<>:"|?*\x00-\x1F'
+    if any(char in filename for char in invalid_chars):
+        return False
+        
     return True
-
-
-def is_allowed_file_type(mimetype: str) -> bool:
+    
+def is_allowed_file_type(mime_type: str) -> bool:
     """
-    Check if a file type is allowed.
-
+    Check if a file type is allowed based on its MIME type.
+    
     Args:
-        mimetype: The MIME type to check
-
+        mime_type: MIME type to check
+        
     Returns:
-        True if the file type is allowed, False otherwise
+        True if allowed, False otherwise
     """
-    return mimetype in ALLOWED_MIME_TYPES
-
+    return mime_type in ALLOWED_MIME_TYPES
 
 def sanitize_filename(filename: str) -> str:
     """
@@ -116,6 +118,106 @@ def sanitize_filename(filename: str) -> str:
         clean_name = f"{base_name}.{extension}" if extension else base_name
 
     return clean_name
+
+
+# Security utility functions to prevent path traversal
+def validate_upload_id(upload_id: str) -> bool:
+    """
+    Validate that an upload ID follows the expected format to prevent path traversal.
+    Only alphanumeric characters and hyphens are allowed.
+    
+    Args:
+        upload_id: The upload ID to validate
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    # Strict validation: only allow alphanumeric characters and hyphens
+    return bool(re.match(r'^[a-zA-Z0-9\-_]+$', upload_id))
+
+
+def calculate_chunk_size(file_size: int) -> int:
+    """
+    Calculate optimal chunk size based on file size.
+    
+    Args:
+        file_size: Size of the file in bytes
+        
+    Returns:
+        Appropriate chunk size in bytes
+    """
+    # Default chunk size
+    base_chunk_size = 5 * 1024 * 1024  # 5MB
+    
+    # For small files, use smaller chunks
+    if file_size < 10 * 1024 * 1024:  # Less than 10MB
+        return min(base_chunk_size, max(1 * 1024 * 1024, file_size // 5))  # At least 1MB
+        
+    # For medium files
+    if file_size < 100 * 1024 * 1024:  # Less than 100MB
+        return base_chunk_size
+        
+    # For larger files, use larger chunks (but not too large)
+    return min(10 * 1024 * 1024, max(base_chunk_size, file_size // 20))  # Max 10MB
+
+
+def get_safe_chunk_path(upload_id: str, chunk_index: Optional[int] = None) -> Optional[Path]:
+    """
+    Generate a safe path for chunk files.
+    
+    Args:
+        upload_id: The ID of the upload
+        chunk_index: Optional index of the chunk. If None, returns the upload directory path
+    
+    Returns:
+        Path object for the chunk file or upload directory if valid, None if invalid
+    """
+    # Validate the upload ID to prevent path traversal
+    if not validate_upload_id(upload_id):
+        logging.error(f"Invalid upload ID format: {upload_id}")
+        return None
+    
+    upload_dir = CHUNKS_DIR / upload_id
+    
+    if chunk_index is None:
+        # Return the upload directory path
+        return upload_dir
+    
+    # Validate the chunk index
+    if not isinstance(chunk_index, int) or chunk_index < 0:
+        logging.error(f"Invalid chunk index: {chunk_index}")
+        return None
+    
+    # Return path to specific chunk file
+    return upload_dir / f"{chunk_index}"
+
+
+def safely_open_file(path: Optional[Path], mode: str = "r") -> Optional[Any]:
+    """
+    Safely open a file within the allowed directory.
+    
+    Args:
+        path: Path object for the file or None
+        mode: File mode ('r', 'w', etc.)
+    
+    Returns:
+        File object if path is valid and within allowed directory, None otherwise
+    """
+    if path is None:
+        logging.error("Cannot open file: path is None")
+        return None
+        
+    try:
+        # Ensure the path is within the allowed directory
+        if not CHUNKS_DIR or not path.is_relative_to(CHUNKS_DIR):
+            logging.error(f"Security violation: File path not in allowed directory: {path}")
+            return None
+            
+        # Open the file
+        return open(path, mode)
+    except Exception as e:
+        logging.error(f"Error opening file {path}: {str(e)}")
+        return None
 
 
 @router.post("/initialize")
@@ -179,24 +281,60 @@ async def initialize_chunked_upload(
         upload_id = uploadId or f"upload_{uuid.uuid4()}"
 
         # Validate upload ID format to prevent path traversal
-        if not re.match(r"^upload_[0-9a-f\-]+$", upload_id):
+        if not validate_upload_id(upload_id):
             raise_error(
                 "validation",
                 message="Invalid upload ID format",
                 detail="Upload ID must be in the correct format",
             )
 
-        # Create a directory for storing chunks
-        upload_dir = CHUNKS_DIR / upload_id
-        upload_dir.mkdir(exist_ok=True)
+        # Create upload directory using safe path handling
+        safe_upload_dir = get_safe_chunk_path(upload_id)
+        if not safe_upload_dir:
+            raise_error(
+                "security_violation",
+                message="Invalid upload path",
+                detail="Could not create a safe upload directory path",
+            )
+            
+        # Only try to create directory if we have a valid path
+        safe_upload_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Create metadata file
+        metadata_path = safe_upload_dir / "metadata.json"
+        
+        # Additional verification that metadata path is safe
+        if not metadata_path or not CHUNKS_DIR or not metadata_path.is_relative_to(CHUNKS_DIR):
+            raise_error(
+                "security_violation",
+                message="Invalid metadata path",
+                detail="Path validation failed for metadata file",
+            )
+            
+        # Calculate optimal chunk size
+        chunk_size = calculate_chunk_size(fileSize)
+        total_chunks = math.ceil(fileSize / chunk_size)
 
         # Check if this is a new upload or resuming an existing one
-        metadata_path = upload_dir / "metadata.json"
-
+        metadata = {}
         if metadata_path.exists():
             # Resuming an existing upload
-            with open(metadata_path, "r") as f:
+            f = safely_open_file(metadata_path, "r")
+            if f is None:
+                raise_error(
+                    "security_violation", 
+                    message="Cannot read metadata file",
+                    detail="Path validation failed for metadata file",
+                )
+            try:
                 metadata = json.load(f)
+                f.close()
+            except Exception as e:
+                logging.error(f"Error reading metadata file: {str(e)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Error reading metadata file"
+                )
 
             # Update the metadata if needed
             metadata["fileSize"] = fileSize
@@ -212,40 +350,76 @@ async def initialize_chunked_upload(
                 "fileSize": fileSize,
                 "mimeType": mimeType,
                 "reportId": reportId,
-                "chunkSize": CHUNK_SIZE,
-                "totalChunks": (fileSize + CHUNK_SIZE - 1) // CHUNK_SIZE,
+                "chunkSize": chunk_size,
+                "totalChunks": total_chunks,
                 "uploadedChunks": [],
                 "createdAt": str(datetime.now()),
                 "status": "initialized",
             }
 
         # Store metadata
-        with open(metadata_path, "w") as f:
+        f = safely_open_file(metadata_path, "w")
+        if f is None:
+            raise_error(
+                "security_violation",
+                message="Cannot write metadata file",
+                detail="Path validation failed for metadata file",
+            )
+        try:
             json.dump(metadata, f)
+            f.close()
+        except Exception as e:
+            logging.error(f"Error writing metadata file: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error writing metadata file"
+            )
 
         # Check which chunks have already been uploaded
-        upload_dir = CHUNKS_DIR / upload_id
-        chunk_files = list(upload_dir.glob("chunk_*.bin"))
-
+        if not safe_upload_dir:
+            raise_error(
+                "security_violation",
+                message="Invalid upload path",
+                detail="Could not validate upload directory path",
+            )
+            
+        # Only iterate over files if directory exists
         uploaded_chunks = []
-        for chunk_file in chunk_files:
-            try:
-                chunk_index = int(chunk_file.stem.split("_")[1])
-                uploaded_chunks.append(chunk_index)
-            except (ValueError, IndexError):
-                continue
+        if safe_upload_dir is not None and safe_upload_dir.exists():
+            chunk_files = list(safe_upload_dir.glob("chunk_*.bin"))
+            
+            for chunk_file in chunk_files:
+                try:
+                    chunk_index = int(chunk_file.stem.split("_")[1])
+                    uploaded_chunks.append(chunk_index)
+                except (ValueError, IndexError):
+                    continue
 
         # Update metadata with uploaded chunks
         metadata["uploadedChunks"] = sorted(uploaded_chunks)
 
-        with open(metadata_path, "w") as f:
+        f = safely_open_file(metadata_path, "w")
+        if f is None:
+            raise_error(
+                "security_violation", 
+                message="Cannot update metadata file",
+                detail="Path validation failed for metadata file",
+            )
+        try:
             json.dump(metadata, f)
+            f.close()
+        except Exception as e:
+            logging.error(f"Error updating metadata file: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error updating metadata file"
+            )
 
         # Return upload information
         return {
             "uploadId": upload_id,
-            "chunkSize": CHUNK_SIZE,
-            "totalChunks": metadata["totalChunks"],
+            "chunkSize": chunk_size,
+            "totalChunks": total_chunks,
             "uploadedChunks": metadata["uploadedChunks"],
             "resumable": True,
         }
@@ -286,24 +460,32 @@ async def upload_chunk(
     """
     try:
         # Validate upload ID format to prevent path traversal
-        if not re.match(r"^upload_[0-9a-f\-]+$", uploadId):
+        if not validate_upload_id(uploadId):
             raise_error(
                 "validation",
                 message="Invalid upload ID format",
                 detail="Upload ID must be in the correct format",
             )
 
-        # Verify upload session exists
-        upload_dir = CHUNKS_DIR / uploadId
-        if not upload_dir.exists():
+        # Get safe path for upload directory
+        safe_upload_dir = get_safe_chunk_path(uploadId)
+        if not safe_upload_dir or not safe_upload_dir.exists():
             raise_error(
                 "not_found",
                 message="Upload session not found",
                 detail=f"No upload session found with ID {uploadId}",
             )
 
-        # Verify metadata exists
-        metadata_path = upload_dir / "metadata.json"
+        # Get safe path for metadata file
+        metadata_path = safe_upload_dir / "metadata.json"
+        # Additional verification that metadata file is in the correct location
+        if not safe_upload_dir or not metadata_path or not metadata_path.is_relative_to(safe_upload_dir) or metadata_path.name != "metadata.json":
+            raise_error(
+                "security_violation",
+                message="Invalid metadata path",
+                detail="Attempted to access file outside of upload directory",
+            )
+            
         if not metadata_path.exists():
             raise_error(
                 "not_found",
@@ -312,8 +494,22 @@ async def upload_chunk(
             )
 
         # Load metadata
-        with open(metadata_path, "r") as f:
+        f = safely_open_file(metadata_path, "r")
+        if f is None:
+            raise_error(
+                "security_violation", 
+                message="Cannot read metadata file",
+                detail="Path validation failed for metadata file",
+            )
+        try:
             metadata = json.load(f)
+            f.close()
+        except Exception as e:
+            logging.error(f"Error reading metadata file: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error reading metadata file"
+            )
 
         # Validate chunk index
         if chunkIndex < 0 or chunkIndex >= metadata["totalChunks"]:
@@ -344,21 +540,44 @@ async def upload_chunk(
                 detail="Chunk filename must be in the correct format",
             )
 
-        chunk_path = upload_dir / chunk_filename
-        with open(chunk_path, "wb") as f:
-            chunk_data = await chunk.read()
-
-            # Validate chunk size against expected size
-            actual_size = len(chunk_data)
-            if actual_size > expected_size * 1.1:  # Allow 10% margin for safety
-                raise_error(
-                    "validation",
-                    message="Chunk too large",
-                    detail=f"Chunk size ({actual_size} bytes) exceeds expected size ({expected_size} bytes)",
-                )
-
+        chunk_path = safe_upload_dir / chunk_filename
+        chunk_data = await chunk.read()
+        
+        # Validate chunk size against expected size
+        actual_size = len(chunk_data)
+        if actual_size > expected_size * 1.1:  # Allow 10% margin for safety
+            raise_error(
+                "validation",
+                message="Chunk too large",
+                detail=f"Chunk size ({actual_size} bytes) exceeds expected size ({expected_size} bytes)",
+            )
+            
+        # Save the chunk
+        f = safely_open_file(chunk_path, "wb")
+        if f is None:
+            raise_error(
+                "security_violation",
+                message="Cannot save chunk file",
+                detail="Path validation failed for chunk file",
+            )
+        try:
             f.write(chunk_data)
+            f.close()
+        except Exception as e:
+            logging.error(f"Error writing chunk file: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error writing chunk file"
+            )
 
+        # Verify file was written
+        if not chunk_path.exists():
+            raise_error(
+                "file_operation",
+                message="Failed to save chunk",
+                detail="Chunk file could not be saved",
+            )
+        
         actual_size = chunk_path.stat().st_size
         if actual_size != expected_size:
             # This is not a fatal error, but log it
@@ -371,7 +590,7 @@ async def upload_chunk(
             metadata["uploadedChunks"].append(chunkIndex)
             metadata["uploadedChunks"].sort()
 
-        with open(metadata_path, "w") as f:
+        with safely_open_file(metadata_path, "w") as f:
             json.dump(metadata, f)
 
         # Check if upload is complete
@@ -415,37 +634,34 @@ async def finalize_chunked_upload(
     Returns:
         JSON response with finalized file information
     """
+    # Validate uploadId (should only contain alphanumeric characters and hyphens)
+    if not validate_upload_id(uploadId):
+        raise_error(
+            "validation",
+            message="Invalid upload ID format",
+            detail="Upload ID contains invalid characters"
+        )
+        
     try:
-        # Validate upload ID format to prevent path traversal
-        if not re.match(r"^upload_[0-9a-f\-]+$", uploadId):
-            raise_error(
-                "validation",
-                message="Invalid upload ID format",
-                detail="Upload ID must be in the correct format",
-            )
-
-        # Validate filename
-        if not is_valid_filename(filename):
-            raise_error(
-                "validation",
-                message="Invalid filename",
-                detail=f"Filename contains invalid characters: {filename}",
-            )
-
-        # Sanitize filename
-        safe_filename = sanitize_filename(filename)
-
-        # Verify upload session exists
-        upload_dir = CHUNKS_DIR / uploadId
-        if not upload_dir.exists():
+        # Get safe path for upload directory
+        safe_upload_dir = get_safe_chunk_path(uploadId)
+        if not safe_upload_dir or not safe_upload_dir.exists():
             raise_error(
                 "not_found",
                 message="Upload session not found",
                 detail=f"No upload session found with ID {uploadId}",
             )
 
-        # Verify metadata exists
-        metadata_path = upload_dir / "metadata.json"
+        # Get safe path for metadata file
+        metadata_path = safe_upload_dir / "metadata.json"
+        # Additional verification that metadata file is in the correct location
+        if not safe_upload_dir or not metadata_path or not metadata_path.is_relative_to(safe_upload_dir) or metadata_path.name != "metadata.json":
+            raise_error(
+                "security_violation",
+                message="Invalid metadata path",
+                detail="Attempted to access file outside of upload directory",
+            )
+            
         if not metadata_path.exists():
             raise_error(
                 "not_found",
@@ -454,8 +670,22 @@ async def finalize_chunked_upload(
             )
 
         # Load metadata
-        with open(metadata_path, "r") as f:
+        f = safely_open_file(metadata_path, "r")
+        if f is None:
+            raise_error(
+                "security_violation", 
+                message="Cannot read metadata file",
+                detail="Path validation failed for metadata file",
+            )
+        try:
             metadata = json.load(f)
+            f.close()
+        except Exception as e:
+            logging.error(f"Error reading metadata file: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Error reading metadata file"
+            )
 
         # Check if upload is complete
         if len(metadata["uploadedChunks"]) != metadata["totalChunks"]:
@@ -491,7 +721,7 @@ async def finalize_chunked_upload(
         report_dir = Path(settings.UPLOAD_DIR) / report_id
         report_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = report_dir / safe_filename
+        output_path = report_dir / filename
 
         # First combine chunks into a temporary file for virus scanning
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
@@ -500,15 +730,29 @@ async def finalize_chunked_upload(
             # Combine chunks
             file_size = 0
             for i in range(metadata["totalChunks"]):
-                chunk_path = upload_dir / f"chunk_{i}.bin"
+                chunk_path = safe_upload_dir / f"chunk_{i}.bin"
                 if not chunk_path.exists():
                     raise_error(
                         "internal",
                         message="Chunk file missing",
                         detail=f"Chunk {i} is missing from upload directory",
                     )
+                
+                # Additional safety check for the chunk path
+                if not chunk_path.is_relative_to(safe_upload_dir):
+                    raise_error(
+                        "security_violation",
+                        message="Invalid chunk path",
+                        detail=f"Chunk {i} path is outside the upload directory",
+                    )
 
-                with open(chunk_path, "rb") as chunk_file:
+                with safely_open_file(chunk_path, "rb") as chunk_file:
+                    if chunk_file is None:
+                        raise_error(
+                            "security_violation",
+                            message="Cannot read chunk file",
+                            detail=f"Path validation failed for chunk {i}",
+                        )
                     chunk_data = chunk_file.read()
                     temp_file.write(chunk_data)
                     file_size += len(chunk_data)
@@ -543,14 +787,14 @@ async def finalize_chunked_upload(
         metadata["finalPath"] = str(output_path)
         metadata["finalSize"] = file_size
 
-        with open(metadata_path, "w") as f:
+        with safely_open_file(metadata_path, "w") as f:
             json.dump(metadata, f)
 
         # Store file information in Supabase if available
         file_info = {
             "file_id": str(uuid.uuid4()),
             "report_id": report_id,
-            "filename": safe_filename,
+            "filename": filename,
             "file_path": str(output_path),
             "file_type": metadata["mimeType"],
             "file_size": file_size,
@@ -571,11 +815,11 @@ async def finalize_chunked_upload(
             "success": True,
             "fileId": file_info["file_id"],
             "reportId": report_id,
-            "filename": safe_filename,
+            "filename": filename,
             "size": file_size,
             "mimeType": metadata["mimeType"],
             "path": str(output_path),
-            "url": f"/files/{report_id}/{safe_filename}",
+            "url": f"/files/{report_id}/{filename}",
         }
     except Exception as e:
         logger.exception("Failed to finalize upload")
@@ -596,12 +840,12 @@ async def finalize_chunked_upload(
             # Don't delete immediately to allow for potential error recovery
             # Just mark for cleanup in metadata
             if metadata_path.exists():
-                with open(metadata_path, "r") as f:
+                with safely_open_file(metadata_path, "r") as f:
                     metadata = json.load(f)
 
                 metadata["pendingCleanup"] = True
 
-                with open(metadata_path, "w") as f:
+                with safely_open_file(metadata_path, "w") as f:
                     json.dump(metadata, f)
         except Exception as e:
             logger.error(f"Error marking chunks for cleanup: {str(e)}")
@@ -620,16 +864,16 @@ async def cancel_chunked_upload(request: Request, uploadId: str = Form(...)):
     """
     try:
         # Validate upload ID format to prevent path traversal
-        if not re.match(r"^upload_[0-9a-f\-]+$", uploadId):
+        if not validate_upload_id(uploadId):
             raise_error(
                 "validation",
                 message="Invalid upload ID format",
                 detail="Upload ID must be in the correct format",
             )
 
-        # Verify upload session exists
-        upload_dir = CHUNKS_DIR / uploadId
-        if not upload_dir.exists():
+        # Get safe path for upload directory
+        safe_upload_dir = get_safe_chunk_path(uploadId)
+        if not safe_upload_dir or not safe_upload_dir.exists():
             return {
                 "success": True,
                 "message": "Upload was already cancelled or does not exist",
@@ -637,15 +881,15 @@ async def cancel_chunked_upload(request: Request, uploadId: str = Form(...)):
 
         # Clean up the upload directory securely
         try:
-            # First verify this is actually a chunks directory, not some other path
-            if not str(upload_dir).startswith(str(CHUNKS_DIR)):
+            # Additional verification that the directory is inside the CHUNKS_DIR
+            if not safe_upload_dir.is_relative_to(CHUNKS_DIR):
                 raise_error(
-                    "validation",
+                    "security_violation",
                     message="Invalid upload directory",
                     detail="Upload directory is outside the chunks directory",
                 )
 
-            shutil.rmtree(upload_dir)
+            shutil.rmtree(safe_upload_dir)
         except Exception as e:
             logger.error(f"Error removing upload directory: {str(e)}")
             raise

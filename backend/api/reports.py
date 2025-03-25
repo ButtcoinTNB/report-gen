@@ -9,8 +9,8 @@ try:
     from services.agent_service import agent_service
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.models.report import ReportCreate
-    from backend.services.agent_service import agent_service
+    from models.report import ReportCreate
+    from services.agent_service import agent_service
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 

@@ -14,7 +14,6 @@ is ready for deployment by verifying:
 import os
 import sys
 import json
-import subprocess
 import re
 from pathlib import Path
 

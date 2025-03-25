@@ -32,8 +32,8 @@ def fix_upload_imports():
     content = re.sub(r"from config import", "from config import", content)
 
     # 4. Import statements on their own line
-    content = re.sub(r"import utils\.", "import backend.utils.", content)
-    content = re.sub(r"import api\.", "import backend.api.", content)
+    content = re.sub(r"import utils\.", "import utils.", content)
+    content = re.sub(r"import api\.", "import api.", content)
     content = re.sub(r"import config\b", "import backend.config", content)
 
     # Save the updated file

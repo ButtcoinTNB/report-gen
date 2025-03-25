@@ -252,7 +252,7 @@ def run_test():
                 chunks_dir=chunks_dir,
                 target_filename="combined_file.bin"
             )
-            print(f"✓ Upload completed successfully")
+            print("✓ Upload completed successfully")
             print(f"  Final file: {result.get('file_path', 'unknown')}")
         except Exception as e:
             print(f"❌ Error completing upload: {e}")
@@ -265,11 +265,11 @@ def run_test():
                 final_content = f.read()
             
             if final_content == original_content:
-                print(f"✓ File content verification PASSED")
+                print("✓ File content verification PASSED")
                 print(f"  Original size: {len(original_content)} bytes")
                 print(f"  Final size: {len(final_content)} bytes")
             else:
-                print(f"❌ File content verification FAILED")
+                print("❌ File content verification FAILED")
                 print(f"  Original size: {len(original_content)} bytes")
                 print(f"  Final size: {len(final_content)} bytes")
                 if abs(len(original_content) - len(final_content)) < 10:

@@ -8,9 +8,9 @@ try:
     from services.share_service import ShareService
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.config import get_settings
-    from backend.models.share import ShareLinkCreate, ShareLinkResponse
-    from backend.services.share_service import ShareService
+    from config import get_settings
+    from models.share import ShareLinkCreate, ShareLinkResponse
+    from services.share_service import ShareService
 
 router = APIRouter()
 

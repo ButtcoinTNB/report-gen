@@ -39,24 +39,24 @@ try:
     )
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.config import settings
-    from backend.models import File as FileModel
-    from backend.models import Report, User
-    from backend.services.ai_service import (
+    from config import settings
+    from models import File as FileModel
+    from models import Report, User
+    from services.ai_service import (
         AIServiceError,
         call_openrouter_api,
         generate_report_text,
         refine_report_text,
     )
-    from backend.services.pdf_extractor import extract_text_from_file
-    from backend.services.template_processor import template_processor
-    from backend.utils.auth import get_current_user
-    from backend.utils.db import get_db
-    from backend.utils.error_handler import (
+    from services.pdf_extractor import extract_text_from_file
+    from services.template_processor import template_processor
+    from utils.auth import get_current_user
+    from utils.db import get_db
+    from utils.error_handler import (
         api_error_handler,
         logger,
     )
-    from backend.utils.exceptions import (
+    from utils.exceptions import (
         AIServiceException,
         BadRequestException,
         DatabaseException,
@@ -308,33 +308,44 @@ async def generate_report(request: GenerateRequest, background_tasks: Background
     Returns:
         Standardized API response with the generated report ID
     """
-    async with supabase_client_context() as supabase:
-        # Create new report
-        report_data = {
-            "report_id": str(uuid.uuid4()),
-            "title": "New Report",
-            "status": "draft",
-            "template_id": str(request.template_id) if request.template_id else None,
-            "metadata": {},
-        }
-
-        report_response = await supabase.table("reports").insert(report_data).execute()
-        if not report_response.data:
-            raise DatabaseException(
-                message="Failed to create report",
-                details={"operation": "Insert report"},
+    try:
+        # Store metadata in Supabase
+        report_id = str(uuid.uuid4())
+        
+        # Use regular 'with' instead of 'async with'
+        with supabase_client_context() as supabase:
+            response = (
+                await supabase.table("reports")
+                .insert(
+                    {
+                        "report_id": report_id,
+                        "title": "New Report",
+                        "status": "draft",
+                        "template_id": str(request.template_id) if request.template_id else None,
+                        "metadata": {},
+                    }
+                )
+                .execute()
             )
+            if not response.data:
+                raise DatabaseException(
+                    message="Failed to create report",
+                    details={"operation": "Insert report"},
+                )
 
-        report = report_response.data[0]
-        report_id = UUID(report["report_id"])
+            report = response.data[0]
+            report_id = UUID(report["report_id"])
 
-        # Associate files with report
-        for doc_id in request.document_ids:
-            await supabase.table("files").update({"report_id": str(report_id)}).eq(
-                "file_id", str(doc_id)
-            ).execute()
+            # Associate files with report
+            for doc_id in request.document_ids:
+                await supabase.table("files").update({"report_id": str(report_id)}).eq(
+                    "file_id", str(doc_id)
+                ).execute()
 
         return {"report_id": str(report_id)}
+    except Exception as e:
+        logger.error(f"Error in generate_report: {str(e)}")
+        raise
 
 
 @router.post("/generate", response_model=APIResponse[GenerateContentResponse])
@@ -372,7 +383,7 @@ async def generate_report_content(
     additional_info = request.additional_info
     template_id = request.template_id
 
-    async with supabase_client_context() as supabase:
+    with supabase_client_context() as supabase:
         # Get report
         report_response = (
             await supabase.table("reports")
@@ -449,7 +460,7 @@ async def refine_report(
     Returns:
         Standardized API response with refined report data
     """
-    async with supabase_client_context() as supabase:
+    with supabase_client_context() as supabase:
         # Get report
         report_response = (
             await supabase.table("reports")
@@ -946,7 +957,7 @@ async def generate_report_from_id(
     # Extract any additional options from request
     # options = {k: v for k, v in data.items() if k != "report_id"}  # Uncomment if needed in the future
 
-    async with supabase_client_context() as supabase:
+    with supabase_client_context() as supabase:
         # Get report from database
         report_response = (
             await supabase.table("reports")

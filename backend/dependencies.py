@@ -7,8 +7,8 @@ try:
     from services.document_service import DocumentService
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.config import get_settings as get_app_settings
-    from backend.services.document_service import DocumentService
+    from config import get_settings as get_app_settings
+    from services.document_service import DocumentService
 
 
 async def get_document_service() -> AsyncGenerator[DocumentService, None]:

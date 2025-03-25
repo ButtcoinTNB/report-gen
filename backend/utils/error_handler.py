@@ -6,13 +6,14 @@ This ensures consistent error responses and logging throughout the application.
 import logging
 import traceback
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Any, Callable, Dict, Optional, TypeVar, Union, Type, ClassVar, NoReturn
+from typing_extensions import TypedDict
 
 # Import the standard APIResponse model
 from api.schemas import APIResponse
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 # Import our custom exceptions
 from utils.exceptions import (
@@ -51,307 +52,156 @@ EXCEPTION_MAPPING = {
     ),
 }
 
+T = TypeVar('T')
+ErrorType = str
+StatusCode = int
+
+class ErrorConfig(TypedDict):
+    status_code: int
+    message: str
+    retryable: bool
 
 class ErrorResponse(BaseModel):
     """Standardized error response model"""
 
-    status: str = "error"
-    message: str
-    code: int
-    detail: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
-    transactionId: Optional[str] = None
-    request_id: Optional[str] = None
-    retryable: bool = False
-    docs_link: Optional[str] = None
+    error_type: ErrorType = Field(description="Type of error that occurred")
+    message: str = Field(description="Human-readable error message")
+    code: StatusCode = Field(description="HTTP status code")
+    retryable: bool = Field(default=False, description="Whether the operation can be retried")
+    detail: Optional[str] = Field(default=None, description="Additional error details")
+    context: Dict[str, Any] = Field(default_factory=dict, description="Error context")
+    transaction_id: Optional[str] = Field(default=None, description="Transaction ID for tracing")
+    request_id: Optional[str] = Field(default=None, description="Request ID for tracing")
 
-
-class ErrorCodes:
-    """Error codes for the application"""
-
-    VALIDATION_ERROR = "validation_error"
-    NOT_FOUND = "not_found"
-    UNAUTHORIZED = "unauthorized"
-    FORBIDDEN = "forbidden"
-    INTERNAL_ERROR = "internal_error"
-    NETWORK_ERROR = "network_error"
-    EXTERNAL_API_ERROR = "external_api_error"
-    DATABASE_ERROR = "database_error"
-    TIMEOUT_ERROR = "timeout_error"
-    STORAGE_ERROR = "storage_error"
-
-
-class ErrorHandler:
-    """
-    Centralized error handling utility for standardized error responses
-    """
-
-    # Error categories with default settings
-    ERROR_TYPES = {
-        "authentication": {
-            "status_code": status.HTTP_401_UNAUTHORIZED,
-            "retryable": False,
-            "message": "Authentication failed",
-        },
-        "authorization": {
-            "status_code": status.HTTP_403_FORBIDDEN,
-            "retryable": False,
-            "message": "You don't have permission to perform this action",
-        },
-        "not_found": {
-            "status_code": status.HTTP_404_NOT_FOUND,
-            "retryable": False,
-            "message": "The requested resource was not found",
-        },
-        "validation": {
-            "status_code": status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "retryable": False,
-            "message": "Validation error",
-        },
-        "rate_limit": {
-            "status_code": status.HTTP_429_TOO_MANY_REQUESTS,
-            "retryable": True,
-            "message": "Rate limit exceeded",
-        },
-        "service_unavailable": {
-            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
-            "retryable": True,
-            "message": "Service temporarily unavailable",
-        },
-        "timeout": {
-            "status_code": status.HTTP_504_GATEWAY_TIMEOUT,
-            "retryable": True,
-            "message": "Operation timed out",
-        },
-        "internal": {
-            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "retryable": False,
-            "message": "Internal server error",
-        },
-        "dependency": {
-            "status_code": status.HTTP_503_SERVICE_UNAVAILABLE,
-            "retryable": True,
-            "message": "Dependency failure",
-        },
-        "conflict": {
-            "status_code": status.HTTP_409_CONFLICT,
-            "retryable": False,
-            "message": "Resource conflict",
-        },
-        "cancelled": {
-            "status_code": HTTP_499_CLIENT_CLOSED_REQUEST,
-            "retryable": False,
-            "message": "Operation cancelled",
-        },
-        "bad_request": {
+    ERROR_TYPES: ClassVar[Dict[ErrorType, ErrorConfig]] = {
+        "VALIDATION_ERROR": {
             "status_code": status.HTTP_400_BAD_REQUEST,
-            "retryable": False,
-            "message": "Bad request",
+            "message": "Invalid request parameters",
+            "retryable": False
         },
+        "INTERNAL_ERROR": {
+            "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "message": "An internal error occurred",
+            "retryable": True
+        }
     }
 
-    @classmethod
-    def raise_error(
-        cls,
-        error_type: str,
-        message: Optional[str] = None,
-        detail: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
-        transaction_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-        retryable: Optional[bool] = None,
-        log_error: bool = True,
-    ) -> None:
-        """
-        Raise a standardized HTTP exception
-
-        Args:
-            error_type: The type of error (must be in ERROR_TYPES)
-            message: Override for the default error message
-            detail: Additional details about the error
-            context: Contextual information about the error
-            transaction_id: ID of the transaction for tracing
-            request_id: ID of the request for tracing
-            retryable: Override whether the error is retryable
-            log_error: Whether to log the error
-
-        Raises:
-            HTTPException: Standardized error response
-        """
-        if error_type not in cls.ERROR_TYPES:
-            error_type = "internal"
-            detail = f"Unknown error type: {error_type}"
-
-        error_config = cls.ERROR_TYPES[error_type]
-
-        # Prepare the error response
-        error_response = ErrorResponse(
-            status="error",
-            message=message or error_config["message"],
-            code=error_config["status_code"],
-            detail=detail,
-            context=context or {},
-            transactionId=transaction_id,
-            request_id=request_id,
-            retryable=retryable if retryable is not None else error_config["retryable"],
-        )
-
-        # Log the error if needed
-        if log_error:
-            log_context = {
-                "error_type": error_type,
-                "status_code": error_config["status_code"],
-                "transaction_id": transaction_id,
-                "request_id": request_id,
-                "context": context,
-            }
-
-            logger.error(f"Error: {error_response.message}", extra=log_context)
-
-            if detail:
-                logger.error(f"Detail: {detail}")
-
-            # Add stack trace for internal errors
-            if error_type == "internal":
-                logger.error(f"Stack trace: {traceback.format_exc()}")
-
-        # Raise the HTTP exception
-        raise HTTPException(
-            status_code=error_config["status_code"], detail=error_response.dict()
-        )
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump()
 
     @classmethod
     def format_error(
         cls,
-        error_type: str,
-        message: Optional[str] = None,
+        error_type: ErrorType,
+        message: str,
+        code: StatusCode,
+        retryable: bool = False,
         detail: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         transaction_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        retryable: Optional[bool] = None,
-        log_error: bool = True,
+        log_error: bool = True
     ) -> Dict[str, Any]:
-        """
-        Format a standardized error response without raising an exception
-
-        Args:
-            error_type: The type of error (must be in ERROR_TYPES)
-            message: Override for the default error message
-            detail: Additional details about the error
-            context: Contextual information about the error
-            transaction_id: ID of the transaction for tracing
-            request_id: ID of the request for tracing
-            retryable: Override whether the error is retryable
-            log_error: Whether to log the error
-
-        Returns:
-            Dict[str, Any]: Standardized error response
-        """
         if error_type not in cls.ERROR_TYPES:
-            error_type = "internal"
+            error_type = "INTERNAL_ERROR"
             detail = f"Unknown error type: {error_type}"
 
         error_config = cls.ERROR_TYPES[error_type]
-
-        # Prepare the error response
-        error_response = ErrorResponse(
-            status="error",
-            message=message or error_config["message"],
-            code=error_config["status_code"],
-            detail=detail,
-            context=context or {},
-            transactionId=transaction_id,
-            request_id=request_id,
-            retryable=retryable if retryable is not None else error_config["retryable"],
-        )
-
-        # Log the error if needed
+        try:
+            error_response = cls(
+                error_type=error_type,
+                message=str(message),
+                code=code or error_config["status_code"],
+                retryable=retryable if retryable is not None else error_config["retryable"],
+                detail=detail,
+                context=context or {},
+                transaction_id=transaction_id,
+                request_id=request_id
+            )
+        except ValidationError as e:
+            logger.error(f"Error creating error response: {e}")
+            error_response = cls(
+                error_type="INTERNAL_ERROR",
+                message="Error creating error response",
+                code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e)
+            )
+        
         if log_error:
-            log_context = {
-                "error_type": error_type,
-                "status_code": error_config["status_code"],
-                "transaction_id": transaction_id,
-                "request_id": request_id,
-                "context": context,
-            }
+            logger.error(
+                f"Error occurred: {error_response.error_type} - {error_response.message}",
+                extra={"error_details": error_response.to_dict()}
+            )
+            if error_type == "INTERNAL_ERROR":
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+        
+        return error_response.to_dict()
 
-            logger.error(f"Error: {error_response.message}", extra=log_context)
-
-            if detail:
-                logger.error(f"Detail: {detail}")
-
-        return error_response.dict()
+    @classmethod
+    def raise_error(
+        cls,
+        error_type: ErrorType,
+        message: str,
+        code: StatusCode = status.HTTP_500_INTERNAL_SERVER_ERROR,
+        retryable: bool = False,
+        detail: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+        transaction_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+        log_error: bool = True
+    ) -> NoReturn:
+        error_dict = cls.format_error(
+            error_type=error_type,
+            message=message,
+            code=code,
+            retryable=retryable,
+            detail=detail,
+            context=context,
+            transaction_id=transaction_id,
+            request_id=request_id,
+            log_error=log_error
+        )
+        raise HTTPException(status_code=code, detail=error_dict)
 
     @classmethod
     def handle_exception(
         cls,
         exception: Exception,
-        error_type: str = "internal",
+        error_type: ErrorType = "INTERNAL_ERROR",
         message: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         transaction_id: Optional[str] = None,
-        request_id: Optional[str] = None,
-    ) -> None:
-        """
-        Handle an exception by raising a standardized HTTP exception
-
-        Args:
-            exception: The exception to handle
-            error_type: The type of error
-            message: Override for the default error message
-            context: Contextual information about the error
-            transaction_id: ID of the transaction for tracing
-            request_id: ID of the request for tracing
-
-        Raises:
-            HTTPException: Standardized error response
-        """
-        # If it's already an HTTPException, extract the status code and detail
-        if isinstance(exception, HTTPException):
-            status_code = exception.status_code
-
-            # Try to parse the detail if it's a dictionary
-            if isinstance(exception.detail, dict) and "message" in exception.detail:
-                detail = exception.detail.get("message")
-            else:
-                detail = str(exception.detail)
-
-            # Map HTTP status code to error type
-            for err_type, config in cls.ERROR_TYPES.items():
-                if config["status_code"] == status_code:
-                    error_type = err_type
-                    break
-        else:
-            detail = str(exception)
-
-        cls.raise_error(
+        request_id: Optional[str] = None
+    ) -> JSONResponse:
+        error_dict = cls.format_error(
             error_type=error_type,
-            message=message,
-            detail=detail,
-            context=context,
+            message=message or str(exception),
+            code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            retryable=False,
+            detail=str(exception),
+            context=context or {},
             transaction_id=transaction_id,
-            request_id=request_id,
-            log_error=True,
+            request_id=request_id
         )
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_dict)
 
 
 # Convenience function for raising errors
 def raise_error(*args, **kwargs):
     """Convenience function for raising standardized errors"""
-    return ErrorHandler.raise_error(*args, **kwargs)
+    return ErrorResponse.raise_error(*args, **kwargs)
 
 
 # Convenience function for formatting errors
 def format_error(*args, **kwargs):
     """Convenience function for formatting standardized errors"""
-    return ErrorHandler.format_error(*args, **kwargs)
+    return ErrorResponse.format_error(*args, **kwargs)
 
 
 # Convenience function for handling exceptions
 def handle_exception(*args, **kwargs):
     """Convenience function for handling exceptions"""
-    return ErrorHandler.handle_exception(*args, **kwargs)
+    return ErrorResponse.handle_exception(*args, **kwargs)
 
 
 # Original error handler (kept for backward compatibility)
@@ -525,3 +375,13 @@ def retry_operation(
     )
 
     raise api_exception
+
+
+def error_handler(func: Callable[..., T]) -> Callable[..., Union[T, JSONResponse]]:
+    @wraps(func)
+    async def wrapper(*args: Any, **kwargs: Any) -> Union[T, JSONResponse]:
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            return ErrorResponse.handle_exception(e)
+    return wrapper

@@ -1,13 +1,14 @@
 """
-File handler module that forwards imports from file_utils.py
+File handling utilities for the Insurance Report Generator
 
 This file exists to maintain backward compatibility with code that imports
 from utils.file_handler but should use utils.file_utils instead.
 """
 
-# Import and re-export functions from file_utils for backward compatibility
+import logging
 from utils.file_processor import FileProcessor
 
+logger = logging.getLogger(__name__)
 
 # Define the compatibility functions that redirect to FileProcessor
 def save_uploaded_file(file, directory, filename=None):
@@ -26,9 +27,6 @@ def get_file_info(file_path):
 
 
 # Add a warning log
-import logging
-
-logger = logging.getLogger(__name__)
 logger.warning(
     "Importing from utils.file_handler is deprecated. Please update to use appropriate modules."
 )

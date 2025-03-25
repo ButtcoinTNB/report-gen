@@ -1,6 +1,7 @@
 import glob
 import os
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -20,24 +21,21 @@ try:
         get_safe_file_path,
         validate_path,
     )
-    from utils.supabase_helper import create_supabase_client, supabase_client_context
+    from utils.supabase_helper import async_supabase_client_context
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.api.schemas import APIResponse
-    from backend.config import settings
-    from backend.services.download_service import download_service
-    from backend.utils.auth import get_current_user
-    from backend.utils.error_handler import api_error_handler, logger
-    from backend.utils.file_processor import FileProcessor
-    from backend.utils.file_utils import safe_path_join
-    from backend.utils.storage import (
+    from api.schemas import APIResponse
+    from config import settings
+    from services.download_service import download_service
+    from utils.auth import get_current_user
+    from utils.error_handler import api_error_handler, logger
+    from utils.file_processor import FileProcessor
+    from utils.file_utils import safe_path_join
+    from utils.storage import (
         get_safe_file_path,
         validate_path,
     )
-    from backend.utils.supabase_helper import (
-        create_supabase_client,
-        supabase_client_context,
-    )
+    from utils.supabase_helper import async_supabase_client_context
 
 # If needed, format-related functions would be imported conditionally here
 # to avoid circular imports when modules are loaded
@@ -45,30 +43,21 @@ except ImportError:
 router = APIRouter()
 
 
-def get_report_content(report_id: UUID4) -> Optional[str]:
+async def get_report_content(report_id: UUID4) -> Optional[str]:
     """
-    Retrieve the actual report content (markdown text) from any available source.
-    This is a more thorough content retrieval function that checks all possible storage locations.
-
-    Args:
-        report_id: The UUID of the report
-
-    Returns:
-        The report content as text, or None if not found
+    Get the report content from either Supabase or local storage
     """
     logger.info(f"Attempting to retrieve content for report ID: {report_id}")
 
     # Check if report exists in Supabase
-    supabase = create_supabase_client()
-    response = (
-        supabase.table("reports")
-        .select("content")
-        .eq("report_id", str(report_id))
-        .execute()
-    )
+    try:
+        async with async_supabase_client_context() as supabase:
+            response = await supabase.table("reports").select("content").eq("report_id", str(report_id)).execute()
 
-    if response.data and response.data[0].get("content"):
-        return response.data[0]["content"]
+            if response.data and response.data[0].get("content"):
+                return response.data[0]["content"]
+    except Exception as e:
+        logger.error(f"Error retrieving content from Supabase: {str(e)}")
 
     # Check local storage as fallback
     uploads_dir = os.path.abspath(settings.UPLOAD_DIR)
@@ -95,37 +84,26 @@ def get_report_content(report_id: UUID4) -> Optional[str]:
     return None
 
 
-def fetch_report_path_from_supabase(report_id: UUID4) -> Optional[str]:
+async def fetch_report_path_from_supabase(report_id: UUID4) -> Optional[str]:
     """
     Get the report file path from Supabase
     """
     try:
-        supabase = create_supabase_client()
-        response = (
-            supabase.table("reports")
-            .select("file_path")
-            .eq("report_id", str(report_id))
-            .execute()
-        )
+        async with async_supabase_client_context() as supabase:
+            response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
 
-        if (
-            response.data
-            and len(response.data) > 0
-            and response.data[0].get("file_path")
-        ):
-            file_path = response.data[0]["file_path"]
+            if response.data and len(response.data) > 0 and response.data[0].get("file_path"):
+                file_path = response.data[0]["file_path"]
 
-            # Validate the file path
-            base_dir = os.path.abspath(settings.GENERATED_REPORTS_DIR)
-            is_valid, validated_path = validate_path(file_path, base_dir)
+                # Validate the file path
+                base_dir = os.path.abspath(settings.GENERATED_REPORTS_DIR)
+                is_valid, validated_path = validate_path(file_path, base_dir)
 
-            if is_valid and os.path.exists(validated_path):
-                return validated_path
+                if is_valid and os.path.exists(validated_path):
+                    return validated_path
 
-            # If the path wasn't valid or file doesn't exist, log this
-            logger.warning(
-                f"File path from Supabase is invalid or file doesn't exist: {file_path}"
-            )
+                # If the path wasn't valid or file doesn't exist, log this
+                logger.warning(f"File path from Supabase is invalid or file doesn't exist: {file_path}")
 
     except Exception as e:
         logger.error(f"Error fetching report path from Supabase: {str(e)}")
@@ -145,11 +123,19 @@ def find_report_file_locally(report_id: UUID4) -> Optional[str]:
     patterns = [f"report_{report_id}*.docx", f"*{report_id}*.docx"]
 
     for pattern in patterns:
-        matching_files = glob.glob(
-            safe_path_join(settings.GENERATED_REPORTS_DIR, pattern)
-        )
+        # Convert Path object to string for glob
+        pattern_str = safe_path_join(settings.GENERATED_REPORTS_DIR, pattern)
+        if isinstance(pattern_str, Path):
+            pattern_str = str(pattern_str)
+        matching_files = glob.glob(pattern_str)
         if matching_files:
-            return matching_files[0]
+            # Validate that the found file is actually in the expected directory
+            found_path = Path(matching_files[0])
+            expected_dir = Path(settings.GENERATED_REPORTS_DIR).resolve()
+            if not found_path.resolve().is_relative_to(expected_dir):
+                logger.error(f"Security violation: File path outside allowed directory: {found_path}")
+                return None
+            return str(matching_files[0])  # Convert Path to string for return
 
     return None
 
@@ -162,18 +148,29 @@ def find_docx_file_locally(report_id: UUID4) -> Optional[str]:
     patterns = [f"report_{report_id}*.docx", f"*{report_id}*.docx"]
 
     for pattern in patterns:
-        matching_files = glob.glob(
-            safe_path_join(settings.GENERATED_REPORTS_DIR, pattern)
-        )
+        # Convert Path object to string for glob
+        pattern_str = safe_path_join(settings.GENERATED_REPORTS_DIR, pattern)
+        if isinstance(pattern_str, Path):
+            pattern_str = str(pattern_str)
+        matching_files = glob.glob(pattern_str)
         if matching_files:
-            return matching_files[0]
+            # Validate that the found file is actually in the expected directory
+            found_path = Path(matching_files[0])
+            expected_dir = Path(settings.GENERATED_REPORTS_DIR).resolve()
+            if not found_path.resolve().is_relative_to(expected_dir):
+                logger.error(f"Security violation: File path outside allowed directory: {found_path}")
+                return None
+            return str(matching_files[0])  # Convert Path to string for return
 
     # Then check in the upload directory
     report_dir = safe_path_join(settings.UPLOAD_DIR, str(report_id))
     if os.path.exists(report_dir):
-        docx_files = glob.glob(safe_path_join(report_dir, "*.docx"))
+        pattern_str = safe_path_join(report_dir, "*.docx")
+        if isinstance(pattern_str, Path):
+            pattern_str = str(pattern_str)
+        docx_files = glob.glob(pattern_str)
         if docx_files:
-            return docx_files[0]
+            return str(docx_files[0])  # Convert Path to string for return
 
     return None
 
@@ -213,20 +210,14 @@ async def download_report(
             detail=f"Unsupported format: {format}. Only 'docx' and 'pdf' are supported.",
         )
 
-    # Initialize Supabase client
-    supabase = create_supabase_client()
-
     # Find the report in Supabase
-    response = (
-        supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
-    )
+    async with async_supabase_client_context() as supabase:
+        response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
 
-    if not response.data:
-        raise HTTPException(
-            status_code=404, detail=f"Report not found with ID: {report_id}"
-        )
-
-    response.data[0]
+        if not response.data:
+            raise HTTPException(
+                status_code=404, detail=f"Report not found with ID: {report_id}"
+            )
 
     # Determine which format to return
     if format.lower() == "docx":
@@ -255,18 +246,13 @@ async def serve_report_file(report_id: UUID4):
         Standardized API response with file response
     """
     # Get file path from Supabase
-    supabase = create_supabase_client()
-    response = (
-        supabase.table("reports")
-        .select("file_path")
-        .eq("report_id", str(report_id))
-        .execute()
-    )
+    async with async_supabase_client_context() as supabase:
+        response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
 
-    if not response.data or not response.data[0].get("file_path"):
-        raise HTTPException(status_code=404, detail="Report file not found")
+        if not response.data or not response.data[0].get("file_path"):
+            raise HTTPException(status_code=404, detail="Report file not found")
 
-    file_path = response.data[0]["file_path"]
+        file_path = response.data[0]["file_path"]
 
     # Check if file exists locally
     if not os.path.exists(file_path):
@@ -304,20 +290,15 @@ async def cleanup_report_files(report_id: UUID4):
 
     try:
         # Get file paths from Supabase
-        supabase = create_supabase_client()
-        response = (
-            supabase.table("reports")
-            .select("file_path")
-            .eq("report_id", str(report_id))
-            .execute()
-        )
+        async with async_supabase_client_context() as supabase:
+            response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
 
-        if response.data and response.data[0].get("file_path"):
-            docx_path = response.data[0]["file_path"]
-            if os.path.exists(docx_path):
-                os.remove(docx_path)
-                deleted_files.append(docx_path)
-                print(f"Deleted final DOCX file: {docx_path}")
+            if response.data and response.data[0].get("file_path"):
+                docx_path = response.data[0]["file_path"]
+                if os.path.exists(docx_path):
+                    os.remove(docx_path)
+                    deleted_files.append(docx_path)
+                    print(f"Deleted final DOCX file: {docx_path}")
 
         # Check for report-related DOCX files in the generated_reports directory
         try:
@@ -325,11 +306,19 @@ async def cleanup_report_files(report_id: UUID4):
             patterns = [f"report_{report_id}*.docx", f"*{report_id}*.docx"]
 
             for pattern in patterns:
-                matching_files = glob.glob(
-                    safe_path_join(settings.GENERATED_REPORTS_DIR, pattern)
-                )
+                # Convert Path object to string for glob
+                pattern_str = safe_path_join(settings.GENERATED_REPORTS_DIR, pattern)
+                if isinstance(pattern_str, Path):
+                    pattern_str = str(pattern_str)
+                matching_files = glob.glob(pattern_str)
                 for file_path in matching_files:
                     try:
+                        # Validate that the found file is actually in the expected directory
+                        found_path = Path(file_path)
+                        expected_dir = Path(settings.GENERATED_REPORTS_DIR).resolve()
+                        if not found_path.resolve().is_relative_to(expected_dir):
+                            logger.error(f"Security violation: File path outside allowed directory: {found_path}")
+                            continue
                         os.remove(file_path)
                         deleted_files.append(file_path)
                         print(f"Deleted generated DOCX file: {file_path}")
@@ -358,10 +347,11 @@ async def cleanup_report_files(report_id: UUID4):
         # Update database status
         try:
             # Mark report as cleaned up in database
-            supabase.table("reports").update({"files_cleaned": True}).eq(
-                "report_id", str(report_id)
-            ).execute()
-            print(f"Updated database for report {report_id}: files_cleaned=True")
+            async with async_supabase_client_context() as supabase:
+                await supabase.table("reports").update({"files_cleaned": True}).eq(
+                    "report_id", str(report_id)
+                ).execute()
+                print(f"Updated database for report {report_id}: files_cleaned=True")
 
         except Exception as e:
             print(f"Error updating database status: {str(e)}")
@@ -404,18 +394,13 @@ async def download_docx_report(report_id: UUID4):
         Standardized API response with FileResponse for the DOCX file
     """
     # Get file path from Supabase
-    supabase = create_supabase_client()
-    response = (
-        supabase.table("reports")
-        .select("file_path")
-        .eq("report_id", str(report_id))
-        .execute()
-    )
+    async with async_supabase_client_context() as supabase:
+        response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
 
-    if not response.data or not response.data[0].get("file_path"):
-        raise HTTPException(status_code=404, detail="Report file not found")
+        if not response.data or not response.data[0].get("file_path"):
+            raise HTTPException(status_code=404, detail="Report file not found")
 
-    file_path = response.data[0]["file_path"]
+        file_path = response.data[0]["file_path"]
 
     # Check if file exists locally
     if not os.path.exists(file_path):
@@ -470,18 +455,13 @@ async def serve_docx_report_file(report_id: UUID4):
         Standardized API response with FileResponse for the DOCX
     """
     # Get file path from Supabase
-    supabase = create_supabase_client()
-    response = (
-        supabase.table("reports")
-        .select("file_path")
-        .eq("report_id", str(report_id))
-        .execute()
-    )
+    async with async_supabase_client_context() as supabase:
+        response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
 
-    if not response.data or not response.data[0].get("file_path"):
-        raise HTTPException(status_code=404, detail="Report file not found")
+        if not response.data or not response.data[0].get("file_path"):
+            raise HTTPException(status_code=404, detail="Report file not found")
 
-    file_path = response.data[0]["file_path"]
+        file_path = response.data[0]["file_path"]
 
     # Check if file exists locally
     if not os.path.exists(file_path):
@@ -514,19 +494,13 @@ async def get_report_file_info(report_id: UUID4):
     Returns:
         Information about the report file including path and content type
     """
-    async with supabase_client_context() as supabase:
-        report_response = (
-            await supabase.table("reports")
-            .select("*")
-            .eq("report_id", str(report_id))
-            .execute()
-        )
+    async with async_supabase_client_context() as supabase:
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
 
         if not report_response.data:
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
 
-        report_response.data[0]
-
+        # No need to assign to unused variable
         # Define the expected file path
         content_file_path = os.path.join(settings.REPORTS_DIR, f"{report_id}.txt")
 
@@ -562,13 +536,8 @@ async def download_report_content(report_id: UUID4):
     Returns:
         The report content as a text file
     """
-    async with supabase_client_context() as supabase:
-        report_response = (
-            await supabase.table("reports")
-            .select("*")
-            .eq("report_id", str(report_id))
-            .execute()
-        )
+    async with async_supabase_client_context() as supabase:
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
 
         if not report_response.data:
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")

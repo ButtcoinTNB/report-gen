@@ -11,7 +11,7 @@ try:
     from utils.supabase_client import supabase
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.utils.supabase_client import supabase
+    from utils.supabase_client import supabase
 
 security = HTTPBearer()
 

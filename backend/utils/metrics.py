@@ -12,6 +12,33 @@ from typing import Any, Dict, List, Optional, Union
 # Set up logging
 logger = logging.getLogger(__name__)
 
+# A global instance of the metrics collector
+_metrics_collector = None
+
+def initialize(metrics_file: Optional[Union[str, Path]] = None) -> "MetricsCollector":
+    """
+    Initialize the global metrics collector instance
+    
+    Args:
+        metrics_file: File path to store metrics (optional)
+        
+    Returns:
+        The initialized MetricsCollector instance
+    """
+    global _metrics_collector
+    if _metrics_collector is None:
+        _metrics_collector = MetricsCollector(metrics_file)
+        logger.info("Metrics collector initialized")
+    return _metrics_collector
+
+def get_instance() -> Optional["MetricsCollector"]:
+    """
+    Get the global metrics collector instance
+    
+    Returns:
+        The global MetricsCollector instance or None if not initialized
+    """
+    return _metrics_collector
 
 class MetricsCollector:
     """

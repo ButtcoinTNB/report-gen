@@ -4,6 +4,7 @@ Provides a centralized way to interact with Supabase storage and database.
 """
 
 import os
+import re
 from typing import Any, BinaryIO, Dict, Optional
 
 from dotenv import load_dotenv
@@ -72,6 +73,14 @@ class SupabaseClient:
     async def download_file(self, bucket: str, file_path: str) -> bytes:
         """Download a file from Supabase storage."""
         try:
+            # Validate bucket name to prevent path traversal
+            if not re.match(r'^[a-zA-Z0-9\-_]+$', bucket):
+                raise ValueError(f"Invalid bucket name: {bucket}")
+                
+            # Validate file_path to prevent directory traversal attempts
+            if '..' in file_path or file_path.startswith('/') or '~' in file_path:
+                raise ValueError(f"Invalid file path: {file_path}")
+
             return self._client.storage.from_(bucket).download(file_path)
         except Exception as e:
             raise Exception(f"Error downloading file: {str(e)}")

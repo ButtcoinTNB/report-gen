@@ -1,0 +1,12 @@
+{
+  "include": ["backend"],
+  "exclude": ["venv", ".venv", "__pycache__", "frontend", "node_modules", ".cursor"],
+  "typeCheckingMode": "strict",
+  "reportMissingImports": true,
+  "reportUnusedImport": true,
+  "reportUnusedVariable": true,
+  "reportIncompatibleVariableOverride": true,
+  "reportPrivateUsage": false,
+  "reportMissingTypeStubs": false,
+  "useLibraryCodeForTypes": true
+}

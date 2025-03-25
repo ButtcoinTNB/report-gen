@@ -12,9 +12,9 @@ try:
     from services.task_manager import task_manager
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.config import get_settings
-    from backend.models.report import ReportCreate
-    from backend.services.task_manager import task_manager
+    from config import get_settings
+    from models.report import ReportCreate
+    from services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 

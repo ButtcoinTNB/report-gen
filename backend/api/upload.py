@@ -44,23 +44,23 @@ try:
     from utils.supabase_helper import create_supabase_client, supabase_client_context
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.api.schemas import APIResponse, UploadQueryResult
-    from backend.config import settings
-    from backend.models import Template, User
-    from backend.services.pdf_extractor import extract_text_from_file
-    from backend.services.upload_service import upload_service
-    from backend.utils.auth import get_current_user
-    from backend.utils.error_handler import api_error_handler, logger
-    from backend.utils.exceptions import (
+    from api.schemas import APIResponse, UploadQueryResult
+    from config import settings
+    from models import Template, User
+    from services.pdf_extractor import extract_text_from_file
+    from services.upload_service import upload_service
+    from utils.auth import get_current_user
+    from utils.error_handler import api_error_handler, logger
+    from utils.exceptions import (
         DatabaseException,
         FileProcessingException,
         InternalServerException,
         ValidationException,
     )
-    from backend.utils.file_processor import FileProcessor
-    from backend.utils.file_utils import safe_path_join, secure_filename
-    from backend.utils.logger import get_logger
-    from backend.utils.supabase_helper import (
+    from utils.file_processor import FileProcessor
+    from utils.file_utils import safe_path_join, secure_filename
+    from utils.logger import get_logger
+    from utils.supabase_helper import (
         create_supabase_client,
         supabase_client_context,
     )
@@ -111,7 +111,7 @@ async def process_file_in_background(
             content = FileProcessor.extract_text(file_path)
 
         # Update the file record with extracted content
-        async with supabase_client_context() as supabase:
+        with supabase_client_context() as supabase:
             await supabase.table("files").update(
                 {"content": content, "mime_type": mime_type, "processed": True}
             ).eq("file_id", file_metadata["file_id"]).execute()
@@ -176,68 +176,85 @@ async def upload_template(
             details={"file_size": file.size, "max_size": settings.MAX_UPLOAD_SIZE},
         )
 
-    async with supabase_client_context() as supabase:
-        # Create template record
-        template_data = {
-            "template_id": str(uuid.uuid4()),
-            "name": name,
-            "version": version,
-            "content": "",  # Will be updated after file processing
-            "meta_data": {},
-        }
+    with supabase_client_context() as supabase:
+        # Store file in Supabase
+        logger.info(f"Storing template in Supabase database: {name} - v{version}")
+        
+        # Check if template with this name already exists
+        existing = (
+            await supabase.table("templates")
+            .select("*")
+            .eq("name", name)
+            .execute()
+        )
+
+        if existing.data:
+            raise ValidationException(
+                message="Template with this name already exists",
+                details={"template_name": name},
+            )
+
+    # Create template record
+    template_data = {
+        "template_id": str(uuid.uuid4()),
+        "name": name,
+        "version": version,
+        "content": "",  # Will be updated after file processing
+        "meta_data": {},
+    }
+
+    try:
+        template_response = (
+            await supabase.table("templates").insert(template_data).execute()
+        )
+        if not template_response.data:
+            raise DatabaseException(
+                message="Failed to create template record",
+                details={"operation": "insert", "table": "templates"},
+            )
+
+        template = template_response.data[0]
+        template_id = UUID4(template["template_id"])
+
+        # Create unique filename using template_id
+        filename = f"template_{template_id}.pdf"
+        file_path = safe_path_join(settings.UPLOAD_DIR, filename)
 
         try:
-            template_response = (
-                await supabase.table("templates").insert(template_data).execute()
-            )
-            if not template_response.data:
-                raise DatabaseException(
-                    message="Failed to create template record",
-                    details={"operation": "insert", "table": "templates"},
-                )
-
-            template = template_response.data[0]
-            template_id = UUID4(template["template_id"])
-
-            # Create unique filename using template_id
-            filename = f"template_{template_id}.pdf"
-            file_path = safe_path_join(settings.UPLOAD_DIR, filename)
-
-            try:
-                # Save file
-                with open(file_path, "wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
-            except Exception as e:
-                raise FileProcessingException(
-                    message=f"Failed to save template file: {str(e)}",
-                    details={"file_path": file_path},
-                )
-
-            try:
-                # Extract content from PDF
-                content = extract_text_from_file(file_path)
-            except Exception as e:
-                raise FileProcessingException(
-                    message=f"Failed to extract text from template: {str(e)}",
-                    details={"file_path": file_path},
-                )
-
-            # Update template with file info
-            await supabase.table("templates").update(
-                {"file_path": file_path, "content": content}
-            ).eq("template_id", str(template_id)).execute()
-
-            return template
+            # Save file
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
         except Exception as e:
-            # If this is not one of our custom exceptions, wrap it
-            if not isinstance(
-                e, (ValidationException, DatabaseException, FileProcessingException)
-            ):
-                raise InternalServerException(
-                    message=f"Error processing template upload: {str(e)}",
-                    details={"template_name": name},
-                )
-            raise e
+            raise FileProcessingException(
+                message=f"Failed to save template file: {str(e)}",
+                details={"file_path": file_path},
+            )
+
+        try:
+            # Extract content from PDF
+            content = extract_text_from_file(file_path)
+        except Exception as e:
+            raise FileProcessingException(
+                message=f"Failed to extract text from template: {str(e)}",
+                details={"file_path": file_path},
+            )
+
+        # Update template with file info
+        await supabase.table("templates").update(
+            {"file_path": file_path, "content": content}
+        ).eq("template_id", str(template_id)).execute()
+
+        return template
+    except Exception as e:
+        # If this is not one of our custom exceptions, wrap it
+        if not isinstance(
+            e, (ValidationException, DatabaseException, FileProcessingException)
+        ):
+            raise InternalServerException(
+                message=f"Error processing template upload: {str(e)}",
+                details={"template_name": name},
+            )
+        raise e
 
 
 @router.post("/files", status_code=201)
@@ -256,7 +273,7 @@ async def upload_files(
         )
 
         uploaded_files = []
-        async with supabase_client_context() as supabase:
+        with supabase_client_context() as supabase:
             for file in files:
                 # Generate file_id
                 file_id = uuid.uuid4()
@@ -1063,7 +1080,7 @@ async def complete_chunked_upload(
         }
 
         # Store file record in database
-        async with supabase_client_context() as supabase:
+        with supabase_client_context() as supabase:
             file_response = await supabase.table("files").insert(file_record).execute()
 
             if not file_response.data:
@@ -1246,7 +1263,7 @@ async def upload_query(
         Standardized API response with query details
     """
     # Check file type
-    if not file.filename.lower().endswith(".json"):
+    if not file.filename or not file.filename.lower().endswith(".json"):
         raise HTTPException(status_code=400, detail="Only JSON files are accepted")
 
     # Check file size
@@ -1268,7 +1285,7 @@ async def upload_query(
     if not isinstance(query_data, dict):
         raise HTTPException(status_code=400, detail="Query must be a JSON object")
 
-    async with supabase_client_context() as supabase:
+    with supabase_client_context() as supabase:
         # Create query record
         query_id = str(uuid.uuid4())
         query_record = {

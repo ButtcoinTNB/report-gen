@@ -263,9 +263,9 @@ try:
     from api.schemas import APIResponse
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.config import settings
-    from backend.utils.logger import get_logger
-    from backend.api.schemas import APIResponse
+    from config import settings
+    from utils.logger import get_logger
+    from api.schemas import APIResponse
 
 """
             # Find a good place to add the hybrid pattern

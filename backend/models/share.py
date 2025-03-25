@@ -1,3 +1,7 @@
+"""
+Share link models for the Insurance Report Generator.
+"""
+
 from datetime import datetime
 from typing import Optional
 
@@ -5,17 +9,14 @@ from pydantic import BaseModel, Field
 
 
 class ShareLink(BaseModel):
-    """Database model for share links."""
-
-    token: str = Field(..., description="Unique token for the share link")
-    document_id: str = Field(..., description="ID of the shared document")
-    expires_at: datetime = Field(..., description="When the share link expires")
-    max_downloads: int = Field(..., description="Maximum number of downloads allowed")
-    remaining_downloads: int = Field(..., description="Number of downloads remaining")
-    created_at: datetime = Field(..., description="When the share link was created")
-    last_downloaded_at: Optional[datetime] = Field(
-        None, description="When the document was last downloaded"
-    )
+    """Share link model for database records"""
+    token: str
+    document_id: str
+    expires_at: datetime
+    max_downloads: int
+    remaining_downloads: int
+    created_at: datetime
+    last_downloaded_at: Optional[datetime] = None
 
 
 class ShareLinkCreate(BaseModel):
@@ -37,10 +38,9 @@ class ShareLinkCreate(BaseModel):
 
 
 class ShareLinkResponse(BaseModel):
-    """Response model for share link operations."""
-
-    url: str = Field(..., description="Full URL for sharing the document")
-    token: str = Field(..., description="Token used in the share URL")
-    expires_at: datetime = Field(..., description="When the share link will expire")
-    remaining_downloads: int = Field(..., description="Number of downloads remaining")
-    document_id: str = Field(..., description="ID of the shared document")
+    """Share link response model for API responses"""
+    url: str
+    token: str
+    expires_at: datetime
+    remaining_downloads: int
+    document_id: str

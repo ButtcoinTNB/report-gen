@@ -8,8 +8,8 @@ try:
     from utils.supabase_helper import create_supabase_client
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.config import get_settings
-    from backend.utils.supabase_helper import create_supabase_client
+    from config import get_settings
+    from utils.supabase_helper import create_supabase_client
 
 
 async def cleanup_expired_share_links():

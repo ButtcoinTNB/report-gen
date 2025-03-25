@@ -1,3 +1,8 @@
+"""
+Test chunked upload functionality
+"""
+# ruff: noqa: E402
+
 import io
 import os
 import shutil
@@ -5,6 +10,7 @@ import sys
 import tempfile
 import uuid
 from os.path import abspath, dirname
+from typing import TypedDict, Optional
 
 import pytest
 
@@ -19,6 +25,15 @@ from utils.exceptions import (
     ValidationException,
 )
 from utils.file_processor import FileProcessor
+
+
+class UploadStatus(TypedDict):
+    upload_id: str
+    filename: str
+    total_chunks: int
+    file_size: int
+    status: str
+    received_chunks: int
 
 
 # Create a test file of a specific size
@@ -157,7 +172,8 @@ class TestFileProcessorChunkedUpload:
         )
 
         # Get status
-        status = FileProcessor.get_chunked_upload_status(upload_id)
+        status: Optional[UploadStatus] = FileProcessor.get_chunked_upload_status(upload_id)
+        assert status is not None
 
         # Verify status
         assert status["upload_id"] == upload_id

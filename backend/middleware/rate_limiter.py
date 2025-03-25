@@ -13,7 +13,7 @@ try:
     from utils.monitoring import logger
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
-    from backend.utils.monitoring import logger
+    from utils.monitoring import logger
 
 
 class RateLimiter:

@@ -7,7 +7,6 @@ from pathlib import Path
 # Add the parent directory to the Python path
 backend_dir = Path(__file__).parent.parent
 sys.path.append(str(backend_dir))
-
 from utils.agents_loop import AIAgentLoop
 
 

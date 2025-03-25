@@ -3,9 +3,7 @@ Consolidated test script for error handling in the Insurance Report Generator.
 This script automates the testing of error handling functionality across the application.
 """
 
-import os
 import sys
-import time
 import subprocess
 import traceback
 

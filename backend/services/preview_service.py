@@ -1,3 +1,8 @@
+"""
+Preview service for generating HTML and PDF previews of reports
+"""
+
+# Standard library imports
 import os
 import platform
 import subprocess
@@ -5,15 +10,17 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
-import mammoth
-
 # Third-party imports
+import mammoth
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 from pydantic import UUID4
+
+# Local imports
 from services.docx_service import docx_service
 from utils.error_handler import handle_exception, logger
+from utils.file_processor import FileProcessor
 from utils.file_utils import safe_path_join
 
 # Conditionally import Windows-specific modules
@@ -28,9 +35,6 @@ if IS_WINDOWS:
         )
 else:
     logger.info("Running on non-Windows platform, using alternative PDF conversion")
-
-from utils.file_processor import FileProcessor
-
 
 class PreviewService:
     def __init__(self):

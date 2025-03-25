@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,7 @@ class Report(BaseModel):
         None, description="When the report was completed"
     )
     download_url: Optional[str] = Field(None, description="URL to download the report")
+    current_version: Optional[int] = Field(None, description="Current version number")
 
 
 class ReportStatus(BaseModel):
@@ -45,3 +47,40 @@ class ReportStatus(BaseModel):
         None, description="Estimated time remaining in seconds"
     )
     quality_score: Optional[float] = Field(None, description="Current quality score")
+
+
+class ReportUpdate(BaseModel):
+    """Model for updating a report"""
+
+    title: Optional[str] = None
+    content: Optional[str] = None
+    is_finalized: Optional[bool] = None
+    current_version: Optional[int] = None
+
+
+class ReportVersion(BaseModel):
+    """Model for tracking report versions"""
+
+    id: UUID
+    report_id: UUID
+    version_number: int
+    content: str
+    created_by: Optional[UUID] = None
+    changes_description: Optional[str] = None
+
+
+class ReportVersionCreate(BaseModel):
+    """Model for creating a new report version"""
+
+    report_id: UUID
+    version_number: int
+    content: str
+    changes_description: Optional[str] = None
+    created_by: Optional[UUID] = None
+
+
+class ReportVersionResponse(BaseModel):
+    """Response model for report version endpoints"""
+
+    versions: List[ReportVersion]
+    current_version: int

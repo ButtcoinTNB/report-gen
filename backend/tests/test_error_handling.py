@@ -1,6 +1,7 @@
 """
-Test script to verify the enhanced error handling in the FileProcessor class.
+Test error handling functionality
 """
+# ruff: noqa: E402
 
 import os
 import shutil
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 import uuid
 from os.path import abspath, dirname
+from typing import Dict, Any, TypedDict
 
 # Add backend directory to the path so imports work correctly
 backend_dir = dirname(dirname(abspath(__file__)))
@@ -22,6 +24,10 @@ from utils.exceptions import (
 )
 from utils.file_processor import FileProcessor
 
+class ExceptionDetail(TypedDict):
+    code: str
+    message: str
+    details: Dict[str, Any]
 
 class TestFileProcessorErrorHandling(unittest.TestCase):
     """Test the enhanced error handling in the FileProcessor class"""
@@ -56,10 +62,11 @@ class TestFileProcessorErrorHandling(unittest.TestCase):
                 FileProcessor.save_chunk(invalid_upload_id, 0, f)
 
         # Verify exception details
-        self.assertIn("not found", str(context.exception.detail["message"]))
-        self.assertEqual(context.exception.detail["code"], "NOT_FOUND")
+        exception_detail: ExceptionDetail = context.exception.detail
+        self.assertIn("not found", str(exception_detail["message"]))
+        self.assertEqual(exception_detail["code"], "NOT_FOUND")
         self.assertEqual(
-            context.exception.detail["details"]["upload_id"], invalid_upload_id
+            exception_detail["details"]["upload_id"], invalid_upload_id
         )
 
     def test_save_chunk_validation_exception(self):

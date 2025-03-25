@@ -144,6 +144,21 @@ class ApiRateLimiter:
     Supports multiple named limiters for different API services.
     """
 
+    # Singleton instance
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls):
+        """
+        Get the singleton instance of ApiRateLimiter
+        
+        Returns:
+            The singleton ApiRateLimiter instance
+        """
+        if cls._instance is None:
+            cls._instance = ApiRateLimiter()
+        return cls._instance
+
     def __init__(self):
         """Initialize the rate limiter with default buckets"""
         self.limiters: Dict[str, TokenBucket] = {}
