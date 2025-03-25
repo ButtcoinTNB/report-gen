@@ -16,10 +16,10 @@ try:
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from config import get_settings
-    from backend.database import get_db
+    from database import get_db
     from models import DocumentMetadata
     from models.document import DocumentMetadataUpdate
-    from backend.storage import get_storage
+    from storage import get_storage
 
 
 class DocumentService:

@@ -22,7 +22,7 @@ try:
     from services.pdf_formatter import format_report_as_pdf
     from utils.error_handler import api_error_handler, logger
     from utils.file_utils import safe_path_join
-    from utils.supabase_helper import create_supabase_client
+    from utils.supabase_helper import supabase_client_context
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from api.schemas import APIResponse
@@ -32,7 +32,7 @@ except ImportError:
     from services.pdf_formatter import format_report_as_pdf
     from utils.error_handler import api_error_handler, logger
     from utils.file_utils import safe_path_join
-    from utils.supabase_helper import create_supabase_client
+    from utils.supabase_helper import supabase_client_context
 
 # Export key functions for other modules
 __all__ = [
@@ -45,7 +45,7 @@ __all__ = [
 router = APIRouter()
 
 
-def fetch_report_from_supabase(report_id: UUID4) -> str:
+async def fetch_report_from_supabase(report_id: UUID4) -> str:
     """
     Fetch the report content from Supabase using the report_id.
 
@@ -59,28 +59,25 @@ def fetch_report_from_supabase(report_id: UUID4) -> str:
         HTTPException: If the report is not found or there's an error
     """
     try:
-        # Initialize Supabase client
-        supabase = create_supabase_client()
+        # Use supabase_client_context instead of create_supabase_client
+        async with supabase_client_context() as supabase:
+            # Query the reports table using report_id directly
+            response = await supabase.table("reports") \
+                .select("content") \
+                .eq("report_id", str(report_id)) \
+                .execute()
 
-        # Query the reports table using report_id directly
-        response = (
-            supabase.table("reports")
-            .select("content")
-            .eq("report_id", str(report_id))
-            .execute()
-        )
+            if not response.data:
+                raise HTTPException(
+                    status_code=404, detail=f"Report not found with report_id: {report_id}"
+                )
 
-        if not response.data:
-            raise HTTPException(
-                status_code=404, detail=f"Report not found with report_id: {report_id}"
-            )
-
-        return response.data[0]["content"]
+            return response.data[0]["content"]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching report: {str(e)}")
 
 
-def update_report_file_path(report_id: UUID4, file_path: str):
+async def update_report_file_path(report_id: UUID4, file_path: str):
     """
     Updates the finalized report's file path in Supabase.
 
@@ -89,23 +86,20 @@ def update_report_file_path(report_id: UUID4, file_path: str):
         file_path: Path to the generated report file (DOCX)
     """
     try:
-        # Initialize Supabase client
-        supabase = create_supabase_client()
+        # Use supabase_client_context instead of create_supabase_client
+        async with supabase_client_context() as supabase:
+            # Update the report with the file path
+            data = {"file_path": file_path, "is_finalized": True}
 
-        # Update the report with the file path
-        data = {"file_path": file_path, "is_finalized": True}
+            response = await supabase.table("reports") \
+                .update(data) \
+                .eq("report_id", str(report_id)) \
+                .execute()
 
-        response = (
-            supabase.table("reports")
-            .update(data)
-            .eq("report_id", str(report_id))
-            .execute()
-        )
-
-        if not response.data:
-            print(
-                f"Warning: No report found with report_id {report_id} when updating file path"
-            )
+            if not response.data:
+                print(
+                    f"Warning: No report found with report_id {report_id} when updating file path"
+                )
 
     except Exception as e:
         # Handle database errors
@@ -356,7 +350,7 @@ async def format_final(data: Dict = Body(...)):
         # If we didn't get content from files, try Supabase
         if not report_content:
             try:
-                report_content = fetch_report_from_supabase(report_id)
+                report_content = await fetch_report_from_supabase(report_id)
             except HTTPException as e:
                 if is_uuid:
                     # For UUID reports, if Supabase fetch fails, check for a content.txt file
@@ -453,7 +447,7 @@ This error occurs when the system cannot locate the report content in the databa
 
         # Try to update the database with the file path
         try:
-            update_report_file_path(report_id, absolute_docx_path)
+            await update_report_file_path(report_id, absolute_docx_path)
         except Exception as e:
             # For UUID reports, we already saved the path in metadata.json
             # so log but don't fail if database update fails
@@ -517,7 +511,7 @@ async def format_docx(data: Dict = Body(...)):
             raise HTTPException(
                 status_code=400, detail=f"Invalid report_id format: {str(e)}"
             )
-        report_content = fetch_report_from_supabase(report_id)
+        report_content = await fetch_report_from_supabase(report_id)
 
     if not report_content:
         raise HTTPException(status_code=400, detail="Report content is required")
@@ -533,7 +527,7 @@ async def format_docx(data: Dict = Body(...)):
 
     # If report_id is provided, update the file path in Supabase
     if report_id:
-        update_report_file_path(report_id, result["docx_path"])
+        await update_report_file_path(report_id, result["docx_path"])
 
     return {"docx_path": result["docx_path"], "filename": result["filename"]}
 
@@ -564,7 +558,7 @@ async def preview_file(data: Dict = Body(...)):
     report_id = data["report_id"]
 
     # Fetch the report content from Supabase using report_id
-    report_content = fetch_report_from_supabase(report_id)
+    report_content = await fetch_report_from_supabase(report_id)
 
     # Generate unique filename for the preview
     preview_id = str(uuid.uuid4())

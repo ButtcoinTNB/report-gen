@@ -1,7 +1,8 @@
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Coroutine, Callable
+import asyncio
 
 try:
     # First try imports without 'backend.' prefix (for Render)
@@ -37,6 +38,8 @@ class TaskManager:
 
     # In-memory task store - in production this should be in a database
     _tasks: Dict[str, TaskStatusResponse] = {}
+    # Store for running tasks
+    _running_tasks: Dict[str, asyncio.Task] = {}
 
     @classmethod
     def create_task(
@@ -293,3 +296,68 @@ class TaskManager:
 
         logger.info(f"Cleaned up {len(task_ids_to_remove)} old tasks")
         return len(task_ids_to_remove)
+
+    @classmethod
+    async def schedule_task(
+        cls,
+        task_id: str,
+        coroutine: Coroutine,
+        task_type: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> TaskStatusResponse:
+        """
+        Schedule a task to run asynchronously.
+
+        Args:
+            task_id: The task ID
+            coroutine: The coroutine to run
+            task_type: Type of task (e.g., 'report_generation')
+            metadata: Optional metadata to store with the task
+
+        Returns:
+            The created task status
+        """
+        # Create task status
+        task_status = cls.create_task(
+            stage=ProcessStage.PROCESSING,
+            metadata={"type": task_type, **(metadata or {})}
+        )
+
+        # Create asyncio task
+        async def wrapped_coroutine():
+            try:
+                await coroutine
+                await cls.complete_task(task_id)
+            except Exception as e:
+                await cls.fail_task(task_id, str(e))
+                raise
+
+        task = asyncio.create_task(wrapped_coroutine())
+        cls._running_tasks[task_id] = task
+
+        # Start the task
+        await cls.start_task(task_id)
+
+        return task_status
+
+    @classmethod
+    async def run_in_thread(cls, func: Callable, *args, **kwargs) -> Any:
+        """
+        Run a function in a thread pool to avoid blocking the event loop.
+        
+        Args:
+            func: The function to run
+            *args: Positional arguments for the function
+            **kwargs: Keyword arguments for the function
+            
+        Returns:
+            The result of the function
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+
+# Create a singleton instance of TaskManager
+task_manager = TaskManager()
+
+# Export the instance
+__all__ = ["task_manager", "TaskManager", "TaskNotFoundException"]

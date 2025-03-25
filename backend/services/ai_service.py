@@ -10,6 +10,7 @@ from config import settings
 from pydantic import UUID4
 from utils.error_handler import logger
 from utils.file_processor import FileProcessor
+from utils.supabase_helper import supabase_client_context
 
 
 # Custom exception classes for AI service
@@ -473,15 +474,15 @@ async def generate_report_text(
     template_id: Optional[UUID4] = None,
 ) -> Dict[str, Any]:
     """
-    Generate report text using AI based on document content and additional info.
+    Generate report text from document paths using OpenRouter API.
 
     Args:
-        document_paths: List of paths to documents to analyze
-        additional_info: Additional information to include in the report
-        template_id: Optional UUID of the template to use
+        document_paths: List of paths to documents to use for generation
+        additional_info: Additional information to include in the prompt
+        template_id: Optional ID of template to use for formatting
 
     Returns:
-        Dictionary containing the generated report text and metadata
+        Dictionary containing the generated report text and variables
 
     Raises:
         AIConnectionError: When there's a network connection error to the AI service
@@ -491,29 +492,24 @@ async def generate_report_text(
         AIServiceError: For other AI service errors
     """
     try:
-        # Extract variables from documents
-        document_text = ""
+        # Extract variables from document
+        variables = {}
         for path in document_paths:
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    document_text += f.read() + "\n\n"
+            with open(path, "r") as f:
+                content = f.read()
+                extracted = await extract_template_variables(content, additional_info)
+                variables.update(extracted)
 
-        variables = await extract_template_variables(document_text, additional_info)
-
-        # Get template content if template_id is provided
+        # Get template content if needed
         template_content = None
         if template_id:
-            from utils.supabase_helper import create_supabase_client
-
-            supabase = create_supabase_client()
-            response = (
-                supabase.table("templates")
-                .select("content")
-                .eq("template_id", str(template_id))
-                .execute()
-            )
-            if response.data:
-                template_content = response.data[0]["content"]
+            async with supabase_client_context() as supabase:
+                response = await supabase.table("templates") \
+                    .select("content") \
+                    .eq("template_id", str(template_id)) \
+                    .execute()
+                if response.data:
+                    template_content = response.data[0]["content"]
 
         # Generate report text
         messages = [
@@ -627,21 +623,16 @@ async def analyze_template(template_id: UUID4) -> Dict[str, Any]:
     """
     try:
         # Get template content
-        from utils.supabase_helper import create_supabase_client
+        async with supabase_client_context() as supabase:
+            response = await supabase.table("templates") \
+                .select("content") \
+                .eq("template_id", str(template_id)) \
+                .execute()
 
-        supabase = create_supabase_client()
+            if not response.data:
+                raise AIServiceError(f"Template with ID {template_id} not found")
 
-        response = (
-            supabase.table("templates")
-            .select("content")
-            .eq("template_id", str(template_id))
-            .execute()
-        )
-
-        if not response.data:
-            raise AIServiceError(f"Template with ID {template_id} not found")
-
-        template_content = response.data[0]["content"]
+            template_content = response.data[0]["content"]
 
         # Analyze template
         messages = [
@@ -697,26 +688,35 @@ async def get_report_files(report_id: UUID4) -> List[str]:
         AIServiceError: When there's an error retrieving the files
     """
     try:
-        from utils.supabase_helper import create_supabase_client
+        async with supabase_client_context() as supabase:
+            response = await supabase.table("reports") \
+                .select("document_ids") \
+                .eq("report_id", str(report_id)) \
+                .execute()
 
-        supabase = create_supabase_client()
+            if not response.data:
+                raise AIServiceError(f"Report with ID {report_id} not found")
 
-        response = (
-            supabase.table("documents")
-            .select("file_path")
-            .eq("report_id", str(report_id))
-            .execute()
-        )
+            document_ids = response.data[0].get("document_ids", [])
+            if not document_ids:
+                return []
 
-        if not response.data:
-            return []
+            paths = []
+            for doc_id in document_ids:
+                file_response = await supabase.table("files") \
+                    .select("storage_path") \
+                    .eq("file_id", doc_id) \
+                    .execute()
 
-        return [item["file_path"] for item in response.data]
+                if file_response.data:
+                    paths.append(file_response.data[0]["storage_path"])
+
+            return paths
+
     except Exception as e:
-        logger.error(f"Error retrieving report files: {str(e)}")
+        logger.error(f"Error getting report files: {str(e)}")
         raise AIServiceError(
-            f"Error retrieving files for report {report_id}: {str(e)}",
-            original_exception=e,
+            f"Error retrieving report files: {str(e)}", original_exception=e
         )
 
 
@@ -728,33 +728,25 @@ async def get_template_content(template_id: UUID4) -> str:
         template_id: The UUID of the template
 
     Returns:
-        Template content as string
+        Template content
 
     Raises:
-        AIServiceError: When the template is not found or there's an error retrieving it
+        AIServiceError: When there's an error retrieving the template
     """
     try:
-        from utils.supabase_helper import create_supabase_client
+        async with supabase_client_context() as supabase:
+            response = await supabase.table("templates") \
+                .select("content") \
+                .eq("template_id", str(template_id)) \
+                .execute()
 
-        supabase = create_supabase_client()
+            if not response.data:
+                raise AIServiceError(f"Template with ID {template_id} not found")
 
-        response = (
-            supabase.table("templates")
-            .select("content")
-            .eq("template_id", str(template_id))
-            .execute()
-        )
+            return response.data[0]["content"]
 
-        if not response.data:
-            raise AIServiceError(f"Template with ID {template_id} not found")
-
-        return response.data[0]["content"]
-    except AIServiceError:
-        # Re-raise AIServiceError exceptions
-        raise
     except Exception as e:
-        logger.error(f"Error retrieving template content: {str(e)}")
+        logger.error(f"Error getting template content: {str(e)}")
         raise AIServiceError(
-            f"Error retrieving content for template {template_id}: {str(e)}",
-            original_exception=e,
+            f"Error retrieving template content: {str(e)}", original_exception=e
         )

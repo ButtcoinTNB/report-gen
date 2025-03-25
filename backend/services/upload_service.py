@@ -7,12 +7,13 @@ import uuid
 from datetime import datetime
 from typing import Any, BinaryIO, Dict, Optional
 
-from ..utils.supabase_client import supabase
+from utils.supabase_helper import create_supabase_client, supabase_client_context
 
 
 class UploadService:
     def __init__(self):
-        self.supabase = supabase
+        # Don't initialize supabase directly in __init__, use context manager in methods
+        pass
 
     async def upload_template(
         self,
@@ -29,18 +30,24 @@ class UploadService:
         unique_filename = f"{uuid.uuid4()}{ext}"
         storage_path = f"templates/{unique_filename}"
 
-        # Upload file to storage
-        await self.supabase.upload_file("templates", storage_path, file)
+        async with supabase_client_context() as supabase:
+            # Upload file to storage
+            await supabase.storage.from_("templates").upload(storage_path, file)
 
-        # Create template record in database matching exact schema
-        template = await self.supabase.create_template(
-            name=filename,
-            description=description or "",
-            storage_path=storage_path,
-            created_by=user_id,
-        )
+            # Create template record in database matching exact schema
+            response = await supabase.table("templates").insert({
+                "name": filename,
+                "description": description or "",
+                "storage_path": storage_path,
+                "created_by": user_id,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }).execute()
 
-        return template
+            if not response.data:
+                raise Exception("Failed to create template record")
+
+            return response.data[0]
 
     async def upload_reference_report(
         self,
@@ -58,19 +65,25 @@ class UploadService:
         unique_filename = f"{uuid.uuid4()}{ext}"
         storage_path = f"reference_reports/{unique_filename}"
 
-        # Upload file to storage
-        await self.supabase.upload_file("reports", storage_path, file)
+        async with supabase_client_context() as supabase:
+            # Upload file to storage
+            await supabase.storage.from_("reports").upload(storage_path, file)
 
-        # Create reference report record in database matching exact schema
-        reference_report = await self.supabase.create_reference_report(
-            name=filename,
-            description=description or "",
-            template_id=template_id,
-            storage_path=storage_path,
-            created_by=user_id,
-        )
+            # Create reference report record in database matching exact schema
+            response = await supabase.table("reference_reports").insert({
+                "name": filename,
+                "description": description or "",
+                "template_id": template_id,
+                "storage_path": storage_path,
+                "created_by": user_id,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }).execute()
 
-        return reference_report
+            if not response.data:
+                raise Exception("Failed to create reference report record")
+
+            return response.data[0]
 
     async def upload_report(
         self,
@@ -86,22 +99,28 @@ class UploadService:
         # Generate a unique filename
         ext = os.path.splitext(filename)[1]
         unique_filename = f"{uuid.uuid4()}{ext}"
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         storage_path = f"reports/{timestamp}_{unique_filename}"
 
-        # Upload file to storage
-        await self.supabase.upload_file("reports", storage_path, file)
+        async with supabase_client_context() as supabase:
+            # Upload file to storage
+            await supabase.storage.from_("reports").upload(storage_path, file)
 
-        # Create report record in database matching exact schema
-        report = await self.supabase.create_report(
-            name=filename,
-            description=description or "",
-            reference_report_id=reference_report_id,
-            storage_path=storage_path,
-            created_by=user_id,
-        )
+            # Create report record in database matching exact schema
+            response = await supabase.table("reports").insert({
+                "name": filename,
+                "description": description or "",
+                "reference_report_id": reference_report_id,
+                "storage_path": storage_path,
+                "created_by": user_id,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            }).execute()
 
-        return report
+            if not response.data:
+                raise Exception("Failed to create report record")
+
+            return response.data[0]
 
     async def get_file_url(
         self, bucket: str, file_path: str, expires_in: int = 3600
@@ -109,7 +128,10 @@ class UploadService:
         """
         Get a signed URL for accessing a file.
         """
-        return await self.supabase.get_file_url(bucket, file_path, expires_in)
+        async with supabase_client_context() as supabase:
+            return await supabase.storage.from_(bucket).create_signed_url(
+                file_path, expires_in=expires_in
+            )
 
 
 # Create a singleton instance

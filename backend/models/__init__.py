@@ -2,6 +2,7 @@
 Models package for the Insurance Report Generator.
 """
 
+from .document import DocumentMetadata, DocumentMetadataUpdate
 from .report import (
     Report,
     ReportUpdate,
@@ -10,8 +11,12 @@ from .report import (
     ReportVersionResponse,
 )
 from .share import ShareLink, ShareLinkResponse
+from .template import Template, TemplateCreate, TemplateUpdate
+from .user import User
 
 __all__ = [
+    "DocumentMetadata",
+    "DocumentMetadataUpdate",
     "Report",
     "ReportUpdate",
     "ReportVersion",
@@ -19,4 +24,8 @@ __all__ = [
     "ReportVersionResponse",
     "ShareLink",
     "ShareLinkResponse",
+    "Template",
+    "TemplateCreate",
+    "TemplateUpdate",
+    "User",
 ]

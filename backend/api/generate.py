@@ -74,7 +74,7 @@ from pydantic import UUID4, BaseModel
 from services.preview_service import preview_service
 from services.storage import get_document_path
 from utils.file_utils import safe_path_join
-from utils.supabase_helper import create_supabase_client, supabase_client_context
+from utils.supabase_helper import supabase_client_context
 
 router = APIRouter(tags=["Report Generation"])
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ class GenerateReportResponse(BaseModel):
     report_id: str
 
 
-def fetch_reference_reports():
+async def fetch_reference_reports():
     """
     Fetches stored reference reports from Supabase or local files.
 
@@ -167,37 +167,36 @@ def fetch_reference_reports():
         List of reference report data with extracted text
     """
     try:
-        # Initialize Supabase client using our helper
-        supabase = create_supabase_client()
+        # Use supabase_client_context instead
+        async with supabase_client_context() as supabase:
+            # Fetch reference reports from the database
+            response = await supabase.table("reference_reports").select("*").execute()
 
-        # Fetch reference reports from the database
-        response = supabase.table("reference_reports").select("*").execute()
+            if hasattr(response, "data") and response.data:
+                print(
+                    f"Successfully fetched {len(response.data)} reference reports from Supabase"
+                )
 
-        if hasattr(response, "data") and response.data:
-            print(
-                f"Successfully fetched {len(response.data)} reference reports from Supabase"
-            )
+                # Ensure each report has the expected fields
+                valid_reports = []
+                for report in response.data:
+                    if "extracted_text" in report and report["extracted_text"]:
+                        valid_reports.append(report)
+                    else:
+                        print(
+                            f"Warning: Reference report {report.get('id', 'unknown')} missing extracted text"
+                        )
 
-            # Ensure each report has the expected fields
-            valid_reports = []
-            for report in response.data:
-                if "extracted_text" in report and report["extracted_text"]:
-                    valid_reports.append(report)
+                if valid_reports:
+                    return valid_reports
                 else:
                     print(
-                        f"Warning: Reference report {report.get('id', 'unknown')} missing extracted text"
+                        "No valid reference reports found in Supabase (missing extracted text)"
                     )
-
-            if valid_reports:
-                return valid_reports
+                    # Fall through to local file check
             else:
-                print(
-                    "No valid reference reports found in Supabase (missing extracted text)"
-                )
+                print("No reference reports found in Supabase, or empty response")
                 # Fall through to local file check
-        else:
-            print("No reference reports found in Supabase, or empty response")
-            # Fall through to local file check
 
     except Exception as e:
         print(f"Error fetching reference reports from Supabase: {str(e)}")
@@ -282,14 +281,12 @@ async def get_report_files(report_id: UUID4) -> List[Dict[str, Any]]:
         List of file information dictionaries
     """
     try:
-        supabase = create_supabase_client()
-        response = (
-            await supabase.table("files")
-            .select("*")
-            .eq("report_id", str(report_id))
-            .execute()
-        )
-        return response.data if response.data else []
+        async with supabase_client_context() as supabase:
+            response = await supabase.table("files") \
+                .select("*") \
+                .eq("report_id", str(report_id)) \
+                .execute()
+            return response.data if response.data else []
     except Exception as e:
         logger.error(f"Error getting report files: {str(e)}")
         return []
@@ -808,29 +805,28 @@ async def _generate_and_save_report(
                 f.write(generated_text)
 
             # Update the report record in the database using Supabase
-            from utils.supabase_helper import create_supabase_client
+            from utils.supabase_helper import supabase_client_context
 
             try:
-                # Initialize Supabase client
-                supabase = create_supabase_client()
-
-                # Update the report record
-                response = (
-                    supabase.table("reports")
-                    .update(
-                        {
-                            "content": generated_text,
-                            "file_path": safe_path_join(
-                                "reports", str(report_id), "report.md"
-                            ),
-                            "status": "completed",
-                        }
+                # Use supabase_client_context instead
+                async with supabase_client_context() as supabase:
+                    # Update the report record
+                    response = (
+                        supabase.table("reports")
+                        .update(
+                            {
+                                "content": generated_text,
+                                "file_path": safe_path_join(
+                                    "reports", str(report_id), "report.md"
+                                ),
+                                "status": "completed",
+                            }
+                        )
+                        .eq("id", report_id)
+                        .execute()
                     )
-                    .eq("id", report_id)
-                    .execute()
-                )
 
-                logger.info(f"Updated report record for ID: {report_id}")
+                    logger.info(f"Updated report record for ID: {report_id}")
             except Exception as db_error:
                 logger.error(f"Database error: {str(db_error)}")
 
@@ -838,16 +834,15 @@ async def _generate_and_save_report(
             logger.error(f"Unexpected API response format: {response}")
 
             # Update report status to failed using Supabase
-            from utils.supabase_helper import create_supabase_client
+            from utils.supabase_helper import supabase_client_context
 
             try:
-                # Initialize Supabase client
-                supabase = create_supabase_client()
-
-                # Update the report status
-                supabase.table("reports").update({"status": "failed"}).eq(
-                    "id", report_id
-                ).execute()
+                # Use supabase_client_context instead
+                async with supabase_client_context() as supabase:
+                    # Update the report status
+                    supabase.table("reports").update({"status": "failed"}).eq(
+                        "id", report_id
+                    ).execute()
 
             except Exception as db_error:
                 logger.error(f"Database error: {str(db_error)}")
@@ -860,15 +855,14 @@ async def _generate_and_save_report(
 
         # Update report status to failed using Supabase
         try:
-            from utils.supabase_helper import create_supabase_client
+            from utils.supabase_helper import supabase_client_context
 
-            # Initialize Supabase client
-            supabase = create_supabase_client()
-
-            # Update the report status
-            supabase.table("reports").update({"status": "failed"}).eq(
-                "id", report_id
-            ).execute()
+            # Use supabase_client_context instead
+            async with supabase_client_context() as supabase:
+                # Update the report status
+                supabase.table("reports").update({"status": "failed"}).eq(
+                    "id", report_id
+                ).execute()
 
         except Exception as db_error:
             logger.error(f"Database error when updating status: {str(db_error)}")

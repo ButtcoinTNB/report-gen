@@ -19,12 +19,13 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Initialize Sentry
-sentry_sdk.init(
-    dsn="https://348b613d688cab3b34c8b9f6b259bd15@o4509033743646720.ingest.de.sentry.io/4509033752887376",
-    # Add data like request headers and IP for users
-    send_default_pii=True,
-)
+# Initialize Sentry only in production
+if os.getenv("ENV", "development") == "production":
+    sentry_sdk.init(
+        dsn="https://348b613d688cab3b34c8b9f6b259bd15@o4509033743646720.ingest.de.sentry.io/4509033752887376",
+        # Add data like request headers and IP for users
+        send_default_pii=True,
+    )
 
 # Set up logging first
 logging.basicConfig(

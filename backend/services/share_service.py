@@ -8,21 +8,24 @@ from typing import Optional, Dict, Any, List, cast
 
 from supabase._async.client import AsyncClient as SupabaseClient
 
-from ..config import get_settings
-from ..models import ShareLink, ShareLinkResponse
-from ..app_types.supabase import APIResponse, SingleAPIResponse
-from ..utils.supabase_helper import create_supabase_client
+# Use imports with fallbacks for better compatibility across environments
+try:
+    # First try imports without 'backend.' prefix (for Render)
+    from config import get_settings
+    from models import ShareLink, ShareLinkResponse
+    from app_types.supabase import APIResponse, SingleAPIResponse
+    from utils.supabase_helper import create_supabase_client, supabase_client_context
+except ImportError:
+    # Fallback to imports with 'backend.' prefix (for local dev)
+    from backend.config import get_settings
+    from backend.models import ShareLink, ShareLinkResponse
+    from backend.app_types.supabase import APIResponse, SingleAPIResponse
+    from backend.utils.supabase_helper import create_supabase_client, supabase_client_context
 
 
 class ShareService:
     def __init__(self):
         self.settings = get_settings()
-        self.supabase: Optional[SupabaseClient] = None
-
-    async def initialize(self):
-        """Initialize the Supabase client"""
-        if self.supabase is None:
-            self.supabase = await create_supabase_client()
 
     async def create_share_link(
         self, document_id: str, expires_in: int, max_downloads: int
@@ -39,9 +42,6 @@ class ShareService:
             ShareLinkResponse object containing the share link details
         """
         try:
-            await self.initialize()
-            assert self.supabase is not None
-
             token = secrets.token_urlsafe(32)
             expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
 
@@ -54,15 +54,16 @@ class ShareService:
                 created_at=datetime.utcnow(),
             )
 
-            response: APIResponse[Dict[str, Any]] = cast(
-                APIResponse[Dict[str, Any]],
-                await self.supabase.table("share_links")
-                .insert(share_link.dict(exclude_none=True))
-                .execute(),
-            )
+            async with supabase_client_context() as supabase:
+                response: APIResponse[Dict[str, Any]] = cast(
+                    APIResponse[Dict[str, Any]],
+                    await supabase.table("share_links")
+                    .insert(share_link.dict(exclude_none=True))
+                    .execute(),
+                )
 
-            if response.error:
-                raise Exception(response.error.message)
+                if response.error:
+                    raise Exception(response.error.message)
 
             base_url = self.settings.BASE_URL.rstrip("/")
             share_url = f"{base_url}/share/{token}"
@@ -89,25 +90,23 @@ class ShareService:
             ShareLink object if found, None otherwise
         """
         try:
-            await self.initialize()
-            assert self.supabase is not None
+            async with supabase_client_context() as supabase:
+                response: SingleAPIResponse[Dict[str, Any]] = cast(
+                    SingleAPIResponse[Dict[str, Any]],
+                    await supabase.table("share_links")
+                    .select("*")
+                    .eq("token", token)
+                    .single()
+                    .execute(),
+                )
 
-            response: SingleAPIResponse[Dict[str, Any]] = cast(
-                SingleAPIResponse[Dict[str, Any]],
-                await self.supabase.table("share_links")
-                .select("*")
-                .eq("token", token)
-                .single()
-                .execute(),
-            )
+                if response.error:
+                    raise Exception(response.error.message)
 
-            if response.error:
-                raise Exception(response.error.message)
+                if not response.data:
+                    return None
 
-            if not response.data:
-                return None
-
-            return ShareLink(**response.data)
+                return ShareLink(**response.data)
 
         except Exception as e:
             raise Exception(f"Failed to get share link: {str(e)}")
@@ -123,19 +122,17 @@ class ShareService:
             remaining_downloads: New remaining downloads value
         """
         try:
-            await self.initialize()
-            assert self.supabase is not None
+            async with supabase_client_context() as supabase:
+                response: APIResponse[Dict[str, Any]] = cast(
+                    APIResponse[Dict[str, Any]],
+                    await supabase.table("share_links")
+                    .update({"remaining_downloads": remaining_downloads})
+                    .eq("token", token)
+                    .execute(),
+                )
 
-            response: APIResponse[Dict[str, Any]] = cast(
-                APIResponse[Dict[str, Any]],
-                await self.supabase.table("share_links")
-                .update({"remaining_downloads": remaining_downloads})
-                .eq("token", token)
-                .execute(),
-            )
-
-            if response.error:
-                raise Exception(response.error.message)
+                if response.error:
+                    raise Exception(response.error.message)
 
         except Exception as e:
             raise Exception(f"Failed to update remaining downloads: {str(e)}")
@@ -151,21 +148,19 @@ class ShareService:
             List of ShareLink objects
         """
         try:
-            await self.initialize()
-            assert self.supabase is not None
+            async with supabase_client_context() as supabase:
+                response: APIResponse[Dict[str, Any]] = cast(
+                    APIResponse[Dict[str, Any]],
+                    await supabase.table("share_links")
+                    .select("*")
+                    .eq("document_id", document_id)
+                    .execute(),
+                )
 
-            response: APIResponse[Dict[str, Any]] = cast(
-                APIResponse[Dict[str, Any]],
-                await self.supabase.table("share_links")
-                .select("*")
-                .eq("document_id", document_id)
-                .execute(),
-            )
+                if response.error:
+                    raise Exception(response.error.message)
 
-            if response.error:
-                raise Exception(response.error.message)
-
-            return [ShareLink(**item) for item in response.data]
+                return [ShareLink(**item) for item in response.data]
 
         except Exception as e:
             raise Exception(f"Failed to get share links: {str(e)}")
@@ -178,19 +173,17 @@ class ShareService:
             token: The share link token
         """
         try:
-            await self.initialize()
-            assert self.supabase is not None
+            async with supabase_client_context() as supabase:
+                response: APIResponse[Dict[str, Any]] = cast(
+                    APIResponse[Dict[str, Any]],
+                    await supabase.table("share_links")
+                    .delete()
+                    .eq("token", token)
+                    .execute(),
+                )
 
-            response: APIResponse[Dict[str, Any]] = cast(
-                APIResponse[Dict[str, Any]],
-                await self.supabase.table("share_links")
-                .delete()
-                .eq("token", token)
-                .execute(),
-            )
-
-            if response.error:
-                raise Exception(response.error.message)
+                if response.error:
+                    raise Exception(response.error.message)
 
         except Exception as e:
             raise Exception(f"Failed to delete share link: {str(e)}")
@@ -198,25 +191,17 @@ class ShareService:
     async def cleanup_expired_links(self) -> None:
         """Delete all expired share links."""
         try:
-            await self.initialize()
-            assert self.supabase is not None
+            async with supabase_client_context() as supabase:
+                response: APIResponse[Dict[str, Any]] = cast(
+                    APIResponse[Dict[str, Any]],
+                    await supabase.table("share_links")
+                    .delete()
+                    .lt("expires_at", datetime.utcnow().isoformat())
+                    .execute(),
+                )
 
-            response: APIResponse[Dict[str, Any]] = cast(
-                APIResponse[Dict[str, Any]],
-                await self.supabase.table("share_links")
-                .delete()
-                .lt("expires_at", datetime.utcnow())
-                .execute(),
-            )
-
-            if response.error:
-                raise Exception(response.error.message)
+                if response.error:
+                    raise Exception(response.error.message)
 
         except Exception as e:
             raise Exception(f"Failed to cleanup expired links: {str(e)}")
-
-    def __del__(self):
-        """Cleanup when the service is destroyed."""
-        if hasattr(self, "supabase"):
-            # Close any open connections
-            pass

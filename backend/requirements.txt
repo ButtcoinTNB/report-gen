@@ -66,7 +66,8 @@ PyMuPDF>=1.22.5,<2.0.0
 pdfrw>=0.4
 weasyprint>=60.2
 python-magic>=0.4.27
-python-magic-bin>=0.4.14;sys_platform=='win32' or sys_platform=='darwin'  # Binary for Windows/Mac
+# python-magic-bin is only needed on Windows
+# python-magic-bin>=0.4.14;sys_platform=='win32'
 
 # Note: For Linux deployment (like Render), ensure LibreOffice or unoconv is installed
 # at the system level for PDF conversion: 
