@@ -70,6 +70,7 @@ python-magic>=0.4.27
 # ---------------- API / Networking ----------------
 aiohttp>=3.9.0
 PyPDF2>=3.0.0
+sse-starlette>=1.6.5  # For server-sent events in FastAPI
 
 # ---------------- Database / Storage ----------------
 supabase>=2.0.0
