@@ -6,6 +6,10 @@ pydantic-settings>=2.0.0
 starlette==0.27.0
 python-multipart>=0.0.6
 sse-starlette>=1.6.5  # For server-sent events in FastAPI
+email-validator>=2.0.0  # Required for pydantic EmailStr
+
+# Monitoring and metrics
+prometheus_client>=0.17.0  # For metrics collection
 
 # Authentication and security
 python-jose[cryptography]>=3.3.0

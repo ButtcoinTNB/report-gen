@@ -10,6 +10,9 @@ services:
       
       # Install Python dependencies
       pip install -r requirements.txt
+      
+      # Ensure these critical packages are installed
+      pip install email-validator prometheus-client
     startCommand: python -m uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeploy: true
