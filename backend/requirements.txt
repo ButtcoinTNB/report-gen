@@ -5,12 +5,14 @@ pydantic>=2.4.2
 pydantic-settings>=2.0.0
 starlette==0.27.0
 python-multipart>=0.0.6
+sse-starlette>=1.6.5  # For server-sent events in FastAPI
 
 # Authentication and security
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 bcrypt==4.0.1
 cryptography==41.0.5
+PyJWT>=2.8.0  # JWT implementation for Python
 
 # Utilities
 python-dotenv>=1.0.0
@@ -19,6 +21,7 @@ httpx>=0.25.0
 requests==2.31.0
 jinja2==3.1.2
 werkzeug>=2.3.0
+asyncio-timeout>=4.0.2  # For async timeouts without using deprecated features
 
 # Database
 sqlalchemy==2.0.22
@@ -41,6 +44,8 @@ pytesseract==0.3.10
 aiofiles==23.2.1
 asyncio==3.4.3
 psutil==5.9.6
+aiohttp>=3.9.0
+aiodns>=3.0.0  # For faster DNS resolution with aiohttp
 
 # Date/time handling
 pytz==2023.3.post1
@@ -62,6 +67,7 @@ PyMuPDF>=1.22.5,<2.0.0
 pdfrw>=0.4
 weasyprint>=60.2
 python-magic>=0.4.27
+python-magic-bin>=0.4.14;sys_platform=='win32' or sys_platform=='darwin'  # Binary for Windows/Mac
 
 # Note: For Linux deployment (like Render), ensure LibreOffice or unoconv is installed
 # at the system level for PDF conversion: 
@@ -75,6 +81,7 @@ sse-starlette>=1.6.5  # For server-sent events in FastAPI
 # ---------------- Database / Storage ----------------
 supabase>=2.0.0
 psycopg2-binary>=2.9.9
+postgrest>=0.13.0  # For Supabase integration
 
 # ---------------- Development Tools ----------------
 black>=24.2.0
