@@ -15,10 +15,10 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from utils.resource_manager import resource_manager
 from utils.error_handler import handle_exception, logger
 from utils.metrics import MetricsCollector
 
-from ..utils.resource_manager import resource_manager
 from .docx_service import docx_service
 
 
