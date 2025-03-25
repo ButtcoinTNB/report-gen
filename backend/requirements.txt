@@ -21,7 +21,6 @@ httpx>=0.25.0
 requests==2.31.0
 jinja2==3.1.2
 werkzeug>=2.3.0
-asyncio-timeout>=4.0.2  # For async timeouts without using deprecated features
 
 # Database
 sqlalchemy==2.0.22
