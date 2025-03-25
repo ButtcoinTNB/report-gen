@@ -87,7 +87,8 @@ class ImportStandardizer:
         python_files = [
             f
             for f in glob.glob(os.path.join(directory, "*.py"))
-            if os.path.basename(f) not in ["__init__.py", "schemas.py", "openapi_examples.py"]
+            if os.path.basename(f)
+            not in ["__init__.py", "schemas.py", "openapi_examples.py"]
         ]
 
         self.log(f"Found {len(python_files)} Python files to process", 1)

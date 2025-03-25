@@ -641,12 +641,14 @@ async def get_preview_file(preview_id: str):
         # Resolve both paths to absolute paths to compare them safely
         file_path_abs = Path(file_path).resolve()
         previews_dir_abs = Path(settings.PREVIEWS_DIR).resolve()
-        
+
         # Check that the file path is within the previews directory
         if not file_path_abs.is_relative_to(previews_dir_abs):
-            logger.error(f"Security violation: Attempted to access file outside previews directory: {file_path}")
+            logger.error(
+                f"Security violation: Attempted to access file outside previews directory: {file_path}"
+            )
             raise HTTPException(status_code=403, detail="Access denied")
-            
+
     except (ValueError, RuntimeError) as e:
         logger.error(f"Path validation error: {str(e)}")
         raise HTTPException(status_code=403, detail="Invalid path")

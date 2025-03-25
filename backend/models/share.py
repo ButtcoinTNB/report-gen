@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class ShareLink(BaseModel):
     """Share link model for database records"""
+
     token: str
     document_id: str
     expires_at: datetime
@@ -39,6 +40,7 @@ class ShareLinkCreate(BaseModel):
 
 class ShareLinkResponse(BaseModel):
     """Share link response model for API responses"""
+
     url: str
     token: str
     expires_at: datetime

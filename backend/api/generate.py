@@ -311,7 +311,7 @@ async def generate_report(request: GenerateRequest, background_tasks: Background
     try:
         # Store metadata in Supabase
         report_id = str(uuid.uuid4())
-        
+
         # Use regular 'with' instead of 'async with'
         with supabase_client_context() as supabase:
             response = (
@@ -321,7 +321,9 @@ async def generate_report(request: GenerateRequest, background_tasks: Background
                         "report_id": report_id,
                         "title": "New Report",
                         "status": "draft",
-                        "template_id": str(request.template_id) if request.template_id else None,
+                        "template_id": (
+                            str(request.template_id) if request.template_id else None
+                        ),
                         "metadata": {},
                     }
                 )

@@ -6,7 +6,17 @@ This ensures consistent error responses and logging throughout the application.
 import logging
 import traceback
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, TypeVar, Union, Type, ClassVar, NoReturn
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    TypeVar,
+    Union,
+    Type,
+    ClassVar,
+    NoReturn,
+)
 from typing_extensions import TypedDict
 
 # Import the standard APIResponse model
@@ -52,14 +62,16 @@ EXCEPTION_MAPPING = {
     ),
 }
 
-T = TypeVar('T')
+T = TypeVar("T")
 ErrorType = str
 StatusCode = int
+
 
 class ErrorConfig(TypedDict):
     status_code: int
     message: str
     retryable: bool
+
 
 class ErrorResponse(BaseModel):
     """Standardized error response model"""
@@ -67,23 +79,29 @@ class ErrorResponse(BaseModel):
     error_type: ErrorType = Field(description="Type of error that occurred")
     message: str = Field(description="Human-readable error message")
     code: StatusCode = Field(description="HTTP status code")
-    retryable: bool = Field(default=False, description="Whether the operation can be retried")
+    retryable: bool = Field(
+        default=False, description="Whether the operation can be retried"
+    )
     detail: Optional[str] = Field(default=None, description="Additional error details")
     context: Dict[str, Any] = Field(default_factory=dict, description="Error context")
-    transaction_id: Optional[str] = Field(default=None, description="Transaction ID for tracing")
-    request_id: Optional[str] = Field(default=None, description="Request ID for tracing")
+    transaction_id: Optional[str] = Field(
+        default=None, description="Transaction ID for tracing"
+    )
+    request_id: Optional[str] = Field(
+        default=None, description="Request ID for tracing"
+    )
 
     ERROR_TYPES: ClassVar[Dict[ErrorType, ErrorConfig]] = {
         "VALIDATION_ERROR": {
             "status_code": status.HTTP_400_BAD_REQUEST,
             "message": "Invalid request parameters",
-            "retryable": False
+            "retryable": False,
         },
         "INTERNAL_ERROR": {
             "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR,
             "message": "An internal error occurred",
-            "retryable": True
-        }
+            "retryable": True,
+        },
     }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -100,7 +118,7 @@ class ErrorResponse(BaseModel):
         context: Optional[Dict[str, Any]] = None,
         transaction_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        log_error: bool = True
+        log_error: bool = True,
     ) -> Dict[str, Any]:
         if error_type not in cls.ERROR_TYPES:
             error_type = "INTERNAL_ERROR"
@@ -112,11 +130,13 @@ class ErrorResponse(BaseModel):
                 error_type=error_type,
                 message=str(message),
                 code=code or error_config["status_code"],
-                retryable=retryable if retryable is not None else error_config["retryable"],
+                retryable=(
+                    retryable if retryable is not None else error_config["retryable"]
+                ),
                 detail=detail,
                 context=context or {},
                 transaction_id=transaction_id,
-                request_id=request_id
+                request_id=request_id,
             )
         except ValidationError as e:
             logger.error(f"Error creating error response: {e}")
@@ -124,17 +144,17 @@ class ErrorResponse(BaseModel):
                 error_type="INTERNAL_ERROR",
                 message="Error creating error response",
                 code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(e)
+                detail=str(e),
             )
-        
+
         if log_error:
             logger.error(
                 f"Error occurred: {error_response.error_type} - {error_response.message}",
-                extra={"error_details": error_response.to_dict()}
+                extra={"error_details": error_response.to_dict()},
             )
             if error_type == "INTERNAL_ERROR":
                 logger.error(f"Stack trace: {traceback.format_exc()}")
-        
+
         return error_response.to_dict()
 
     @classmethod
@@ -148,7 +168,7 @@ class ErrorResponse(BaseModel):
         context: Optional[Dict[str, Any]] = None,
         transaction_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        log_error: bool = True
+        log_error: bool = True,
     ) -> NoReturn:
         error_dict = cls.format_error(
             error_type=error_type,
@@ -159,7 +179,7 @@ class ErrorResponse(BaseModel):
             context=context,
             transaction_id=transaction_id,
             request_id=request_id,
-            log_error=log_error
+            log_error=log_error,
         )
         raise HTTPException(status_code=code, detail=error_dict)
 
@@ -171,7 +191,7 @@ class ErrorResponse(BaseModel):
         message: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         transaction_id: Optional[str] = None,
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
     ) -> JSONResponse:
         error_dict = cls.format_error(
             error_type=error_type,
@@ -181,9 +201,11 @@ class ErrorResponse(BaseModel):
             detail=str(exception),
             context=context or {},
             transaction_id=transaction_id,
-            request_id=request_id
+            request_id=request_id,
         )
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_dict)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=error_dict
+        )
 
 
 # Convenience function for raising errors
@@ -384,4 +406,5 @@ def error_handler(func: Callable[..., T]) -> Callable[..., Union[T, JSONResponse
             return await func(*args, **kwargs)
         except Exception as e:
             return ErrorResponse.handle_exception(e)
+
     return wrapper

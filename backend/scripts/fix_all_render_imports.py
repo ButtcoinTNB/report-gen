@@ -83,14 +83,14 @@ def main():
         print(f"\nSuccessfully fixed imports in {len(fixed_files)} files:")
         for file in fixed_files[:20]:  # Show first 20 files
             print(f"- {file}")
-        
+
         if len(fixed_files) > 20:
             print(f"... and {len(fixed_files) - 20} more files")
-            
+
         print("\nYou should now be able to deploy the application successfully.")
     else:
         print("No files needed fixing.")
 
 
 if __name__ == "__main__":
-    main() 
+    main()

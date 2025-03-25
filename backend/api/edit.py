@@ -11,14 +11,26 @@ from fastapi import APIRouter, HTTPException, Query
 try:
     # First try imports without 'backend.' prefix (for Render)
     from api.schemas import APIResponse
-    from models import Report, ReportUpdate, ReportVersion, ReportVersionCreate, ReportVersionResponse
+    from models import (
+        Report,
+        ReportUpdate,
+        ReportVersion,
+        ReportVersionCreate,
+        ReportVersionResponse,
+    )
     from services.ai_service import refine_report_text
     from utils.error_handler import api_error_handler
     from utils.supabase_helper import async_supabase_client_context
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from api.schemas import APIResponse
-    from models import Report, ReportUpdate, ReportVersion, ReportVersionCreate, ReportVersionResponse
+    from models import (
+        Report,
+        ReportUpdate,
+        ReportVersion,
+        ReportVersionCreate,
+        ReportVersionResponse,
+    )
     from services.ai_service import refine_report_text
     from utils.error_handler import api_error_handler
     from utils.supabase_helper import async_supabase_client_context
@@ -28,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter()
+
 
 @router.put("/{report_id}", response_model=APIResponse[Report])
 @api_error_handler
@@ -51,7 +64,12 @@ async def update_report(
     """
     # Retrieve report from database
     async with async_supabase_client_context() as supabase:
-        response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        response = (
+            await supabase.table("reports")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not response.data:
             raise HTTPException(
@@ -75,7 +93,11 @@ async def update_report(
                 changes_description=version_description,
             )
 
-            version_response = await supabase.table("report_versions").insert(version_data.dict()).execute()
+            version_response = (
+                await supabase.table("report_versions")
+                .insert(version_data.dict())
+                .execute()
+            )
             if not version_response.data:
                 raise HTTPException(
                     status_code=500, detail="Failed to create version record"
@@ -89,12 +111,15 @@ async def update_report(
         update_data["updated_at"] = datetime.now().isoformat()
 
         # Update report
-        update_response = await supabase.table("reports").update(update_data).eq("report_id", str(report_id)).execute()
+        update_response = (
+            await supabase.table("reports")
+            .update(update_data)
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not update_response.data:
-            raise HTTPException(
-                status_code=500, detail="Failed to update report"
-            )
+            raise HTTPException(status_code=500, detail="Failed to update report")
 
         return APIResponse(data=Report(**update_response.data[0]))
 
@@ -124,7 +149,12 @@ async def ai_refine_report(
     # Initialize Supabase client
     async with async_supabase_client_context() as supabase:
         # Get current report content
-        response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        response = (
+            await supabase.table("reports")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not response.data:
             raise HTTPException(
@@ -135,7 +165,9 @@ async def ai_refine_report(
         report = Report(**report_data)
 
         # Refine the report content using AI
-        refined_result = await refine_report_text(report_id, instructions, report_data["content"])
+        refined_result = await refine_report_text(
+            report_id, instructions, report_data["content"]
+        )
         refined_content = refined_result["content"]
 
         # Create a new version record
@@ -150,9 +182,15 @@ async def ai_refine_report(
             changes_description=f"AI refinement based on instructions: {instructions}",
         )
 
-        version_response = await supabase.table("report_versions").insert(version_data.dict()).execute()
+        version_response = (
+            await supabase.table("report_versions")
+            .insert(version_data.dict())
+            .execute()
+        )
         if not version_response.data:
-            raise HTTPException(status_code=500, detail="Failed to create version record")
+            raise HTTPException(
+                status_code=500, detail="Failed to create version record"
+            )
 
         # Update the report with refined content
         update_data = {
@@ -161,7 +199,12 @@ async def ai_refine_report(
             "updated_at": datetime.now().isoformat(),
         }
 
-        update_response = await supabase.table("reports").update(update_data).eq("report_id", str(report_id)).execute()
+        update_response = (
+            await supabase.table("reports")
+            .update(update_data)
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not update_response.data:
             raise HTTPException(status_code=500, detail="Failed to update report")
@@ -185,7 +228,12 @@ async def get_report_versions(
     """
     async with async_supabase_client_context() as supabase:
         # Check if report exists and get current version
-        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        report_response = (
+            await supabase.table("reports")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not report_response.data:
             raise HTTPException(
@@ -195,7 +243,13 @@ async def get_report_versions(
         report = Report(**report_response.data[0])
 
         # Get versions
-        versions_response = await supabase.table("report_versions").select("*").eq("report_id", str(report_id)).order("version_number", desc=True).execute()
+        versions_response = (
+            await supabase.table("report_versions")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .order("version_number", desc=True)
+            .execute()
+        )
 
         versions = [ReportVersion(**v) for v in versions_response.data]
 
@@ -206,7 +260,9 @@ async def get_report_versions(
         )
 
 
-@router.get("/{report_id}/versions/{version_number}", response_model=APIResponse[ReportVersion])
+@router.get(
+    "/{report_id}/versions/{version_number}", response_model=APIResponse[ReportVersion]
+)
 @api_error_handler
 async def get_report_version(
     report_id: UUID,
@@ -224,7 +280,13 @@ async def get_report_version(
     """
     async with async_supabase_client_context() as supabase:
         # Get specific version
-        version_response = await supabase.table("report_versions").select("*").eq("report_id", str(report_id)).eq("version_number", version_number).execute()
+        version_response = (
+            await supabase.table("report_versions")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .eq("version_number", version_number)
+            .execute()
+        )
 
         if not version_response.data:
             raise HTTPException(
@@ -235,7 +297,9 @@ async def get_report_version(
         return APIResponse(data=ReportVersion(**version_response.data[0]))
 
 
-@router.post("/{report_id}/versions/{version_number}/revert", response_model=APIResponse[Report])
+@router.post(
+    "/{report_id}/versions/{version_number}/revert", response_model=APIResponse[Report]
+)
 @api_error_handler
 async def revert_to_version(
     report_id: UUID,
@@ -253,7 +317,13 @@ async def revert_to_version(
     """
     async with async_supabase_client_context() as supabase:
         # Get the target version
-        version_response = await supabase.table("report_versions").select("*").eq("report_id", str(report_id)).eq("version_number", version_number).execute()
+        version_response = (
+            await supabase.table("report_versions")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .eq("version_number", version_number)
+            .execute()
+        )
 
         if not version_response.data:
             raise HTTPException(
@@ -264,7 +334,12 @@ async def revert_to_version(
         target_version = ReportVersion(**version_response.data[0])
 
         # Get current report data
-        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        report_response = (
+            await supabase.table("reports")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not report_response.data:
             raise HTTPException(
@@ -283,9 +358,15 @@ async def revert_to_version(
             changes_description=f"Reverted to version {version_number}",
         )
 
-        version_response = await supabase.table("report_versions").insert(version_data.dict()).execute()
+        version_response = (
+            await supabase.table("report_versions")
+            .insert(version_data.dict())
+            .execute()
+        )
         if not version_response.data:
-            raise HTTPException(status_code=500, detail="Failed to create version record")
+            raise HTTPException(
+                status_code=500, detail="Failed to create version record"
+            )
 
         # Update the report content
         update_data = {
@@ -294,7 +375,12 @@ async def revert_to_version(
             "updated_at": datetime.now().isoformat(),
         }
 
-        update_response = await supabase.table("reports").update(update_data).eq("report_id", str(report_id)).execute()
+        update_response = (
+            await supabase.table("reports")
+            .update(update_data)
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not update_response.data:
             raise HTTPException(status_code=500, detail="Failed to update report")

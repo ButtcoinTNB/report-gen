@@ -146,12 +146,12 @@ class ApiRateLimiter:
 
     # Singleton instance
     _instance = None
-    
+
     @classmethod
     def get_instance(cls):
         """
         Get the singleton instance of ApiRateLimiter
-        
+
         Returns:
             The singleton ApiRateLimiter instance
         """

@@ -52,7 +52,12 @@ async def get_report_content(report_id: UUID4) -> Optional[str]:
     # Check if report exists in Supabase
     try:
         async with async_supabase_client_context() as supabase:
-            response = await supabase.table("reports").select("content").eq("report_id", str(report_id)).execute()
+            response = (
+                await supabase.table("reports")
+                .select("content")
+                .eq("report_id", str(report_id))
+                .execute()
+            )
 
             if response.data and response.data[0].get("content"):
                 return response.data[0]["content"]
@@ -90,9 +95,18 @@ async def fetch_report_path_from_supabase(report_id: UUID4) -> Optional[str]:
     """
     try:
         async with async_supabase_client_context() as supabase:
-            response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+            response = (
+                await supabase.table("reports")
+                .select("file_path")
+                .eq("report_id", str(report_id))
+                .execute()
+            )
 
-            if response.data and len(response.data) > 0 and response.data[0].get("file_path"):
+            if (
+                response.data
+                and len(response.data) > 0
+                and response.data[0].get("file_path")
+            ):
                 file_path = response.data[0]["file_path"]
 
                 # Validate the file path
@@ -103,7 +117,9 @@ async def fetch_report_path_from_supabase(report_id: UUID4) -> Optional[str]:
                     return validated_path
 
                 # If the path wasn't valid or file doesn't exist, log this
-                logger.warning(f"File path from Supabase is invalid or file doesn't exist: {file_path}")
+                logger.warning(
+                    f"File path from Supabase is invalid or file doesn't exist: {file_path}"
+                )
 
     except Exception as e:
         logger.error(f"Error fetching report path from Supabase: {str(e)}")
@@ -133,7 +149,9 @@ def find_report_file_locally(report_id: UUID4) -> Optional[str]:
             found_path = Path(matching_files[0])
             expected_dir = Path(settings.GENERATED_REPORTS_DIR).resolve()
             if not found_path.resolve().is_relative_to(expected_dir):
-                logger.error(f"Security violation: File path outside allowed directory: {found_path}")
+                logger.error(
+                    f"Security violation: File path outside allowed directory: {found_path}"
+                )
                 return None
             return str(matching_files[0])  # Convert Path to string for return
 
@@ -158,7 +176,9 @@ def find_docx_file_locally(report_id: UUID4) -> Optional[str]:
             found_path = Path(matching_files[0])
             expected_dir = Path(settings.GENERATED_REPORTS_DIR).resolve()
             if not found_path.resolve().is_relative_to(expected_dir):
-                logger.error(f"Security violation: File path outside allowed directory: {found_path}")
+                logger.error(
+                    f"Security violation: File path outside allowed directory: {found_path}"
+                )
                 return None
             return str(matching_files[0])  # Convert Path to string for return
 
@@ -212,7 +232,12 @@ async def download_report(
 
     # Find the report in Supabase
     async with async_supabase_client_context() as supabase:
-        response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        response = (
+            await supabase.table("reports")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not response.data:
             raise HTTPException(
@@ -247,7 +272,12 @@ async def serve_report_file(report_id: UUID4):
     """
     # Get file path from Supabase
     async with async_supabase_client_context() as supabase:
-        response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+        response = (
+            await supabase.table("reports")
+            .select("file_path")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not response.data or not response.data[0].get("file_path"):
             raise HTTPException(status_code=404, detail="Report file not found")
@@ -291,7 +321,12 @@ async def cleanup_report_files(report_id: UUID4):
     try:
         # Get file paths from Supabase
         async with async_supabase_client_context() as supabase:
-            response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+            response = (
+                await supabase.table("reports")
+                .select("file_path")
+                .eq("report_id", str(report_id))
+                .execute()
+            )
 
             if response.data and response.data[0].get("file_path"):
                 docx_path = response.data[0]["file_path"]
@@ -317,7 +352,9 @@ async def cleanup_report_files(report_id: UUID4):
                         found_path = Path(file_path)
                         expected_dir = Path(settings.GENERATED_REPORTS_DIR).resolve()
                         if not found_path.resolve().is_relative_to(expected_dir):
-                            logger.error(f"Security violation: File path outside allowed directory: {found_path}")
+                            logger.error(
+                                f"Security violation: File path outside allowed directory: {found_path}"
+                            )
                             continue
                         os.remove(file_path)
                         deleted_files.append(file_path)
@@ -395,7 +432,12 @@ async def download_docx_report(report_id: UUID4):
     """
     # Get file path from Supabase
     async with async_supabase_client_context() as supabase:
-        response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+        response = (
+            await supabase.table("reports")
+            .select("file_path")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not response.data or not response.data[0].get("file_path"):
             raise HTTPException(status_code=404, detail="Report file not found")
@@ -456,7 +498,12 @@ async def serve_docx_report_file(report_id: UUID4):
     """
     # Get file path from Supabase
     async with async_supabase_client_context() as supabase:
-        response = await supabase.table("reports").select("file_path").eq("report_id", str(report_id)).execute()
+        response = (
+            await supabase.table("reports")
+            .select("file_path")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not response.data or not response.data[0].get("file_path"):
             raise HTTPException(status_code=404, detail="Report file not found")
@@ -495,7 +542,12 @@ async def get_report_file_info(report_id: UUID4):
         Information about the report file including path and content type
     """
     async with async_supabase_client_context() as supabase:
-        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        report_response = (
+            await supabase.table("reports")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not report_response.data:
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")
@@ -537,7 +589,12 @@ async def download_report_content(report_id: UUID4):
         The report content as a text file
     """
     async with async_supabase_client_context() as supabase:
-        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        report_response = (
+            await supabase.table("reports")
+            .select("*")
+            .eq("report_id", str(report_id))
+            .execute()
+        )
 
         if not report_response.data:
             raise HTTPException(status_code=404, detail=f"Report {report_id} not found")

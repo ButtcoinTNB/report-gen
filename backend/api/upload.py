@@ -179,13 +179,10 @@ async def upload_template(
     with supabase_client_context() as supabase:
         # Store file in Supabase
         logger.info(f"Storing template in Supabase database: {name} - v{version}")
-        
+
         # Check if template with this name already exists
         existing = (
-            await supabase.table("templates")
-            .select("*")
-            .eq("name", name)
-            .execute()
+            await supabase.table("templates").select("*").eq("name", name).execute()
         )
 
         if existing.data:

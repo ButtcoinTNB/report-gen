@@ -1,6 +1,7 @@
 """
 Test error handling functionality
 """
+
 # ruff: noqa: E402
 
 import os
@@ -24,10 +25,12 @@ from utils.exceptions import (
 )
 from utils.file_processor import FileProcessor
 
+
 class ExceptionDetail(TypedDict):
     code: str
     message: str
     details: Dict[str, Any]
+
 
 class TestFileProcessorErrorHandling(unittest.TestCase):
     """Test the enhanced error handling in the FileProcessor class"""
@@ -65,9 +68,7 @@ class TestFileProcessorErrorHandling(unittest.TestCase):
         exception_detail: ExceptionDetail = context.exception.detail
         self.assertIn("not found", str(exception_detail["message"]))
         self.assertEqual(exception_detail["code"], "NOT_FOUND")
-        self.assertEqual(
-            exception_detail["details"]["upload_id"], invalid_upload_id
-        )
+        self.assertEqual(exception_detail["details"]["upload_id"], invalid_upload_id)
 
     def test_save_chunk_validation_exception(self):
         """Test that save_chunk raises ValidationException for invalid chunk index"""

@@ -5,10 +5,20 @@ from typing import Any, Dict, List, Optional
 
 try:
     # First try imports without 'backend.' prefix (for Render)
-    from models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
+    from models.task import (
+        ProcessStage,
+        TaskStatus,
+        TaskStatusResponse,
+        TaskUpdateRequest,
+    )
 except ImportError:
     # Fall back to imports with 'backend.' prefix (for local development)
-    from models.task import ProcessStage, TaskStatus, TaskStatusResponse, TaskUpdateRequest
+    from models.task import (
+        ProcessStage,
+        TaskStatus,
+        TaskStatusResponse,
+        TaskUpdateRequest,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -193,20 +203,20 @@ class TaskManager:
     def fail_task(cls, task_id: str, error: str) -> TaskStatusResponse:
         """
         Mark a task as failed.
-        
+
         Args:
             task_id: The task ID
             error: Error message
-            
+
         Returns:
             The updated task
-            
+
         Raises:
             TaskNotFoundException: If the task is not found
         """
         # Check if task exists (will raise TaskNotFoundException if not found)
         cls.get_task(task_id)
-        
+
         # Update task
         update = TaskUpdateRequest(
             status=TaskStatus.FAILED.value,
@@ -214,33 +224,33 @@ class TaskManager:
             error=error,
             can_proceed=True,
         )
-        
+
         return cls.update_task_status(task_id, update)
-    
+
     @classmethod
     def cancel_task(cls, task_id: str) -> TaskStatusResponse:
         """
         Cancel a task.
-        
+
         Args:
             task_id: The task ID
-            
+
         Returns:
             The updated task
-            
+
         Raises:
             TaskNotFoundException: If the task is not found
         """
         # Check if task exists (will raise TaskNotFoundException if not found)
         cls.get_task(task_id)
-        
+
         # Update task
         update = TaskUpdateRequest(
             status=TaskStatus.CANCELLED.value,
             message="Process cancelled by user",
             can_proceed=True,
         )
-        
+
         return cls.update_task_status(task_id, update)
 
     @classmethod

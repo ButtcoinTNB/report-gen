@@ -1,6 +1,7 @@
 """
 Test chunked upload functionality
 """
+
 # ruff: noqa: E402
 
 import io
@@ -172,7 +173,9 @@ class TestFileProcessorChunkedUpload:
         )
 
         # Get status
-        status: Optional[UploadStatus] = FileProcessor.get_chunked_upload_status(upload_id)
+        status: Optional[UploadStatus] = FileProcessor.get_chunked_upload_status(
+            upload_id
+        )
         assert status is not None
 
         # Verify status

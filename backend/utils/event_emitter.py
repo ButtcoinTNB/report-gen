@@ -5,6 +5,7 @@ Event emitter utility for handling event subscriptions and notifications
 import asyncio
 from typing import Dict, List, Any
 
+
 class EventEmitter:
     """
     A simple event emitter for handling event subscriptions and notifications
@@ -17,16 +18,16 @@ class EventEmitter:
     async def subscribe(self, event_type: str) -> asyncio.Queue:
         """
         Subscribe to an event type
-        
+
         Args:
             event_type: The type of event to subscribe to
-            
+
         Returns:
             A queue that will receive events of the specified type
         """
         if event_type not in self.subscribers:
             self.subscribers[event_type] = []
-            
+
         queue = asyncio.Queue()
         self.subscribers[event_type].append(queue)
         return queue
@@ -34,7 +35,7 @@ class EventEmitter:
     async def unsubscribe(self, event_type: str, queue: asyncio.Queue) -> None:
         """
         Unsubscribe from an event type
-        
+
         Args:
             event_type: The type of event to unsubscribe from
             queue: The queue to remove from subscribers
@@ -45,7 +46,7 @@ class EventEmitter:
     async def emit(self, event_type: str, data: Any) -> None:
         """
         Emit an event to all subscribers
-        
+
         Args:
             event_type: The type of event to emit
             data: The data to send to subscribers
@@ -63,11 +64,11 @@ class EventEmitter:
     def get_subscriber_count(self, event_type: str) -> int:
         """
         Get the number of subscribers for an event type
-        
+
         Args:
             event_type: The type of event to count subscribers for
-            
+
         Returns:
             The number of subscribers for the event type
         """
-        return len(self.subscribers.get(event_type, [])) 
+        return len(self.subscribers.get(event_type, []))

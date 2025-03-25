@@ -249,9 +249,7 @@ def test_error_handler():
         try:
             raise ValueError("Test error")
         except Exception as e:
-            error_handler.handle_exception(
-                e, "test operation", include_traceback=True
-            )
+            error_handler.handle_exception(e, "test operation", include_traceback=True)
             logger.error("This line should not be reached")
             return False
     except Exception as e:

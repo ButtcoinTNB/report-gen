@@ -9,16 +9,27 @@ import logging
 import threading
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Tuple, cast, TypeVar, Any, List, Generic, AsyncIterator
+from typing import (
+    Dict,
+    Optional,
+    Tuple,
+    cast,
+    TypeVar,
+    Any,
+    List,
+    Generic,
+    AsyncIterator,
+)
 
 from supabase._async.client import AsyncClient as Client, create_client
+
 # Import only one version of APIResponse to avoid conflicts
 try:
     from postgrest.base_request_builder import APIResponse
 except ImportError:
     from postgrest._async.request import APIResponse
 
-T = TypeVar('T')  # Define a generic type variable
+T = TypeVar("T")  # Define a generic type variable
 
 # Use imports with fallbacks for better compatibility across environments
 try:
@@ -59,7 +70,11 @@ CONNECTION_EXPIRY_SECONDS = 300  # 5 minutes
 class SupabaseConnectionPool:
     """Thread-safe connection pool for Supabase clients with LRU eviction and expiration"""
 
-    def __init__(self, max_size: int = MAX_CONNECTIONS, expiry_seconds: int = CONNECTION_EXPIRY_SECONDS) -> None:
+    def __init__(
+        self,
+        max_size: int = MAX_CONNECTIONS,
+        expiry_seconds: int = CONNECTION_EXPIRY_SECONDS,
+    ) -> None:
         """
         Initialize the connection pool.
 
@@ -71,7 +86,9 @@ class SupabaseConnectionPool:
         self._pool: Dict[str, Tuple[Client, datetime]] = {}
         self._max_size = max_size
         self._expiry_seconds = expiry_seconds
-        logger.info(f"Initialized Supabase connection pool: max_size={max_size}, expiry={expiry_seconds}s")
+        logger.info(
+            f"Initialized Supabase connection pool: max_size={max_size}, expiry={expiry_seconds}s"
+        )
 
     def get(self, key: str) -> Optional[Client]:
         """
@@ -120,7 +137,9 @@ class SupabaseConnectionPool:
                 oldest_time = last_used
 
         if oldest_key:
-            logger.debug(f"Evicting oldest Supabase connection: last used {oldest_time}")
+            logger.debug(
+                f"Evicting oldest Supabase connection: last used {oldest_time}"
+            )
             del self._pool[oldest_key]
 
     def cleanup_expired(self) -> int:
@@ -179,7 +198,7 @@ async def create_supabase_client() -> Client:
     try:
         client = await create_client(
             supabase_url=settings_obj.SUPABASE_URL,
-            supabase_key=settings_obj.SUPABASE_KEY
+            supabase_key=settings_obj.SUPABASE_KEY,
         )
         return client
     except Exception as e:
@@ -191,23 +210,25 @@ def get_supabase_client() -> Client:
     """
     Synchronous function to get a Supabase client.
     Note: In most new code, you should use the async version instead.
-    
+
     Returns:
         A Supabase client instance
     """
     # This is a simplified version that should only be used in synchronous contexts
     client_key = f"{settings.SUPABASE_URL}:{settings.SUPABASE_KEY}"
-    
+
     # Check if client already exists in pool
     client = _connection_pool.get(client_key)
     if client:
         return client
-        
+
     # Create a new synchronous client - not ideal, but necessary for backward compatibility
     from supabase import create_client as create_sync_client
-    
+
     supabase = create_sync_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-    _connection_pool.put(client_key, cast(Client, supabase))  # Type casting for compatibility
+    _connection_pool.put(
+        client_key, cast(Client, supabase)
+    )  # Type casting for compatibility
     return cast(Client, supabase)
 
 
@@ -216,14 +237,14 @@ def supabase_client_context():
     """
     Context manager for Supabase client access.
     Ensures connections are returned to the pool after use.
-    
+
     Usage:
         with supabase_client_context() as supabase:
             response = supabase.table("reports").select("*").execute()
     """
     # When a client is needed, get one from pool (or create new one if needed)
     client = get_supabase_client()
-    
+
     try:
         # Provide the client to the calling code
         yield client
@@ -239,7 +260,7 @@ def supabase_client_context():
 async def async_supabase_client_context() -> AsyncIterator[Client]:
     """
     Async context manager for Supabase client access.
-    
+
     Usage:
         async with async_supabase_client_context() as supabase:
             response = await supabase.table("reports").select("*").execute()
@@ -305,7 +326,7 @@ def _get_storage_url_from_client(client: Client, bucket: str, path: str) -> str:
 async def get_supabase_connection_status() -> dict:
     """
     Check the status of the Supabase connection.
-    
+
     Returns:
         A dictionary with status information
     """
@@ -313,11 +334,15 @@ async def get_supabase_connection_status() -> dict:
         client = await create_supabase_client()
         # Use the client to do a simple query to check connection
         await client.table("reports").select("*").limit(1).execute()
-        
+
         return {
             "status": "connected",
             "pool_size": _connection_pool.size(),
-            "url": settings.SUPABASE_URL.split("@")[-1] if "@" in settings.SUPABASE_URL else settings.SUPABASE_URL,
+            "url": (
+                settings.SUPABASE_URL.split("@")[-1]
+                if "@" in settings.SUPABASE_URL
+                else settings.SUPABASE_URL
+            ),
         }
     except Exception as e:
         return {
@@ -334,7 +359,7 @@ async def initialize_supabase_tables():
     """
     try:
         client = await create_supabase_client()
-        
+
         # Create share_links table if it doesn't exist
         await client.rpc(
             "create_share_links_table",
@@ -387,10 +412,15 @@ async def cleanup_database():
         logger.info("Running database cleanup operations")
 
         client = await create_supabase_client()
-        
+
         # Example: Delete expired share links
         now = datetime.utcnow()
-        result = await client.table("share_links").delete().lt("expires_at", now.isoformat()).execute()
+        result = (
+            await client.table("share_links")
+            .delete()
+            .lt("expires_at", now.isoformat())
+            .execute()
+        )
 
         if not result.error:
             logger.info(f"Deleted {len(result.data)} expired share links")
@@ -428,7 +458,9 @@ def close_all_connections() -> None:
 
 
 class ResourceTracker(Generic[T]):
-    def __init__(self, name: str, cleanup_func: callable, resource_type: str = "resource"):
+    def __init__(
+        self, name: str, cleanup_func: callable, resource_type: str = "resource"
+    ):
         self.name = name
         self.cleanup_func = cleanup_func
         self.resource_type = resource_type
@@ -436,21 +468,23 @@ class ResourceTracker(Generic[T]):
 
 
 async def check_token_expiry(supabase: Client) -> Dict[str, Any]:
-    result: APIResponse[Dict[str, Any]] = await supabase.table("tokens").select("*").execute()
-    
+    result: APIResponse[Dict[str, Any]] = (
+        await supabase.table("tokens").select("*").execute()
+    )
+
     if result.error:
         raise Exception(f"Error checking token expiry: {result.error}")
     if len(result.data) == 0:
         raise Exception("No tokens found")
-        
+
     return result.data[0]
 
 
 def create_presigned_url(
-    bucket_name: str, 
-    file_path: str, 
+    bucket_name: str,
+    file_path: str,
     max_size: int = 10485760,  # 10MB default
-    expiry_seconds: int = 3600  # 1 hour default
+    expiry_seconds: int = 3600,  # 1 hour default
 ) -> Tuple[str, Dict[str, Any]]:
     # Implementation of create_presigned_url function
     pass
@@ -458,31 +492,41 @@ def create_presigned_url(
 
 async def get_report_by_id(supabase: Client, report_id: str) -> Dict[str, Any]:
     """Get a report by its ID."""
-    result: APIResponse[Dict[str, Any]] = await supabase.table("reports").select("*").eq("id", report_id).execute()
-    
+    result: APIResponse[Dict[str, Any]] = (
+        await supabase.table("reports").select("*").eq("id", report_id).execute()
+    )
+
     if result.error:
         raise SupabaseConnectionError(f"Error getting report: {result.error}")
     if len(result.data) == 0:
         raise SupabaseConnectionError(f"Report not found: {report_id}")
-        
+
     return cast(Dict[str, Any], result.data[0])
 
 
 async def get_reports(supabase: Client) -> List[Dict[str, Any]]:
     """Get all reports."""
-    result: APIResponse[List[Dict[str, Any]]] = await supabase.table("reports").select("*").execute()
-    
+    result: APIResponse[List[Dict[str, Any]]] = (
+        await supabase.table("reports").select("*").execute()
+    )
+
     if result.error:
         raise SupabaseConnectionError(f"Error getting reports: {result.error}")
-        
+
     return cast(List[Dict[str, Any]], result.data)
 
 
-async def call_function(supabase: Client, function_name: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def call_function(
+    supabase: Client, function_name: str, params: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """Call a Supabase Edge Function."""
-    result: APIResponse[Dict[str, Any]] = await supabase.rpc(function_name, params).execute()
-    
+    result: APIResponse[Dict[str, Any]] = await supabase.rpc(
+        function_name, params
+    ).execute()
+
     if result.error:
-        raise SupabaseConnectionError(f"Error calling function {function_name}: {result.error}")
-        
+        raise SupabaseConnectionError(
+            f"Error calling function {function_name}: {result.error}"
+        )
+
     return cast(Dict[str, Any], result.data)

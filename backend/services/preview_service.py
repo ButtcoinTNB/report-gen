@@ -36,6 +36,7 @@ if IS_WINDOWS:
 else:
     logger.info("Running on non-Windows platform, using alternative PDF conversion")
 
+
 class PreviewService:
     def __init__(self):
         self.preview_dir = Path("previews")

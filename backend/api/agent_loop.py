@@ -8,7 +8,15 @@ from typing import Dict, List, Optional, Any, Union, AsyncIterator, cast
 import logging
 import json
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -57,13 +65,16 @@ file_handler.setFormatter(
 )
 metrics_logger.addHandler(file_handler)
 
+
 # Helper function
-def format_insurance_data(insurance_data: Dict[str, Any], document_ids: List[str]) -> str:
+def format_insurance_data(
+    insurance_data: Dict[str, Any], document_ids: List[str]
+) -> str:
     """
     Format insurance data and document IDs into a structured string for AI processing
     """
     formatted_content = "Insurance Report Request:\n\n"
-    
+
     # Add insurance data in a structured format
     formatted_content += "Insurance Information:\n"
     for key, value in insurance_data.items():
@@ -73,13 +84,14 @@ def format_insurance_data(insurance_data: Dict[str, Any], document_ids: List[str
                 formatted_content += f"  - {sub_key}: {sub_value}\n"
         else:
             formatted_content += f"- {key}: {value}\n"
-    
+
     # Add document IDs
     formatted_content += "\nDocument IDs for Analysis:\n"
     for doc_id in document_ids:
         formatted_content += f"- {doc_id}\n"
-    
+
     return formatted_content
+
 
 class AgentLoopRequest(BaseModel):
     report_id: str
@@ -127,25 +139,38 @@ class CancelTaskRequest(BaseModel):
 
 class TaskInput(BaseModel):
     """Input data for launching a task"""
-    insurance_data: Dict[str, Any] = Field(..., description="Insurance data for the report")
-    document_ids: List[str] = Field(..., description="List of document IDs to include in the analysis")
+
+    insurance_data: Dict[str, Any] = Field(
+        ..., description="Insurance data for the report"
+    )
+    document_ids: List[str] = Field(
+        ..., description="List of document IDs to include in the analysis"
+    )
     input_type: str = Field("insurance", description="Type of input data")
     user_id: Optional[str] = Field(None, description="User ID for task ownership")
-    max_iterations: int = Field(3, description="Maximum number of iterations for the agent loop")
-    transaction_id: Optional[str] = Field(None, description="Transaction ID for tracing")
+    max_iterations: int = Field(
+        3, description="Maximum number of iterations for the agent loop"
+    )
+    transaction_id: Optional[str] = Field(
+        None, description="Transaction ID for tracing"
+    )
     template_type: str = Field("standard", description="Type of template to use")
 
 
 class RefineInput(BaseModel):
     """Input data for refining a report"""
+
     report_id: str = Field(..., description="ID of the report to refine")
     feedback: str = Field(..., description="User feedback for refinement")
     user_id: Optional[str] = Field(None, description="User ID for task ownership")
-    transaction_id: Optional[str] = Field(None, description="Transaction ID for tracing")
+    transaction_id: Optional[str] = Field(
+        None, description="Transaction ID for tracing"
+    )
 
 
 class CancelInput(BaseModel):
     """Input data for cancelling a task"""
+
     userId: Optional[str] = Field(None, description="User ID for validation")
     transactionId: Optional[str] = Field(None, description="Transaction ID for tracing")
 
@@ -545,22 +570,24 @@ async def process_report_generation(
         )
 
         # Define progress callback with proper types
-        async def progress_callback(progress: float, message: str = "", stage: Optional[str] = None, 
-                                     estimated_time_remaining: Optional[float] = None) -> None:
+        async def progress_callback(
+            progress: float,
+            message: str = "",
+            stage: Optional[str] = None,
+            estimated_time_remaining: Optional[float] = None,
+        ) -> None:
             await update_task_status(
                 task_id=task_id,
                 status=tasks_cache[task_id]["status"],
-                message=message or f"Processing report, {int(progress * 100)}% complete",
+                message=message
+                or f"Processing report, {int(progress * 100)}% complete",
                 progress=float(progress),
                 stage=stage or "ai_processing",
-                estimated_time_remaining=estimated_time_remaining
+                estimated_time_remaining=estimated_time_remaining,
             )
 
         # Create AI Agent Loop
-        agent_loop = AIAgentLoop(
-            max_loops=3,
-            progress_callback=progress_callback
-        )
+        agent_loop = AIAgentLoop(max_loops=3, progress_callback=progress_callback)
 
         # Format the user content
         formatted_content = format_insurance_data(insurance_data, document_ids)
@@ -574,7 +601,9 @@ async def process_report_generation(
             message=tasks_cache[task_id]["message"],
             progress=float(tasks_cache[task_id]["progress"]),
             stage=tasks_cache[task_id].get("stage"),
-            estimated_time_remaining=tasks_cache[task_id].get("estimated_time_remaining")
+            estimated_time_remaining=tasks_cache[task_id].get(
+                "estimated_time_remaining"
+            ),
         )
 
         # Generate report
@@ -619,7 +648,7 @@ async def process_report_generation(
             status="failed",
             message=f"Error generating report: {str(e)}",
             progress=0.0,
-            error=str(e)
+            error=str(e),
         )
         raise
 
@@ -638,7 +667,7 @@ async def process_report_refinement(
             task_id=task_id,
             status="processing",
             message="Starting report refinement",
-            progress=0.0
+            progress=0.0,
         )
 
         # Check if report exists
@@ -650,7 +679,7 @@ async def process_report_refinement(
                 status="failed",
                 message="Failed to refine report",
                 progress=0.0,
-                error=error_message
+                error=error_message,
             )
             return
 
@@ -666,7 +695,7 @@ async def process_report_refinement(
                 status="failed",
                 message="Failed to refine report",
                 progress=0.0,
-                error=error_message
+                error=error_message,
             )
             return
 
@@ -750,7 +779,9 @@ async def process_report_generation_v2(task_id: str, request: AgentLoopRequest) 
             message=tasks_cache[task_id]["message"],
             progress=float(tasks_cache[task_id]["progress"]),
             stage=tasks_cache[task_id].get("stage"),
-            estimated_time_remaining=tasks_cache[task_id].get("estimated_time_remaining")
+            estimated_time_remaining=tasks_cache[task_id].get(
+                "estimated_time_remaining"
+            ),
         )
 
         # Create AI Agent Loop with progress callback
@@ -762,8 +793,8 @@ async def process_report_generation_v2(task_id: str, request: AgentLoopRequest) 
                 message=message,
                 progress=progress,
                 stage=stage,
-                estimated_time_remaining=estimated_time_remaining
-            )
+                estimated_time_remaining=estimated_time_remaining,
+            ),
         )
 
         # Run the agent loop
@@ -775,7 +806,9 @@ async def process_report_generation_v2(task_id: str, request: AgentLoopRequest) 
             message=tasks_cache[task_id]["message"],
             progress=float(tasks_cache[task_id]["progress"]),
             stage=tasks_cache[task_id].get("stage"),
-            estimated_time_remaining=tasks_cache[task_id].get("estimated_time_remaining")
+            estimated_time_remaining=tasks_cache[task_id].get(
+                "estimated_time_remaining"
+            ),
         )
 
         # Generate report
@@ -791,7 +824,9 @@ async def process_report_generation_v2(task_id: str, request: AgentLoopRequest) 
             message=tasks_cache[task_id]["message"],
             progress=float(tasks_cache[task_id]["progress"]),
             stage=tasks_cache[task_id].get("stage"),
-            estimated_time_remaining=tasks_cache[task_id].get("estimated_time_remaining")
+            estimated_time_remaining=tasks_cache[task_id].get(
+                "estimated_time_remaining"
+            ),
         )
 
         # Extract results
@@ -871,7 +906,9 @@ async def process_report_generation_v2(task_id: str, request: AgentLoopRequest) 
             message=tasks_cache[task_id]["message"],
             progress=float(tasks_cache[task_id]["progress"]),
             stage=tasks_cache[task_id].get("stage"),
-            estimated_time_remaining=tasks_cache[task_id].get("estimated_time_remaining")
+            estimated_time_remaining=tasks_cache[task_id].get(
+                "estimated_time_remaining"
+            ),
         )
 
     except Exception as e:
@@ -896,7 +933,9 @@ async def process_report_generation_v2(task_id: str, request: AgentLoopRequest) 
             message=tasks_cache[task_id]["message"],
             progress=float(tasks_cache[task_id]["progress"]),
             stage=tasks_cache[task_id].get("stage"),
-            estimated_time_remaining=tasks_cache[task_id].get("estimated_time_remaining")
+            estimated_time_remaining=tasks_cache[task_id].get(
+                "estimated_time_remaining"
+            ),
         )
 
     finally:

@@ -2,6 +2,7 @@
 Main application entrypoint for the Insurance Report Generator API
 Handles both development and production environments
 """
+
 # ruff: noqa: E402
 
 import asyncio
@@ -54,7 +55,10 @@ from middleware.rate_limiter import rate_limit_middleware
 # Import utilities
 from utils.file_utils import safe_path_join
 from utils.metrics import MetricsCollector, initialize
-from utils.supabase_helper import cleanup_expired_connections, async_supabase_client_context
+from utils.supabase_helper import (
+    cleanup_expired_connections,
+    async_supabase_client_context,
+)
 from utils.api_rate_limiter import ApiRateLimiter
 
 # Ensure required directories exist
@@ -86,7 +90,7 @@ async def lifespan(app: FastAPI):
     # Initialize task variables
     supabase_cleanup_task = None
     rate_limiter_cleanup_task = None
-    
+
     # Startup - run initialization
     logger.info("Starting application...")
 
@@ -107,12 +111,12 @@ async def lifespan(app: FastAPI):
     # Create background tasks
     try:
         logger.info("Creating background cleanup tasks...")
-        
+
         # Task for cleaning up the Supabase connections
         supabase_cleanup_task = asyncio.create_task(
             start_supabase_connection_cleanup_scheduler()
         )
-        
+
         # Task for cleaning up the rate limiter and resetting metrics
         rate_limiter_cleanup_task = asyncio.create_task(
             start_rate_limiter_cleanup_scheduler()
@@ -285,7 +289,12 @@ async def cleanup_old_data(max_age_hours: int = 24):
                 try:
                     async with async_supabase_client_context() as supabase:
                         # Try to get a single row to check schema
-                        response = await supabase.table("reports").select("*").limit(1).execute()
+                        response = (
+                            await supabase.table("reports")
+                            .select("*")
+                            .limit(1)
+                            .execute()
+                        )
                         if response.data and "files_cleaned" in response.data[0]:
                             # Column exists, proceed with update
                             # Update records where files_cleaned is null and created_at is older than max_age_time
@@ -297,7 +306,9 @@ async def cleanup_old_data(max_age_hours: int = 24):
                                 .execute()
                             )
 
-                            logger.info(f"Updated database for cleaned files: {response}")
+                            logger.info(
+                                f"Updated database for cleaned files: {response}"
+                            )
                         else:
                             logger.info(
                                 "Skipping database update: files_cleaned column not found in schema"
@@ -344,7 +355,9 @@ async def start_rate_limiter_cleanup_scheduler():
     while True:
         try:
             # Cleanup stale limiters
-            ApiRateLimiter.get_instance().cleanup_stale_limiters(max_age_seconds=3600)  # 1 hour
+            ApiRateLimiter.get_instance().cleanup_stale_limiters(
+                max_age_seconds=3600
+            )  # 1 hour
 
             # Reset metrics once a day (at midnight)
             current_hour = datetime.now().hour

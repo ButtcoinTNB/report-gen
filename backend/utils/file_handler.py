@@ -10,6 +10,7 @@ from utils.file_processor import FileProcessor
 
 logger = logging.getLogger(__name__)
 
+
 # Define the compatibility functions that redirect to FileProcessor
 def save_uploaded_file(file, directory, filename=None):
     """Redirect to FileProcessor.save_upload"""

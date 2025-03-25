@@ -68,13 +68,7 @@ def check_index(supabase, table_name, column_name):
     print(f"\n--- Checking index on {table_name}.{column_name} ---")
     try:
         # Try ordering by the column which should use an index if it exists
-        (
-            supabase.table(table_name)
-            .select("id")
-            .order(column_name)
-            .limit(1)
-            .execute()
-        )
+        (supabase.table(table_name).select("id").order(column_name).limit(1).execute())
         print(f"✅ {column_name} appears to be indexed (order by query succeeded)")
         return True
     except Exception as e:

@@ -10,7 +10,7 @@ from supabase._async.client import AsyncClient as SupabaseClient
 
 from ..config import get_settings
 from ..models import ShareLink, ShareLinkResponse
-from ..types.supabase import APIResponse, SingleAPIResponse
+from ..app_types.supabase import APIResponse, SingleAPIResponse
 from ..utils.supabase_helper import create_supabase_client
 
 
@@ -58,7 +58,7 @@ class ShareService:
                 APIResponse[Dict[str, Any]],
                 await self.supabase.table("share_links")
                 .insert(share_link.dict(exclude_none=True))
-                .execute()
+                .execute(),
             )
 
             if response.error:
@@ -98,7 +98,7 @@ class ShareService:
                 .select("*")
                 .eq("token", token)
                 .single()
-                .execute()
+                .execute(),
             )
 
             if response.error:
@@ -112,7 +112,9 @@ class ShareService:
         except Exception as e:
             raise Exception(f"Failed to get share link: {str(e)}")
 
-    async def update_remaining_downloads(self, token: str, remaining_downloads: int) -> None:
+    async def update_remaining_downloads(
+        self, token: str, remaining_downloads: int
+    ) -> None:
         """
         Update the remaining downloads for a share link.
 
@@ -129,7 +131,7 @@ class ShareService:
                 await self.supabase.table("share_links")
                 .update({"remaining_downloads": remaining_downloads})
                 .eq("token", token)
-                .execute()
+                .execute(),
             )
 
             if response.error:
@@ -157,7 +159,7 @@ class ShareService:
                 await self.supabase.table("share_links")
                 .select("*")
                 .eq("document_id", document_id)
-                .execute()
+                .execute(),
             )
 
             if response.error:
@@ -184,7 +186,7 @@ class ShareService:
                 await self.supabase.table("share_links")
                 .delete()
                 .eq("token", token)
-                .execute()
+                .execute(),
             )
 
             if response.error:
@@ -204,7 +206,7 @@ class ShareService:
                 await self.supabase.table("share_links")
                 .delete()
                 .lt("expires_at", datetime.utcnow())
-                .execute()
+                .execute(),
             )
 
             if response.error:
