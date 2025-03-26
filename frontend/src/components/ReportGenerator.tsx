@@ -27,8 +27,9 @@ import { generateApi } from '../services'; // Import the API adapter
 import { Report, ReportCamel, adaptReport } from '../types';
 import { logger } from '../utils/logger';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
-import { setAdditionalInfo, setBackgroundUpload } from '../store/reportSlice';
+import { setAdditionalInfo, setBackgroundUpload, setReportId } from '../store/reportSlice';
 import JourneyVisualizer from './JourneyVisualizer';
+import { generateUUID } from '../utils/common';
 
 // Define a subtle pulsing animation for the progress bar
 const pulse = keyframes`
@@ -90,9 +91,26 @@ const AdditionalInfoInput: React.FC = () => {
   const dispatch = useAppDispatch();
   const additionalInfo = useAppSelector(state => state.report.additionalInfo);
   const backgroundUpload = useAppSelector(state => state.report.backgroundUpload);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const handleInfoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     dispatch(setAdditionalInfo(event.target.value));
+  };
+
+  const handleSaveInfo = () => {
+    setIsSaving(true);
+    
+    // Simulate a brief save operation
+    setTimeout(() => {
+      // Update the last activity time in the store
+      dispatch(setAdditionalInfo(additionalInfo));
+      setIsSaving(false);
+      
+      // Show success message briefly
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    }, 400);
   };
 
   return (
@@ -118,6 +136,28 @@ const AdditionalInfoInput: React.FC = () => {
         helperText={`${additionalInfo.length}/1000 caratteri - Sii specifico per ottenere risultati migliori`}
       />
       
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+        {saveSuccess && (
+          <Typography 
+            variant="body2" 
+            color="success.main" 
+            sx={{ mr: 2, display: 'flex', alignItems: 'center' }}
+          >
+            <CheckCircleIcon fontSize="small" sx={{ mr: 0.5 }} />
+            Informazioni salvate!
+          </Typography>
+        )}
+        <Button 
+          variant="contained" 
+          color="primary"
+          onClick={handleSaveInfo}
+          disabled={isSaving}
+          startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : null}
+        >
+          {isSaving ? 'Salvataggio...' : 'Salva Informazioni'}
+        </Button>
+      </Box>
+      
       {backgroundUpload?.isUploading && (
         <Alert severity="info" sx={{ mt: 2 }}>
           <Typography variant="body2">
@@ -139,10 +179,14 @@ const AdditionalInfoInput: React.FC = () => {
   );
 };
 
-const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => {
+const ReportGenerator: React.FC<Props> = ({ reportId: propReportId, onGenerate, onError }) => {
   const dispatch = useAppDispatch();
   const backgroundUpload = useAppSelector(state => state.report.backgroundUpload);
   const additionalInfo = useAppSelector(state => state.report.additionalInfo);
+  const storeReportId = useAppSelector(state => state.report.reportId);
+  
+  // Use propReportId if provided, otherwise use from store
+  const reportId = propReportId || storeReportId;
   
   const [state, setState] = useState<State>({
     isGenerating: false,
@@ -162,11 +206,11 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
 
   // Function to check if we can autogenerate report
   const canAutoGenerateReport = useCallback(() => {
-    return reportId && 
+    return propReportId && 
            !backgroundUpload?.isUploading && 
            backgroundUpload?.progress === 100 && 
            additionalInfo.trim().length > 10;
-  }, [reportId, backgroundUpload, additionalInfo]);
+  }, [propReportId, backgroundUpload, additionalInfo]);
 
   // Effect to auto-trigger generation when conditions are met
   useEffect(() => {
@@ -183,7 +227,7 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
       
       return () => clearTimeout(timer);
     }
-  }, [backgroundUpload, reportId, additionalInfo, state.isGenerating]);
+  }, [backgroundUpload, propReportId, additionalInfo, state.isGenerating]);
 
   // Effect to show success message when upload completes
   useEffect(() => {
@@ -202,15 +246,15 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
   // Clean up uploads when component unmounts
   useEffect(() => {
     return () => {
-      if (reportId) {
+      if (propReportId) {
         // Notify cleanup service when component unmounts
         dispatch(setBackgroundUpload({
           shouldCleanup: true,
-          cleanupReportId: reportId
+          cleanupReportId: propReportId
         }));
       }
     };
-  }, [reportId, dispatch]);
+  }, [propReportId, dispatch]);
 
   // Effect to handle processing time and long processing message
   useEffect(() => {
@@ -289,6 +333,13 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
       return () => clearTimeout(timer);
     }
   }, [currentStep, displayStep]);
+
+  // Ensure we have a reportId for the Generate button to be enabled
+  useEffect(() => {
+    if (!reportId) {
+      dispatch(setReportId(generateUUID()));
+    }
+  }, [dispatch, reportId]);
 
   const handleGenerateReport = async () => {
     try {
@@ -390,7 +441,7 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
           color="secondary"
           size="large"
           onClick={handleGenerateReport}
-          disabled={state.isGenerating || !reportId || (backgroundUpload?.isUploading || false)}
+          disabled={state.isGenerating || !reportId}
           startIcon={state.isGenerating ? <CircularProgress size={20} color="inherit" /> : <AutoAwesomeIcon />}
           fullWidth
           sx={{ 
@@ -532,4 +583,4 @@ const ReportGenerator: React.FC<Props> = ({ reportId, onGenerate, onError }) => 
   );
 };
 
-export default ReportGenerator; 
+export default ReportGenerator;

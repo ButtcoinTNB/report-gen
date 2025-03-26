@@ -60,6 +60,10 @@ export interface TaskState {
   currentVersionId?: string;
   versions?: DocumentVersion[];
   uploadedFiles?: UploadedFile[];
+  metrics?: {
+    uploadedFiles: number;
+    totalFiles: number;
+  };
 }
 
 // Valid transitions between task stages
@@ -84,6 +88,8 @@ export type TaskContextType = {
   switchVersion: (versionId: string) => Promise<boolean>;
   compareVersions: (versionIds: [string, string]) => Promise<any>;
   downloadVersion: (versionId: string) => Promise<boolean>;
+  updateMetrics: (metrics: { uploadedFiles: number; totalFiles: number; }) => void;
+  updateProgress: (progress: number, message?: string) => void;
 };
 
 // Default context value
@@ -94,7 +100,11 @@ const defaultTaskContext: TaskContextType = {
     stage: 'idle',
     progress: 0,
     message: 'Ready to start',
-    versions: []
+    versions: [],
+    metrics: {
+      uploadedFiles: 0,
+      totalFiles: 0
+    }
   },
   updateTask: () => {},
   transitionToStage: () => false,
@@ -102,7 +112,9 @@ const defaultTaskContext: TaskContextType = {
   createVersion: async () => null,
   switchVersion: async () => false,
   compareVersions: async () => null,
-  downloadVersion: async () => false
+  downloadVersion: async () => false,
+  updateMetrics: () => {},
+  updateProgress: () => {}
 };
 
 // Create the context
@@ -120,6 +132,19 @@ export const TaskProvider: React.FC<{children: React.ReactNode}> = ({ children }
   const updateTask = useCallback((updates: Partial<TaskState>) => {
     setTask(prevTask => ({ ...prevTask, ...updates }));
   }, []);
+
+  // Update progress with optional message
+  const updateProgress = useCallback((progress: number, message?: string) => {
+    updateTask({ 
+      progress: Math.min(100, Math.max(0, progress)),
+      message: message || task.message
+    });
+  }, [updateTask, task.message]);
+
+  // Update metrics
+  const updateMetrics = useCallback((metrics: { uploadedFiles: number; totalFiles: number; }) => {
+    updateTask({ metrics });
+  }, [updateTask]);
 
   // Transition to a new stage with validation
   const transitionToStage = useCallback((newStage: ProcessStage): boolean => {
@@ -309,7 +334,9 @@ export const TaskProvider: React.FC<{children: React.ReactNode}> = ({ children }
     createVersion,
     switchVersion,
     compareVersions,
-    downloadVersion
+    downloadVersion,
+    updateMetrics,
+    updateProgress
   }), [
     task, 
     updateTask, 
@@ -318,7 +345,9 @@ export const TaskProvider: React.FC<{children: React.ReactNode}> = ({ children }
     createVersion, 
     switchVersion, 
     compareVersions, 
-    downloadVersion
+    downloadVersion,
+    updateMetrics,
+    updateProgress
   ]);
 
   return (

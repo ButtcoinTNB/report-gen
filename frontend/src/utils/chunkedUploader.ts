@@ -138,7 +138,7 @@ export class ChunkedUploader {
         formData.append('uploadId', this.uploadId);
         
         await axios.post(
-          `${API_BASE_URL}/api/upload-chunked/cancel`,
+          `${API_BASE_URL}/api/uploads/cancel`,
           formData,
           {
             headers: {
@@ -235,7 +235,7 @@ export class ChunkedUploader {
     
     try {
       const response = await axios.post<UploadMetadata>(
-        `${API_BASE_URL}/api/upload-chunked/initialize`,
+        `${API_BASE_URL}/api/uploads/initialize`,
         formData,
         {
           headers: {
@@ -342,7 +342,7 @@ export class ChunkedUploader {
     
     try {
       await axios.post(
-        `${API_BASE_URL}/api/upload-chunked/chunk`,
+        `${API_BASE_URL}/api/uploads/chunk`,
         formData,
         {
           headers: {
@@ -375,7 +375,7 @@ export class ChunkedUploader {
     
     try {
       const response = await axios.post<ChunkedUploadResult>(
-        `${API_BASE_URL}/api/upload-chunked/finalize`,
+        `${API_BASE_URL}/api/uploads/finalize`,
         formData,
         {
           headers: {

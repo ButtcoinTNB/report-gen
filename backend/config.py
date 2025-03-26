@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     APP_NAME: str = "Insurance Report Generator"
     DEBUG: bool = False
     BASE_URL: str = "http://localhost:8000"
+    ENVIRONMENT: str = Field(
+        default=os.getenv("NODE_ENV", "development"),
+        description="Current environment (development/production)"
+    )
 
     # Supabase configuration
     SUPABASE_URL: str
@@ -137,6 +141,10 @@ class Settings(BaseSettings):
 
     # CORS Settings
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "https://report-gen-liard.vercel.app")
+    CORS_ALLOW_ALL: bool = Field(
+        default=os.getenv("CORS_ALLOW_ALL", "").lower() in ("true", "1", "yes"),
+        description="Whether to allow all origins for CORS"
+    )
 
     # Additional allowed origins beyond the FRONTEND_URL
     ADDITIONAL_ALLOWED_ORIGINS: List[str] = Field(

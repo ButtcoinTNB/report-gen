@@ -1,7 +1,7 @@
 import { config } from '../../../config';
 import { apiConfig } from '../../config/api.config';
 import { 
-  Report, 
+  Report as ReportType, 
   ReportPreview, 
   AnalysisResponse,
   ReportCamel,
@@ -12,12 +12,12 @@ import {
   ReportPreview as ApiReportPreview, 
   AnalysisResponse as ApiAnalysisResponse 
 } from '../../types/api';
-import { ApiClient, createApiClient, ApiRequestOptions } from './ApiClient';
+import { ApiClient, createApiClient } from './ApiClient';
 import { adaptApiResponse, adaptApiRequest } from '../../utils/adapters';
 import { store } from '../../store';
 import { beginTransaction, completeTransaction } from '../../store/reportSlice';
 import { v4 as uuidv4 } from 'uuid';
-import { ApiService } from './ApiService';
+import { ApiService, ApiRequestOptions } from './ApiService';
 import apiClient from '../api';
 
 /**
@@ -194,12 +194,27 @@ export class ReportService extends ApiService {
   private webSocketConnections: Map<string, WebSocket> = new Map();
   
   /**
-   * Create a new ReportService instance
+   * Generate a report based on document analysis
+   * @param reportId The ID of the report
+   * @param requestData Additional data for report generation
+   * @returns Promise with the report preview
    */
-  constructor() {
-    super({
-      baseUrl: config.API_URL
-    });
+  async generateReport(
+    reportId: string, 
+    requestData: GenerateReportRequest
+  ): Promise<ReportPreviewCamel> {
+    try {
+      logger.info(`Generating report for ${reportId}`);
+      
+      const response = await this.post<ReportPreviewCamel>(`/api/reports/generate/${reportId}`, requestData);
+      
+      logger.info('Generation response:', response.data);
+      
+      return response.data;
+    } catch (error) {
+      logger.error('Error generating report:', error);
+      throw error;
+    }
   }
 
   /**
@@ -221,30 +236,6 @@ export class ReportService extends ApiService {
       return adaptedResponse;
     } catch (error) {
       logger.error('Error analyzing documents:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Generate a report based on document analysis
-   * @param reportId The ID of the report
-   * @param requestData Additional data for report generation
-   * @returns Promise with the report preview
-   */
-  async generateReport(
-    reportId: string, 
-    requestData: GenerateReportRequest
-  ): Promise<ReportPreviewCamel> {
-    try {
-      logger.info(`Generating report for ${reportId}`);
-      
-      const response = await this.post<ReportPreviewCamel>(`/reports/generate/${reportId}`, requestData);
-      
-      logger.info('Generation response:', response.data);
-      
-      return response.data;
-    } catch (error) {
-      logger.error('Error generating report:', error);
       throw error;
     }
   }
@@ -369,6 +360,8 @@ export class ReportService extends ApiService {
     try {
       // Start a cancellation transaction for state management
       const transactionAction = beginTransaction({
+        type: 'agent_loop',
+        status: 'pending',
         operation: 'cancel',
         taskId
       });
@@ -514,6 +507,8 @@ export class ReportService extends ApiService {
     
     // Start a reconnection transaction for state management
     const transactionAction = beginTransaction({
+      type: 'agent_loop',
+      status: 'pending',
       operation: 'reconnect',
       taskId,
       retryCount: reconnectAttempts

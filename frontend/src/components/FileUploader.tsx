@@ -11,7 +11,10 @@ import {
   ListItemText,
   IconButton,
   Chip,
-  Tooltip
+  Tooltip,
+  Stack,
+  Alert,
+  useTheme
 } from '@mui/material';
 import { 
   CloudUpload as UploadIcon, 
@@ -21,11 +24,15 @@ import {
   Image as ImageIcon,
   Delete as DeleteIcon,
   CheckCircle as SuccessIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  FileDownloadDone as FileDownloadDoneIcon,
+  InsertChart as InsertChartIcon
 } from '@mui/icons-material';
 import { useTask } from '../context/TaskContext';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import apiClient from '../services/api';
+import { useAppDispatch } from '../store/hooks';
+import { setDocumentIds } from '../store/reportSlice';
 
 // File status types
 type FileStatus = 'pending' | 'uploading' | 'success' | 'error';
@@ -45,6 +52,8 @@ interface FileUploaderProps {
   maxFiles?: number;
   maxSize?: number; // in bytes
   onUploadComplete?: (fileIds: string[]) => void;
+  reportId?: string;
+  allowContinueWhileUploading?: boolean;
 }
 
 // Helper to get file icon based on type
@@ -77,13 +86,31 @@ const FileUploader: React.FC<FileUploaderProps> = ({
   accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png',
   maxFiles = 5,
   maxSize = 10 * 1024 * 1024, // 10MB
-  onUploadComplete
+  onUploadComplete,
+  reportId,
+  allowContinueWhileUploading
 }) => {
-  const { task, updateProgress, updateMetrics, updateStage } = useTask();
+  const { task, updateProgress, updateMetrics, transitionToStage } = useTask();
   const { handleError, wrapPromise } = useErrorHandler();
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dispatch = useAppDispatch();
+  
+  // Avoid task context updates during initial render
+  useEffect(() => {
+    // Only initialize metrics if needed (not on every render)
+    if (files.length > 0) {
+      const successCount = files.filter(f => f.status === 'success').length;
+      const totalCount = files.filter(f => f.status !== 'error').length;
+      
+      // Update task metrics outside of render phase
+      updateMetrics({
+        uploadedFiles: successCount,
+        totalFiles: totalCount
+      });
+    }
+  }, []); // Empty dependency array - only run once after initial render
   
   // Check if files can be added
   const canAddFiles = files.length < maxFiles;
@@ -224,19 +251,48 @@ const FileUploader: React.FC<FileUploaderProps> = ({
     });
   };
   
-  // Upload a specific file
-  const uploadFile = async (fileItem: FileItem) => {
-    // Skip files that are already uploading, completed, or have errors
-    if (fileItem.status !== 'pending') {
+  // Upload all pending files
+  const uploadAllFiles = () => {
+    const pendingFiles = files.filter(f => f.status === 'pending');
+    
+    if (pendingFiles.length === 0) {
       return;
     }
     
-    // Update file status to uploading
+    // First, mark all files as uploading in a single state update
     setFiles(prevFiles => 
       prevFiles.map(f => 
-        f.id === fileItem.id ? { ...f, status: 'uploading' as const } : f
+        f.status === 'pending' ? { ...f, status: 'uploading' as const } : f
       )
     );
+    
+    // Then schedule uploads to happen in the next event loop tick
+    setTimeout(() => {
+      // Process each file upload sequentially with slight delays to avoid
+      // too many simultaneous updates
+      pendingFiles.forEach((fileItem, index) => {
+        setTimeout(() => {
+          uploadFile(fileItem, true); // Pass true to indicate file is already marked as uploading
+        }, index * 50); // Small stagger between files
+      });
+    }, 0);
+  };
+  
+  // Upload a specific file
+  const uploadFile = async (fileItem: FileItem, alreadyMarkedUploading = false) => {
+    // Skip files that are already uploading, completed, or have errors
+    if (fileItem.status !== 'pending' && !alreadyMarkedUploading) {
+      return;
+    }
+    
+    // Update file status to uploading if not already marked
+    if (!alreadyMarkedUploading) {
+      setFiles(prevFiles => 
+        prevFiles.map(f => 
+          f.id === fileItem.id ? { ...f, status: 'uploading' as const } : f
+        )
+      );
+    }
     
     try {
       // Make the upload request
@@ -270,92 +326,125 @@ const FileUploader: React.FC<FileUploaderProps> = ({
           f.id === fileItem.id ? { ...f, status: 'success' as const, progress: 100 } : f
         );
         
-        // Update task metrics
-        const successCount = newFiles.filter(f => f.status === 'success').length;
-        const totalCount = newFiles.filter(f => f.status !== 'error').length;
-        
-        updateMetrics({
-          uploadedFiles: successCount,
-          totalFiles: totalCount
-        });
-        
-        // If all files are processed, call the completion handler
-        if (successCount === totalCount && successCount > 0) {
-          const fileIds = newFiles
-            .filter(f => f.status === 'success')
-            .map(f => f.id);
-            
-          onUploadComplete?.(fileIds);
-        }
+        // Delay state updates to avoid React warnings about updating during render
+        setTimeout(() => {
+          // Update task metrics
+          const successCount = newFiles.filter(f => f.status === 'success').length;
+          const totalCount = newFiles.filter(f => f.status !== 'error').length;
+          const fileIds = newFiles.filter(f => f.status === 'success').map(f => f.id);
+          
+          updateMetrics({
+            uploadedFiles: successCount,
+            totalFiles: totalCount
+          });
+          
+          // Update Redux store with documentIds
+          dispatch(setDocumentIds(fileIds));
+          
+          // Update progress
+          updateProgress(100, 'Caricamento completato. Avvio estrazione del contenuto...');
+          
+          // If all files are processed, call the completion handler
+          if (successCount === totalCount && successCount > 0) {
+            // Transition to next stage after short delay for user to see completion
+            setTimeout(() => {
+              // Only transition if we're still in upload stage (user hasn't navigated away)
+              if (task.stage === 'upload') {
+                // Use transitionToStage for stage transition
+                transitionToStage('extraction');
+                
+                // Call onUploadComplete callback if provided
+                onUploadComplete?.(fileIds);
+              }
+            }, 1500);
+          }
+        }, 0);
         
         return newFiles;
       });
     } catch (error) {
       // Update file status to error
-      setFiles(prevFiles => 
-        prevFiles.map(f => 
+      setFiles(prevFiles => {
+        const newFiles = prevFiles.map(f => 
           f.id === fileItem.id ? { 
             ...f, 
             status: 'error' as const, 
             error: error instanceof Error ? error.message : 'Errore durante il caricamento'
           } : f
-        )
-      );
+        );
+        
+        return newFiles;
+      });
     }
-  };
-  
-  // Upload all pending files
-  const uploadAllFiles = () => {
-    const pendingFiles = files.filter(f => f.status === 'pending');
-    
-    if (pendingFiles.length === 0) {
-      return;
-    }
-    
-    // Start uploading each file
-    pendingFiles.forEach(fileItem => {
-      uploadFile(fileItem);
-    });
   };
   
   // Handle all uploads complete
   const checkAllUploadsComplete = useCallback(() => {
-    const allCompleted = files.length > 0 && 
-      files.every(f => f.status === 'success' || f.status === 'error');
+    // Calculate success and total counts
+    const successCount = files.filter(f => f.status === 'success').length;
+    const totalCount = files.filter(f => f.status !== 'error').length;
+    const allCompleted = files.every(f => f.status === 'success' || f.status === 'error');
     
-    const successfulFiles = files.filter(f => f.status === 'success');
-    
-    if (allCompleted && successfulFiles.length > 0) {
-      const fileIds = successfulFiles.map(f => f.id);
+    if (successCount > 0) {
+      const fileIds = files.filter(f => f.status === 'success').map(f => f.id);
       
-      // Update task progress and message
+      // Schedule redux update in next tick to avoid React warnings
+      setTimeout(() => {
+        // Update Redux store with documentIds
+        dispatch(setDocumentIds(fileIds));
+      }, 0);
+      
+      // Update task metrics
       updateMetrics({
-        progress: 100,
-        message: 'Caricamento completato. Avvio estrazione del contenuto...',
-        fileIds: fileIds // Add fileIds to the task state
+        uploadedFiles: successCount,
+        totalFiles: totalCount
       });
+      
+      // Update progress
+      updateProgress(100, 'Caricamento completato. Avvio estrazione del contenuto...');
       
       // Transition to next stage after short delay for user to see completion
       setTimeout(() => {
         // Only transition if we're still in upload stage (user hasn't navigated away)
         if (task.stage === 'upload') {
-          // Use updateStage instead of transitionToStage
-          updateStage('extraction', 'Estrazione del contenuto in corso');
+          // Use transitionToStage for stage transition
+          transitionToStage('extraction');
           
           // Call onUploadComplete callback if provided
           onUploadComplete?.(fileIds);
         }
       }, 1500);
-    } else if (allCompleted && successfulFiles.length === 0) {
-      // All files failed - show error
-      handleError(new Error('Nessun file è stato caricato con successo. Riprova.'));
+    } else if (allCompleted && totalCount > 0 && successCount === 0) {
+      // Only show error if all files are completed (success or error)
+      // and none were successful
+      setTimeout(() => {
+        handleError(new Error('Nessun file è stato caricato con successo. Riprova.'));
+      }, 0);
     }
-  }, [files, handleError, onUploadComplete, task.stage, updateMetrics, updateStage]);
+  }, [files, handleError, onUploadComplete, task.stage, updateMetrics, updateProgress, transitionToStage, dispatch]);
   
   // Check for completion whenever file statuses change
   useEffect(() => {
-    checkAllUploadsComplete();
-  }, [files.map(f => f.status).join(','), checkAllUploadsComplete]);
+    // Only check completion if we have files
+    if (files.length > 0) {
+      // Use a separate method to count success/completed files
+      const getCompletionStatus = () => {
+        const successCount = files.filter(f => f.status === 'success').length;
+        const allCompleted = files.every(f => f.status === 'success' || f.status === 'error');
+        return { successCount, allCompleted };
+      };
+      
+      const { successCount, allCompleted } = getCompletionStatus();
+      
+      // Only trigger completion check when appropriate
+      if (successCount > 0 || (allCompleted && files.length > 0)) {
+        // Use setTimeout to ensure this happens after render completes
+        setTimeout(() => {
+          checkAllUploadsComplete();
+        }, 0);
+      }
+    }
+  }, [files, checkAllUploadsComplete]);
   
   // Render file item
   const renderFileItem = (fileItem: FileItem) => {

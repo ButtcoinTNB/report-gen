@@ -202,6 +202,14 @@ export class APIClient {
     activeRequests.set(requestId, source);
     
     try {
+      // If data is FormData, remove Content-Type header to let browser set it
+      if (config.data instanceof FormData) {
+        delete this.axiosInstance.defaults.headers['Content-Type'];
+        if (config.headers) {
+          delete config.headers['Content-Type'];
+        }
+      }
+      
       // Implement retry logic with exponential backoff
       const response = await backOff(
         () => this.axiosInstance.request<T>(config),
@@ -221,8 +229,18 @@ export class APIClient {
         }
       );
       
+      // Restore default Content-Type header
+      if (config.data instanceof FormData) {
+        this.axiosInstance.defaults.headers['Content-Type'] = 'application/json';
+      }
+      
       return response.data;
     } catch (error) {
+      // Restore default Content-Type header in case of error
+      if (config.data instanceof FormData) {
+        this.axiosInstance.defaults.headers['Content-Type'] = 'application/json';
+      }
+      
       // Convert error to appropriate type with our error handler
       if (axios.isCancel(error)) {
         throw createError(error, {
@@ -263,7 +281,7 @@ export class APIClient {
   }
   
   /**
-   * Upload a file with progress tracking
+   * Upload a file with progress tracking using chunked upload
    */
   async uploadFile<T>(
     endpoint: string,
@@ -271,27 +289,69 @@ export class APIClient {
     additionalData: Record<string, any> = {},
     onProgress?: (progress: number) => void
   ): Promise<T> {
+    // Initialize upload
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('filename', file.name);
+    formData.append('fileSize', file.size.toString());
+    formData.append('mimeType', file.type);
     
-    // Add any additional data to the form
+    // Add additional data as form fields directly
     Object.entries(additionalData).forEach(([key, value]) => {
-      formData.append(key, JSON.stringify(value));
+      // Don't stringify the value, send it as is
+      formData.append(key, value);
     });
-    
-    const config: AxiosRequestConfig = {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          onProgress(progress);
+
+    const initResponse = await this.post<{
+      uploadId: string;
+      chunkSize: number;
+      totalChunks: number;
+      uploadedChunks: number[];
+    }>(`${endpoint}/initialize`, formData);
+
+    const { uploadId, chunkSize, totalChunks } = initResponse;
+    let uploadedChunks = 0;
+
+    // Upload chunks
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, file.size);
+      const chunk = file.slice(start, end);
+
+      const chunkFormData = new FormData();
+      chunkFormData.append('uploadId', uploadId);
+      chunkFormData.append('chunkIndex', i.toString());
+      chunkFormData.append('start', start.toString());
+      chunkFormData.append('end', end.toString());
+      chunkFormData.append('chunk', chunk);
+
+      await this.post(
+        `${endpoint}/chunk`,
+        chunkFormData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          }
         }
-      },
-    };
-    
-    return this.post<T>(endpoint, formData, config);
+      );
+
+      uploadedChunks++;
+      if (onProgress) {
+        onProgress((uploadedChunks / totalChunks) * 100);
+      }
+    }
+
+    // Finalize upload
+    const finalizeFormData = new FormData();
+    finalizeFormData.append('uploadId', uploadId);
+    finalizeFormData.append('filename', file.name);
+    if (additionalData.reportId) {
+      finalizeFormData.append('reportId', additionalData.reportId);
+    }
+
+    return this.post<T>(
+      `${endpoint}/finalize`,
+      finalizeFormData
+    );
   }
   
   /**

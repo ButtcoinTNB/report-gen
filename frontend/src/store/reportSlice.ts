@@ -276,6 +276,17 @@ export const setPreviewUrlAsync = (url: string | null): AppThunk => (dispatch) =
   dispatch(setPreviewUrl(url));
 };
 
+// Thunk to ensure a reportId exists
+export const ensureReportId = (): AppThunk => (dispatch, getState) => {
+  const { reportId } = getState().report;
+  
+  // If there's no reportId yet, generate a new one
+  if (!reportId) {
+    const newReportId = generateUUID();
+    dispatch(setReportId(newReportId));
+  }
+};
+
 // Export actions
 export const { 
   setActiveStep, 

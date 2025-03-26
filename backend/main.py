@@ -203,14 +203,12 @@ app.middleware("http")(rate_limit_middleware)
 from api import tasks
 from api.agent_loop import router as agent_loop_router, register_startup_tasks
 
-app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
-app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
-app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
+app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
+app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
+app.include_router(templates.router, prefix="/api/templates", tags=["Templates"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
-app.include_router(share.router, prefix="/api/share", tags=["share"])
-app.include_router(
-    upload_chunked_router, prefix="/api/upload-chunked", tags=["uploads"]
-)
+app.include_router(share.router, prefix="/api/share", tags=["Share"])
+app.include_router(upload_chunked_router, prefix="/api/uploads", tags=["Uploads"])
 app.include_router(agent_loop_router, prefix="/api/agent-loop", tags=["agent-loop"])
 
 # Register the agent_loop startup tasks
@@ -219,7 +217,7 @@ register_startup_tasks(app)
 # Serve static files
 upload_dir = Path("./uploads")
 upload_dir.mkdir(exist_ok=True)
-app.mount("/files", StaticFiles(directory="./uploads"), name="files")
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 # Add temp directory for processing files
 temp_dir = Path("./temp_files")
@@ -230,6 +228,8 @@ metrics_collector = MetricsCollector(
     metrics_file=Path(project_root) / "data" / "metrics.json",
 )
 
+# Mount static file directories
+app.mount("/reports", StaticFiles(directory=settings.GENERATED_REPORTS_DIR), name="reports")
 
 # Add a function to clean up old reports and uploads
 async def cleanup_old_data(max_age_hours: int = 24):

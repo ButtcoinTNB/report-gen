@@ -174,10 +174,12 @@ const ReportStepper: React.FC<Props> = ({ reportId: propReportId, onGenerate, on
 
   // Determine if the Next button should be disabled
   const isNextDisabled = () => {
+    console.log('documentIds:', documentIds); // Debug why the button is disabled
+    
     switch (activeStep) {
       case 0:
-        // Files will be uploaded in background, but we need at least one file uploading or uploaded
-        return !backgroundUpload || (!backgroundUpload.isUploading && backgroundUpload.uploadedFiles === 0);
+        // Enable if we have at least one successfully uploaded file
+        return !documentIds || documentIds.length === 0;
       case 1:
         // Disable if report is not yet generated
         return !generatedReport;

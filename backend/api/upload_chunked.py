@@ -797,34 +797,55 @@ async def finalize_chunked_upload(
 
         # Store file information in Supabase if available
         file_info = {
-            "file_id": str(uuid.uuid4()),
-            "report_id": report_id,
             "filename": filename,
-            "file_path": str(output_path),
-            "file_type": metadata["mimeType"],
-            "file_size": file_size,
+            "content_type": metadata["mimeType"],
+            "size": file_size,
+            "status": "uploaded",
+            "quality_score": 0,
+            "edit_count": 0,
+            "iterations": 0,
+            "time_saved": 0,
+            "download_count": 0,
+            "pages": 1
         }
 
         try:
-            # Store file info in Supabase
+            # Store file info in Supabase documents table
             with supabase_client_context() as supabase:
-                result = supabase.table("files").insert(file_info).execute()
+                result = supabase.table("documents").insert(file_info).execute()
 
                 if hasattr(result, "error") and result.error:
                     logger.error(f"Error storing file info in Supabase: {result.error}")
+                    return {
+                        "success": True,
+                        "fileId": None,
+                        "filename": filename,
+                        "size": file_size,
+                        "mimeType": metadata["mimeType"],
+                        "path": str(output_path),
+                        "url": f"/files/{filename}"
+                    }
         except Exception as e:
             logger.error(f"Error storing file info in Supabase: {str(e)}")
+            return {
+                "success": True,
+                "fileId": None,
+                "filename": filename,
+                "size": file_size,
+                "mimeType": metadata["mimeType"],
+                "path": str(output_path),
+                "url": f"/files/{filename}"
+            }
 
         # Return finalized file information
         return {
             "success": True,
-            "fileId": file_info["file_id"],
-            "reportId": report_id,
+            "fileId": result.data[0]["id"] if result.data else None,
             "filename": filename,
             "size": file_size,
             "mimeType": metadata["mimeType"],
             "path": str(output_path),
-            "url": f"/files/{report_id}/{filename}",
+            "url": f"/files/{filename}"
         }
     except Exception as e:
         logger.exception("Failed to finalize upload")

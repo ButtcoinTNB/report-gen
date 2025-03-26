@@ -14,6 +14,37 @@ export const isBrowser = typeof window !== 'undefined' && window.document !== un
 export const isServer = !isBrowser;
 
 /**
+ * Execute code only in browser environment
+ * @param callback Function to execute in browser
+ * @param fallback Fallback value for server environment
+ */
+export function browserOnly<T>(callback: () => T, fallback: T): T {
+  if (isBrowser) {
+    try {
+      return callback();
+    } catch (error) {
+      console.error('Browser execution error:', error);
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Run code only in browser environment
+ * @param callback Function to run in browser
+ */
+export function runInBrowser(callback: () => void): void {
+  if (isBrowser) {
+    try {
+      callback();
+    } catch (error) {
+      console.error('Browser execution error:', error);
+    }
+  }
+}
+
+/**
  * Determine if we're in a development environment
  */
 export const isDevelopment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'development';

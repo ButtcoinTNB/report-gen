@@ -13,7 +13,7 @@ const getEnvVar = (name: string, defaultValue: string = ''): string => {
 
 // In production (Vercel), use the NEXT_PUBLIC_API_URL environment variable
 // In development, fall back to localhost
-const API_URL = getEnvVar('NEXT_PUBLIC_API_URL', 'http://localhost:8000');
+const API_URL = getEnvVar('NEXT_PUBLIC_API_URL', 'http://localhost:8001');
 
 // Define endpoint structure
 interface Endpoints {
@@ -62,7 +62,7 @@ Object.keys(config).forEach(key => {
     
     // Set fallback values for different config types
     if (key === 'API_URL') {
-      (config as any)[key] = 'http://localhost:8000';
+      (config as any)[key] = 'http://localhost:8001';
     }
   }
 });

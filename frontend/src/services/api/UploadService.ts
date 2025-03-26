@@ -2,7 +2,7 @@ import { ApiClient, ApiRequestOptions, createApiClient } from './ApiClient';
 import { config } from '../../../config';
 import { logger } from '../../utils/logger';
 import { adaptApiRequest, adaptApiResponse } from '../../utils/adapters';
-import { processUploadError } from '../../utils/errorHandler';
+import { handleError } from '../../utils/errorHandler';
 import { throttle } from '../../utils/throttle';
 
 /**
@@ -163,7 +163,7 @@ export class UploadService extends ApiClient {
    */
   constructor() {
     // Get the base URL for the upload API - use the Next.js API route
-    let baseUrl = '/api/upload';
+    let baseUrl = '/api/uploads';
     
     super({
       baseUrl,
@@ -269,7 +269,7 @@ export class UploadService extends ApiClient {
     } catch (error) {
       logger.error('Error uploading file:', error);
       // Process error for better user feedback
-      const structuredError = processUploadError(error);
+      const structuredError = handleError(error);
       // Preserve the original error's structure but augment with structured info
       const enhancedError = new Error(structuredError.message);
       (enhancedError as any).category = structuredError.category;
@@ -439,7 +439,7 @@ export class UploadService extends ApiClient {
         reportId: reportId || null
       });
 
-      const initResponse = await this.post<ChunkedUploadInitResponse>('/chunked/init', initRequest);
+      const initResponse = await this.post<ChunkedUploadInitResponse>('/initialize', initRequest);
       
       // Convert response to camelCase
       const camelInitResponse = adaptApiResponse<ChunkedUploadInitResponseCamel>(initResponse.data);
@@ -461,7 +461,7 @@ export class UploadService extends ApiClient {
         
         try {
           // Use specific URL pattern for each chunk that matches backend
-          const url = `/chunked/chunk/${uploadId}/${chunkIndex}`;
+          const url = `/chunk/${uploadId}/${chunkIndex}`;
           
           // Use retry logic for each chunk
           await this.post<ChunkUploadResponse>(url, formData, {
@@ -502,8 +502,11 @@ export class UploadService extends ApiClient {
       const completeRequest = adaptApiRequest({
         uploadId
       });
-
-      const completeResponse = await this.post<CompletedUploadResponse>('/chunked/complete', completeRequest);
+      
+      const completeResponse = await this.post<CompletedUploadResponse>(
+        `/finalize`,
+        completeRequest
+      );
       
       // Convert response to camelCase
       return adaptApiResponse<CompletedUploadResponseCamel>(completeResponse.data);
