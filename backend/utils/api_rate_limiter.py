@@ -12,6 +12,16 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+# Function to set up rate limiters
+def setup_rate_limiters():
+    """
+    Initialize the API rate limiters.
+    This function should be called during application startup.
+    """
+    rate_limiter = ApiRateLimiter.get_instance()
+    rate_limiter.initialize()
+
+
 class TokenBucket:
     """
     Token bucket rate limiter implementation.

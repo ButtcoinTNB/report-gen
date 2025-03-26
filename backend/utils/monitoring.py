@@ -4,8 +4,10 @@ from functools import wraps
 from typing import Any, Callable, Optional
 
 import sentry_sdk
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Counter, Gauge, Histogram, generate_latest
 from sentry_sdk.integrations.fastapi import FastApiIntegration
+from fastapi.responses import Response
+from config import settings
 
 # Metrics
 TASK_DURATION = Histogram("task_duration_seconds", "Task duration in seconds")
@@ -22,8 +24,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def init_monitoring(sentry_dsn: Optional[str] = None):
+def setup_monitoring():
     """Initialize monitoring systems"""
+    # Initialize Sentry if DSN is provided
+    sentry_dsn = getattr(settings, "SENTRY_DSN", None)
+    if sentry_dsn:
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            integrations=[FastApiIntegration()],
+            traces_sample_rate=0.1,
+            profiles_sample_rate=0.1,
+        )
+    
+    logger.info("Metrics collector initialized")
+
+
+def get_metrics():
+    """Get Prometheus metrics"""
+    data = generate_latest()
+    return Response(content=data, media_type="text/plain")
+
+
+def init_monitoring(sentry_dsn: Optional[str] = None):
+    """Initialize monitoring systems (legacy)"""
     if sentry_dsn:
         sentry_sdk.init(
             dsn=sentry_dsn,

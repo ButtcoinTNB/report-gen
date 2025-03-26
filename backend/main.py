@@ -13,11 +13,13 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Dict
 
 import sentry_sdk
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Initialize Sentry only in production
 if os.getenv("ENV", "development") == "production":
@@ -61,6 +63,8 @@ from utils.supabase_helper import (
     async_supabase_client_context,
 )
 from utils.api_rate_limiter import ApiRateLimiter
+from utils.monitoring import setup_monitoring, get_metrics
+from utils.api_rate_limiter import setup_rate_limiters
 
 # Ensure required directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -98,14 +102,14 @@ async def lifespan(app: FastAPI):
     # Initialize monitoring
     try:
         logger.info("Initializing monitoring...")
-        initialize()
+        setup_monitoring()
     except Exception as e:
         logger.error(f"Error initializing monitoring: {e}")
 
     # Initialize rate limiter
     try:
         logger.info("Initializing API rate limiter...")
-        await ApiRateLimiter.get_instance().start()
+        setup_rate_limiters()
     except Exception as e:
         logger.error(f"Error initializing API rate limiter: {e}")
 
@@ -133,7 +137,7 @@ async def lifespan(app: FastAPI):
     # Stop the rate limiter
     try:
         logger.info("Stopping API rate limiter...")
-        await ApiRateLimiter.get_instance().stop()
+        ApiRateLimiter.get_instance().stop()
     except Exception as e:
         logger.error(f"Error stopping API rate limiter: {e}")
 
@@ -155,12 +159,28 @@ app = FastAPI(
     description="API for the Insurance Report Generator",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if settings.ENVIRONMENT != "production" else None,
+    redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
 )
 
 # Add CORS middleware first
+allowed_origins = []
+
+if settings.CORS_ALLOW_ALL:
+    allowed_origins = ["*"]
+else:
+    # Add specific allowed origins
+    if settings.FRONTEND_URL:
+        allowed_origins.append(settings.FRONTEND_URL)
+    
+    # Add any additional origins from settings
+    if settings.ALLOWED_ORIGINS:
+        additional_origins = settings.ALLOWED_ORIGINS.split(",")
+        allowed_origins.extend([origin.strip() for origin in additional_origins])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -404,6 +424,15 @@ async def trigger_error():
     """
     Test endpoint to trigger a Sentry error
     """
+
+
+# Metrics endpoint for Prometheus
+@app.get("/metrics")
+async def metrics():
+    """
+    Get Prometheus metrics.
+    """
+    return get_metrics()
 
 
 # For local development
