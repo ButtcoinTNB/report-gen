@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, UTC
 from enum import Enum
-from typing import Any, Dict, List, Optional, Callable, TypeVar, Generic, cast
+from typing import Any, Dict, List, Optional, Callable, TypeVar
 
 from fastapi import Depends
 from pydantic import UUID4

@@ -1,0 +1,22 @@
+{
+  "timestamp": "2025-03-28T11:59:00.621Z",
+  "endpoints": [
+    {
+      "endpoint": "/api/uploads/initialize",
+      "method": "post",
+      "success": false,
+      "message": "connect ECONNREFUSED ::1:8000",
+      "data": null
+    },
+    {
+      "endpoint": "/api/agent-loop/generate-report",
+      "method": "post",
+      "success": false,
+      "message": "connect ECONNREFUSED ::1:8000",
+      "data": null
+    }
+  ],
+  "success": 0,
+  "failed": 2,
+  "skipped": 3
+}

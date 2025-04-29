@@ -13,13 +13,11 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict
 
 import sentry_sdk
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 # Initialize Sentry only in production
 if os.getenv("ENV", "development") == "production":
@@ -57,10 +55,11 @@ from middleware.rate_limiter import rate_limit_middleware
 
 # Import utilities
 from utils.file_utils import safe_path_join
-from utils.metrics import MetricsCollector, initialize
+from utils.metrics import MetricsCollector
 from utils.supabase_helper import (
     cleanup_expired_connections,
     async_supabase_client_context,
+    create_supabase_client,
 )
 from utils.api_rate_limiter import ApiRateLimiter
 from utils.monitoring import setup_monitoring, get_metrics
@@ -202,6 +201,7 @@ app.middleware("http")(rate_limit_middleware)
 # Import and include routers
 from api import tasks
 from api.agent_loop import router as agent_loop_router, register_startup_tasks
+from api.generate import router as generate_router
 
 app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
@@ -210,6 +210,7 @@ app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 app.include_router(share.router, prefix="/api/share", tags=["Share"])
 app.include_router(upload_chunked_router, prefix="/api/uploads", tags=["Uploads"])
 app.include_router(agent_loop_router, prefix="/api/agent-loop", tags=["agent-loop"])
+app.include_router(generate_router, prefix="/api/agent-loop/generate-report", tags=["Generate"])
 
 # Register the agent_loop startup tasks
 register_startup_tasks(app)
@@ -433,6 +434,47 @@ async def metrics():
     Get Prometheus metrics.
     """
     return get_metrics()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services and resources on app startup"""
+    # Create required directories
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    os.makedirs(settings.GENERATED_REPORTS_DIR, exist_ok=True)
+    os.makedirs(settings.TEMPLATES_DIR, exist_ok=True)
+    
+    # Update RLS policies for documents table
+    await update_rls_policies()
+    
+    logger.info(f"Application started with environment: {settings.ENV}")
+
+
+async def update_rls_policies():
+    """Update RLS policies for Supabase tables"""
+    try:
+        # Get SQL migration script content
+        migration_path = Path(__file__).parent / "migrations" / "add_public_documents_policy.sql"
+        if not migration_path.exists():
+            logger.warning(f"Migration file not found: {migration_path}")
+            return
+            
+        with open(migration_path, "r") as f:
+            sql_script = f.read()
+            
+        logger.info("Applying public document access policy for development environment")
+        
+        # Create a connection and execute the script
+        supabase = await create_supabase_client()
+        result = await supabase.rpc("run_sql", {"query": sql_script}).execute()
+        
+        if hasattr(result, "error") and result.error:
+            logger.error(f"Error updating RLS policies: {result.error}")
+        else:
+            logger.info("Updated RLS policies for documents table - using public access policy")
+            
+    except Exception as e:
+        logger.error(f"Failed to update RLS policies: {str(e)}")
 
 
 # For local development

@@ -328,6 +328,29 @@ class AgentService:
 
         return True
 
+    async def get_report_files(self, report_id: str) -> List[str]:
+        """
+        Get all file IDs associated with a specific report.
+        
+        Args:
+            report_id: The ID of the report to get files for
+            
+        Returns:
+            List of file IDs associated with the report
+            
+        Raises:
+            Exception: If the report is not found
+        """
+        if report_id not in self._agent_states:
+            raise Exception(f"Report {report_id} not found")
+        
+        state = self._agent_states[report_id]
+        
+        if "file_ids" not in state:
+            raise Exception(f"No files found for report {report_id}")
+        
+        return state["file_ids"]
+
 
 # Singleton instance
 agent_service = AgentService()

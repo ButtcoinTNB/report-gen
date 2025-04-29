@@ -22,7 +22,7 @@ try:
     from services.pdf_formatter import format_report_as_pdf
     from utils.error_handler import api_error_handler, logger
     from utils.file_utils import safe_path_join
-    from utils.supabase_helper import supabase_client_context
+    from utils.supabase_helper import async_supabase_client_context
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from api.schemas import APIResponse
@@ -32,7 +32,7 @@ except ImportError:
     from services.pdf_formatter import format_report_as_pdf
     from utils.error_handler import api_error_handler, logger
     from utils.file_utils import safe_path_join
-    from utils.supabase_helper import supabase_client_context
+    from utils.supabase_helper import async_supabase_client_context
 
 # Export key functions for other modules
 __all__ = [
@@ -59,8 +59,8 @@ async def fetch_report_from_supabase(report_id: UUID4) -> str:
         HTTPException: If the report is not found or there's an error
     """
     try:
-        # Use supabase_client_context instead of create_supabase_client
-        async with supabase_client_context() as supabase:
+        # Use async_supabase_client_context instead of supabase_client_context
+        async with async_supabase_client_context() as supabase:
             # Query the reports table using report_id directly
             response = await supabase.table("reports") \
                 .select("content") \
@@ -86,8 +86,8 @@ async def update_report_file_path(report_id: UUID4, file_path: str):
         file_path: Path to the generated report file (DOCX)
     """
     try:
-        # Use supabase_client_context instead of create_supabase_client
-        async with supabase_client_context() as supabase:
+        # Use async_supabase_client_context instead of supabase_client_context
+        async with async_supabase_client_context() as supabase:
             # Update the report with the file path
             data = {"file_path": file_path, "is_finalized": True}
 

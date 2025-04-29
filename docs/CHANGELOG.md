@@ -11,14 +11,14 @@
   - `/api/download/docx/{report_id}` endpoint
   - `/api/download/file/{report_id}` endpoint
   - `/api/download/file/docx/{report_id}` endpoint
-  - `/api/generate/reports/{report_id}/refine` endpoint
+  - `/api/agent-loop/refine-report` endpoint
   - `/api/generate/simple-test` endpoint
-  - `/api/generate/reports/generate-docx` endpoint
-  - `/api/generate/from-id` endpoint
+  - `/api/reports/{report_id}/generate-docx` endpoint
+  - `/api/agent-loop/generate-report` endpoint
   - `/api/generate/analyze` endpoint
   - `/api/generate/` base endpoint
   - `/api/generate/generate` endpoint
-  - `/api/edit/{report_id}` PUT endpoint
+  - `/api/agent-loop/refine-report` PUT endpoint
   - `/api/edit/ai-refine` POST endpoint
 - Added new response models in `schemas.py`:
   - `UploadQueryResult` model

@@ -10,7 +10,7 @@ from config import settings
 from pydantic import UUID4
 from utils.error_handler import logger
 from utils.file_processor import FileProcessor
-from utils.supabase_helper import supabase_client_context
+from utils.supabase_helper import async_supabase_client_context
 
 
 # Custom exception classes for AI service
@@ -503,7 +503,7 @@ async def generate_report_text(
         # Get template content if needed
         template_content = None
         if template_id:
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
                 response = await supabase.table("templates") \
                     .select("content") \
                     .eq("template_id", str(template_id)) \
@@ -623,7 +623,7 @@ async def analyze_template(template_id: UUID4) -> Dict[str, Any]:
     """
     try:
         # Get template content
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             response = await supabase.table("templates") \
                 .select("content") \
                 .eq("template_id", str(template_id)) \
@@ -688,7 +688,7 @@ async def get_report_files(report_id: UUID4) -> List[str]:
         AIServiceError: When there's an error retrieving the files
     """
     try:
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             response = await supabase.table("reports") \
                 .select("document_ids") \
                 .eq("report_id", str(report_id)) \
@@ -734,7 +734,7 @@ async def get_template_content(template_id: UUID4) -> str:
         AIServiceError: When there's an error retrieving the template
     """
     try:
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             response = await supabase.table("templates") \
                 .select("content") \
                 .eq("template_id", str(template_id)) \

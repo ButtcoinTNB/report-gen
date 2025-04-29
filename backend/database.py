@@ -4,7 +4,7 @@ Database connection utilities for the application.
 
 import os
 from functools import lru_cache
-from typing import Any, Callable
+from typing import Callable
 
 from supabase import create_client, Client
 from postgrest._async.client import AsyncPostgrestClient

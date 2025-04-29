@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any, BinaryIO, Dict, Optional
 
-from utils.supabase_helper import create_supabase_client, supabase_client_context
+from utils.supabase_helper import async_supabase_client_context
 
 
 class UploadService:
@@ -30,7 +30,7 @@ class UploadService:
         unique_filename = f"{uuid.uuid4()}{ext}"
         storage_path = f"templates/{unique_filename}"
 
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             # Upload file to storage
             await supabase.storage.from_("templates").upload(storage_path, file)
 
@@ -65,7 +65,7 @@ class UploadService:
         unique_filename = f"{uuid.uuid4()}{ext}"
         storage_path = f"reference_reports/{unique_filename}"
 
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             # Upload file to storage
             await supabase.storage.from_("reports").upload(storage_path, file)
 
@@ -102,7 +102,7 @@ class UploadService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         storage_path = f"reports/{timestamp}_{unique_filename}"
 
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             # Upload file to storage
             await supabase.storage.from_("reports").upload(storage_path, file)
 
@@ -128,7 +128,7 @@ class UploadService:
         """
         Get a signed URL for accessing a file.
         """
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             return await supabase.storage.from_(bucket).create_signed_url(
                 file_path, expires_in=expires_in
             )

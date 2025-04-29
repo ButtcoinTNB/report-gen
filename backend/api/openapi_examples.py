@@ -234,8 +234,8 @@ COMMON_ERROR_EXAMPLES = {
 
 # Mapping of endpoints to examples
 ENDPOINT_EXAMPLES: Dict[str, Dict[str, Any]] = {
-    "/api/generate": {"post": GENERATE_REPORT_EXAMPLES},
-    "/api/upload": {"post": UPLOAD_EXAMPLES},
+    "/api/agent-loop/generate-report": {"post": GENERATE_REPORT_EXAMPLES},
+    "/api/uploads/initialize": {"post": UPLOAD_EXAMPLES},
     "/api/download/{report_id}": {"get": DOWNLOAD_EXAMPLES},
     "/api/edit/refine/{report_id}": {"post": REFINE_EXAMPLES},
 }

@@ -25,7 +25,7 @@ These endpoints function with or without authentication, but associate data with
 
 - **`/api/upload/documents`** - Uploading case documents
 - **`/api/generate/generate`** - Generating report content
-- **`/api/generate/from-id`** - Retrieving report by ID
+- **`/api/agent-loop/generate-report`** - Retrieving report by ID
 - **`/api/generate/analyze`** - Analyzing document content
 
 ### Public Endpoints

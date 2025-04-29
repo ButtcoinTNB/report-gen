@@ -1,5 +1,6 @@
 import os
 import sys
+import asyncio
 
 from dotenv import load_dotenv
 
@@ -498,6 +499,86 @@ def generate_sql_commands(table_info, table_name):
     return sql_commands
 
 
+async def check_and_fix_rls(supabase):
+    """
+    Check and fix Row Level Security policies for the documents table
+    """
+    print("\n=== Checking and fixing RLS Policies ===")
+
+    try:
+        # First check if documents table exists
+        print("\nChecking for documents table...")
+        result = await supabase.rpc('get_tables').execute()
+        
+        tables = []
+        if not hasattr(result, 'error') and result.data:
+            for item in result.data:
+                if 'name' in item:
+                    tables.append(item['name'])
+        
+        if 'documents' not in tables:
+            print("❌ Documents table does not exist")
+            return
+
+        print("✅ Documents table exists")
+        
+        # Apply the public access policy
+        print("\nApplying public access policy to documents table...")
+        sql = """
+        -- First check if policies exist before attempting to drop
+        DROP POLICY IF EXISTS "Users can view their own or public documents" ON documents;
+        DROP POLICY IF EXISTS "Users can create their own or public documents" ON documents;
+        DROP POLICY IF EXISTS "Users can update their own or public documents" ON documents;
+        DROP POLICY IF EXISTS "Users can delete their own or public documents" ON documents;
+
+        -- Drop old policies if they still exist
+        DROP POLICY IF EXISTS "Users can view their own documents" ON documents;
+        DROP POLICY IF EXISTS "Users can create their own documents" ON documents;
+        DROP POLICY IF EXISTS "Users can update their own documents" ON documents;
+        DROP POLICY IF EXISTS "Users can delete their own documents" ON documents;
+
+        -- Completely public policy for the demo environment
+        CREATE POLICY "Public documents access policy"
+            ON documents FOR ALL
+            USING (true)
+            WITH CHECK (true);
+
+        -- Make created_by nullable
+        ALTER TABLE documents 
+        ALTER COLUMN created_by DROP NOT NULL;
+        """
+        
+        result = await supabase.rpc('run_sql', {'query': sql}).execute()
+        
+        if hasattr(result, 'error') and result.error:
+            print(f"❌ Error applying public access policy: {result.error}")
+        else:
+            print("✅ Successfully applied public access policy to documents table")
+            
+        # Test the policy by inserting a test document
+        print("\nTesting policy with a test document insert...")
+        test_doc = {
+            "filename": "test_rls_fix.pdf",
+            "content_type": "application/pdf",
+            "size": 1024,
+            "status": "uploaded"
+        }
+        
+        result = await supabase.table('documents').insert(test_doc).execute()
+        
+        if hasattr(result, 'error') and result.error:
+            print(f"❌ Policy test failed: {result.error}")
+        else:
+            print("✅ Successfully inserted test document - RLS policy is working!")
+            # Delete the test document
+            if result.data and len(result.data) > 0 and 'id' in result.data[0]:
+                await supabase.table('documents').delete().eq('id', result.data[0]['id']).execute()
+                print("✅ Test document cleaned up")
+            
+    except Exception as e:
+        print(f"❌ Error checking/fixing RLS: {str(e)}")
+
+
 def main():
     # Load environment variables from .env file if it exists
     load_dotenv()
@@ -538,6 +619,9 @@ def main():
                     print(f"✅ {bucket} bucket already exists")
         except Exception as e:
             print("Error managing storage buckets:", str(e))
+
+        # Check and fix RLS policies
+        asyncio.run(check_and_fix_rls(supabase))
 
     except Exception as e:
         print(f"Error connecting to Supabase: {str(e)}")

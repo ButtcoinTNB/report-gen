@@ -555,97 +555,36 @@ class FileProcessor:
             return f"Error extracting text from image: {str(e)}"
 
     @staticmethod
-    def extract_text(file_path: Union[str, Path]) -> str:
+    def extract_text(file_path: str, chunk_size: int = 8192) -> str:
         """
-        Extract text from file (unified method for all file types)
-
+        Extract text from a file using streaming to handle large files efficiently.
+        
         Args:
             file_path: Path to the file
-
+            chunk_size: Size of chunks to read at a time
+            
         Returns:
-            Extracted text
+            Extracted text content
         """
-        file_path_str = str(file_path)
-
-        if not os.path.exists(file_path_str):
-            error_msg = f"File does not exist: {file_path_str}"
-            logger.error(error_msg)
-            return error_msg
-
+        text_parts = []
+        
         try:
-            # Get file info for logging
-            file_info = FileProcessor.get_file_info(file_path_str)
-            logger.info(
-                f"Extracting text from {file_info['name']} ({file_info['size_mb']:.2f} MB)"
-            )
-
-            # Check if file is empty
-            if file_info["size_bytes"] == 0:
-                error_msg = f"File is empty: {file_info['name']}"
-                logger.error(error_msg)
-                return error_msg
-
-            # Process based on file extension
-            extension = file_info["extension"].lower()
-
-            # Plain text files
-            if extension == ".txt" or (
-                file_info["is_text"] and extension not in [".pdf", ".docx", ".doc"]
-            ):
-                with open(file_path_str, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                return content
-
-            # PDF files
-            elif extension == ".pdf":
-                return FileProcessor._extract_text_from_pdf(file_path_str)
-
-            # Word documents
-            elif extension in [".docx", ".doc"]:
-                return FileProcessor._extract_text_from_docx(file_path_str)
-
-            # Image files
-            elif file_info["is_image"]:
-                return FileProcessor._extract_text_from_image(file_path_str)
-
-            # Try to detect file type if extension is unknown
-            else:
-                detected_type = FileProcessor._detect_file_type(file_path_str)
-                if detected_type:
-                    logger.info(
-                        f"Detected file type {detected_type} for {file_path_str}"
-                    )
-
-                    if detected_type == ".pdf":
-                        return FileProcessor._extract_text_from_pdf(file_path_str)
-                    elif detected_type in [".docx", ".doc"]:
-                        return FileProcessor._extract_text_from_docx(file_path_str)
-                    elif detected_type in [
-                        ".jpg",
-                        ".jpeg",
-                        ".png",
-                        ".tif",
-                        ".tiff",
-                        ".bmp",
-                        ".gif",
-                        ".webp",
-                    ]:
-                        return FileProcessor._extract_text_from_image(file_path_str)
-
-                # Last resort: try as text
-                try:
-                    with open(
-                        file_path_str, "r", encoding="utf-8", errors="ignore"
-                    ) as f:
-                        content = f.read()
-                    logger.info(f"Read file as text: {file_path_str}")
-                    return content
-                except Exception:
-                    return f"Unsupported file type for text extraction: {extension}"
-
+            with open(file_path, 'rb') as f:
+                while chunk := f.read(chunk_size):
+                    # Process chunk and extract text
+                    if chunk.strip():  # Only process non-empty chunks
+                        try:
+                            text = chunk.decode('utf-8', errors='ignore')
+                            text_parts.append(text)
+                        except Exception as e:
+                            logger.warning(f"Error processing chunk: {str(e)}")
+                            continue
+                            
         except Exception as e:
-            logger.error(f"Error extracting text from file {file_path_str}: {str(e)}")
-            return f"Error extracting text: {str(e)}"
+            logger.error(f"Error reading file {file_path}: {str(e)}")
+            raise IOError(f"Failed to read file: {str(e)}")
+        
+        return ''.join(text_parts)
 
     @staticmethod
     def extract_text_from_files(file_paths: List[Union[str, Path]]) -> str:

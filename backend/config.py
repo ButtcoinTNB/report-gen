@@ -157,6 +157,19 @@ class Settings(BaseSettings):
         description="Additional allowed origins for CORS",
     )
 
+    # File processing settings
+    ALLOWED_EXTENSIONS: List[str] = [
+        ".pdf", ".docx", ".doc", ".txt", 
+        ".jpg", ".jpeg", ".png"
+    ]
+    MAX_TOTAL_SIZE: int = 104857600  # 100MB
+    INDIVIDUAL_FILE_SIZE_RATIO: float = 0.8  # Individual file size limit as ratio of total
+    CHUNK_SIZE: int = 8192  # 8KB chunks for file processing
+    
+    @property
+    def MAX_INDIVIDUAL_FILE_SIZE(self) -> int:
+        return int(self.MAX_TOTAL_SIZE * self.INDIVIDUAL_FILE_SIZE_RATIO)
+
     # All allowed origins combining FRONTEND_URL and ADDITIONAL_ALLOWED_ORIGINS
     @property
     def allowed_origins(self) -> List[str]:
@@ -274,3 +287,9 @@ print(
     f"Config loaded. Upload dir: {settings.UPLOAD_DIR}, Generated reports dir: {settings.GENERATED_REPORTS_DIR}"
 )
 print(f"Data retention period: {settings.DATA_RETENTION_HOURS} hours")
+
+# Test user credentials for testing (not for production use)
+TEST_USER = {
+    "email": "test@example.com",
+    "password": "test_password123"
+}

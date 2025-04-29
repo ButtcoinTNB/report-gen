@@ -1,11 +1,13 @@
 # Insurance Report Generator API Documentation
 
-This API enables the generation, editing, and downloading of insurance reports based on document analysis. The system allows uploading various document types, processing them through AI models, and generating structured insurance reports.
+## Overview
+
+This document provides a comprehensive guide to the Insurance Report Generator API, detailing endpoints, request/response formats, and common workflows. The API allows for document upload processing, report generation, and file management through a RESTful interface.
 
 ## Base URL
 
-- **Development**: `http://localhost:8000`
-- **Production**: `https://[domain]` (as configured in `.env` file)
+- Development: `http://localhost:8000`
+- Production: Deployment-specific URL (see environment configuration)
 
 ## Authentication
 
@@ -18,12 +20,12 @@ Authorization: Bearer {jwt_token}
 
 ## Standard Response Format
 
-All endpoints return responses in a consistent format:
+All endpoints return responses in a standardized format:
 
 ```json
 {
   "status": "success",
-  "data": { ... }  // For successful responses
+  "data": { ... }  // Response data varies by endpoint
 }
 ```
 
@@ -47,22 +49,6 @@ The API follows an asynchronous task pattern for long-running operations:
    - **WebSocket**: Real-time updates via server-sent events
    - **Polling**: Regular status checks at an interval
 3. **Task Completion**: Task status changes to "completed" with result data or "failed" with error details
-
-## Error Handling
-
-The API uses HTTP status codes and consistent error response formats:
-
-| Status Code | Description |
-|-------------|-------------|
-| 400 | Bad Request - The request was invalid |
-| 401 | Unauthorized - Authentication required |
-| 403 | Forbidden - Insufficient permissions |
-| 404 | Not Found - Resource not found |
-| 413 | Payload Too Large - File size exceeds limit |
-| 422 | Unprocessable Entity - Validation error |
-| 429 | Too Many Requests - Rate limit exceeded |
-| 500 | Internal Server Error - Something went wrong |
-| 503 | Service Unavailable - External service unavailable |
 
 ## API Endpoints
 
@@ -249,17 +235,6 @@ curl -X POST "http://localhost:8000/api/agent-loop/generate-report" \
   "data": {
     "task_id": "task_uuid",
     "message": "Report generation started"
-  }
-}
-```
-
-**Error Response:**
-```json
-{
-  "error": {
-    "message": "An unexpected error occurred",
-    "code": "INTERNAL_ERROR",
-    "details": {}
   }
 }
 ```
@@ -634,6 +609,34 @@ curl -X PATCH "http://localhost:8000/api/documents/doc_uuid/metadata" \
    curl "http://localhost:8000/api/reports/report_uuid/download" --output refined_report.docx
    ```
 
+## Error Handling
+
+Common error codes:
+
+| Code | Description |
+|------|-------------|
+| INVALID_INPUT | The request contains invalid input data |
+| FILE_NOT_FOUND | The requested file could not be found |
+| REPORT_NOT_FOUND | The requested report could not be found |
+| TASK_NOT_FOUND | The requested task could not be found |
+| PROCESSING_ERROR | An error occurred during processing |
+| UNAUTHORIZED | Authentication is required for this operation |
+| INTERNAL_ERROR | An unexpected internal error occurred |
+
+## Rate Limiting
+
+The API implements rate limiting to prevent abuse:
+
+- Standard endpoints: 60 requests per minute
+- Resource-intensive endpoints (report generation, refinement): Stricter limits
+
+Rate limit headers in responses:
+```
+X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 58
+X-RateLimit-Reset: 1743151560
+```
+
 ## Deprecated Endpoints
 
 The following endpoints are deprecated and will be removed in future versions:
@@ -650,23 +653,32 @@ The following endpoints are deprecated and will be removed in future versions:
 10. **`POST /api/generate/reports/generate-docx`**: Use `/api/reports/{report_id}/generate-docx` instead
 11. **`POST /api/generate/reports/{report_id}/refine`**: Use `/api/agent-loop/refine-report` instead
 
-## Rate Limiting
-
-The API implements rate limiting to prevent abuse:
-
-- Standard endpoints: 60 requests per minute
-- Resource-intensive endpoints (report generation, refinement): Stricter limits
-
-Rate limit headers in responses:
-```
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 58
-X-RateLimit-Reset: 1743151560
-```
-
 ## Known Issues and Limitations
 
 1. Report generation for very large documents (>100MB) may timeout - use chunked uploads for large files
 2. The API currently handles up to 10 concurrent report generation tasks
 3. File types are limited to: PDF, DOCX, DOC, TXT, JPG, JPEG, PNG
-4. Maximum file size: 1GB (configurable via environment variables) 
+4. Maximum file size: 1GB (configurable via environment variables)
+
+## Environment Variables
+
+Key environment variables that affect API behavior:
+
+- `SUPABASE_URL` and `SUPABASE_KEY`: Database and auth configuration
+- `OPENROUTER_API_KEY`: AI model access
+- `MAX_UPLOAD_SIZE`: Maximum file size (default: 1GB)
+- `API_RATE_LIMIT`: Rate limit for API calls
+- `CORS_ALLOW_ALL`: Whether to allow all origins for CORS
+
+## Database Schema Integration
+
+The API interacts with several key database tables in Supabase:
+
+- `files`: Stores file metadata and references
+- `reports`: Stores report data and processing status
+- `tasks`: Tracks background processing tasks
+
+### Key Relationships:
+- Reports have many-to-many relationship with files through `document_ids` field
+- Tasks reference reports through `report_id` field
+- Files can be standalone or associated with reports 

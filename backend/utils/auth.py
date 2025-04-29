@@ -4,6 +4,7 @@ This is a minimal implementation since authentication is optional and not requir
 for core functionality.
 """
 
+import uuid
 from typing import Optional
 
 from fastapi import Depends
@@ -25,6 +26,11 @@ async def get_current_user(token: Optional[str] = Depends(oauth2_scheme)):
     Returns:
         A dictionary with basic user context
     """
-    # For now, just return a basic context
-    # This can be expanded later if we implement full authentication
-    return {"is_authenticated": bool(token), "context_id": "default"}
+    # For now, just return a basic context with a generated UUID for demo purposes
+    # This is sufficient for Supabase RLS policies which need a user ID
+    # In a real implementation, you would decode the JWT and extract the user ID
+    return {
+        "is_authenticated": bool(token),
+        "context_id": "default",
+        "id": str(uuid.uuid4())  # Generate a unique ID for RLS purposes
+    }

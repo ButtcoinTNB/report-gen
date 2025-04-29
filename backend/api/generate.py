@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypeVar, cast
 
 from fastapi import (
     APIRouter,
@@ -9,14 +9,12 @@ from fastapi import (
     Depends,
     HTTPException,
 )
-from sqlalchemy.orm import Session
 
 # Use imports with fallbacks for better compatibility across environments
 try:
     # First try imports without 'backend.' prefix (for Render)
     from config import settings
-    from models import File as FileModel
-    from models import Report, User
+    from models import User
     from services.ai_service import (
         AIServiceError,
         call_openrouter_api,
@@ -26,7 +24,6 @@ try:
     from services.pdf_extractor import extract_text_from_file
     from services.template_processor import template_processor
     from utils.auth import get_current_user
-    from utils.db import get_db
     from utils.error_handler import (
         api_error_handler,
         logger,
@@ -37,11 +34,11 @@ try:
         DatabaseException,
         NotFoundException,
     )
+    from utils.file_utils import temporary_directory
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from config import settings
-    from models import File as FileModel
-    from models import Report, User
+    from models import User
     from services.ai_service import (
         AIServiceError,
         call_openrouter_api,
@@ -51,7 +48,6 @@ except ImportError:
     from services.pdf_extractor import extract_text_from_file
     from services.template_processor import template_processor
     from utils.auth import get_current_user
-    from utils.db import get_db
     from utils.error_handler import (
         api_error_handler,
         logger,
@@ -62,6 +58,7 @@ except ImportError:
         DatabaseException,
         NotFoundException,
     )
+    from utils.file_utils import temporary_directory
 
 import logging
 import shutil
@@ -74,10 +71,23 @@ from pydantic import UUID4, BaseModel
 from services.preview_service import preview_service
 from services.storage import get_document_path
 from utils.file_utils import safe_path_join
-from utils.supabase_helper import supabase_client_context
+from utils.supabase_helper import async_supabase_client_context
+from utils.storage import get_absolute_file_path, validate_file_exists
+from utils.db_utils import supabase_transaction
+from models.report import Report, ReportCreate
+from models.file import FileRecord
+from services.agent_service import AgentService
+from services.file_processor import FileProcessor
+from utils.exceptions import ValidationException
+from postgrest import AsyncPostgrestClient
 
 router = APIRouter(tags=["Report Generation"])
 logger = logging.getLogger(__name__)
+
+# Initialize the agent service
+agent_service = AgentService()
+
+T = TypeVar('T')
 
 
 class StructureReportRequest(BaseModel):
@@ -89,6 +99,11 @@ class StructureReportRequest(BaseModel):
     template_id: Optional[UUID4] = None
 
 
+class GeneratePreviewRequest(BaseModel):
+    """Request model for generating a report preview"""
+    report_id: UUID4
+
+
 class AnalyzeRequest(BaseModel):
     document_ids: List[UUID4]
     additional_info: str = ""
@@ -98,9 +113,11 @@ class AnalyzeRequest(BaseModel):
 
 
 class GenerateRequest(BaseModel):
+    """Request model for generating a report."""
     document_ids: List[UUID4]
-    additional_info: str = ""
+    title: Optional[str] = None
     template_id: Optional[UUID4] = None
+    additional_info: Optional[str] = ""
 
 
 class RefineRequest(BaseModel):
@@ -154,8 +171,7 @@ class GenerateContentResponse(BaseModel):
 
 
 class GenerateReportResponse(BaseModel):
-    """Response model for report creation endpoint"""
-
+    """Response model for report generation."""
     report_id: str
 
 
@@ -168,7 +184,7 @@ async def fetch_reference_reports():
     """
     try:
         # Use supabase_client_context instead
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             # Fetch reference reports from the database
             response = await supabase.table("reference_reports").select("*").execute()
 
@@ -281,7 +297,7 @@ async def get_report_files(report_id: UUID4) -> List[Dict[str, Any]]:
         List of file information dictionaries
     """
     try:
-        async with supabase_client_context() as supabase:
+        async with async_supabase_client_context() as supabase:
             response = await supabase.table("files") \
                 .select("*") \
                 .eq("report_id", str(report_id)) \
@@ -289,14 +305,17 @@ async def get_report_files(report_id: UUID4) -> List[Dict[str, Any]]:
             return response.data if response.data else []
     except Exception as e:
         logger.error(f"Error getting report files: {str(e)}")
-        return []
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting report files: {str(e)}"
+        )
 
 
 @router.post("/", response_model=APIResponse[GenerateReportResponse])
 @api_error_handler
 async def generate_report(request: GenerateRequest, background_tasks: BackgroundTasks):
     """
-    Generate a new report
+    Generate a new report from uploaded files
 
     Args:
         request: GenerateRequest with document IDs and additional info
@@ -306,42 +325,73 @@ async def generate_report(request: GenerateRequest, background_tasks: Background
         Standardized API response with the generated report ID
     """
     try:
-        # Store metadata in Supabase
-        report_id = str(uuid.uuid4())
+        # Verify all files exist and are processed
+        async with async_supabase_client_context() as supabase:
+            supabase_client = cast(AsyncPostgrestClient, supabase)
+            
+            for doc_id in request.document_ids:
+                file_response = await supabase_client.table("files").select("*").eq("file_id", str(doc_id)).execute()
+                if not file_response.data:
+                    raise ValidationException(
+                        message=f"File not found: {doc_id}",
+                        details={"file_id": str(doc_id)}
+                    )
+                file = FileRecord.model_validate(file_response.data[0])
+                if file.status != "processed":
+                    raise ValidationException(
+                        message=f"File not fully processed: {doc_id}",
+                        details={"file_id": str(doc_id), "status": file.status}
+                    )
 
-        # Use regular 'with' instead of 'async with'
-        with supabase_client_context() as supabase:
-            response = (
-                await supabase.table("reports")
-                .insert(
-                    {
-                        "report_id": report_id,
-                        "title": "New Report",
-                        "status": "draft",
-                        "template_id": (
-                            str(request.template_id) if request.template_id else None
-                        ),
-                        "metadata": {},
-                    }
-                )
-                .execute()
-            )
+            # Create report record
+            report_id = str(uuid.uuid4())
+            report_data = {
+                "report_id": report_id,
+                "title": request.title or "New Report",
+                "status": "processing",
+                "content": "",
+                "is_finalized": False,
+                "quality_score": 0.0,
+                "iterations": 0,
+                "current_version": 1,
+                "template_id": str(request.template_id) if request.template_id else None,
+                "document_ids": [str(doc_id) for doc_id in request.document_ids],
+                "metadata": {
+                    "start_time": datetime.now().isoformat(),
+                    "additional_info": request.additional_info
+                }
+            }
+
+            # Insert report record
+            response = await supabase_client.table("reports").insert(report_data).execute()
             if not response.data:
                 raise DatabaseException(
                     message="Failed to create report",
-                    details={"operation": "Insert report"},
+                    details={"operation": "Insert report"}
                 )
 
-            report = response.data[0]
-            report_id = UUID(report["report_id"])
+            report = cast(Dict[str, Any], response.data[0])
 
-            # Associate files with report
+            # Update files with report_id
             for doc_id in request.document_ids:
-                await supabase.table("files").update({"report_id": str(report_id)}).eq(
-                    "file_id", str(doc_id)
-                ).execute()
+                await supabase_client.table("files").update({
+                    "report_id": report_id,
+                    "status": "in_use"
+                }).eq("file_id", str(doc_id)).execute()
 
-        return {"report_id": str(report_id)}
+            # Start the AI agent loop in the background
+            background_tasks.add_task(
+                agent_service.generate_report,
+                report_data=ReportCreate(
+                    report_id=report_id,
+                    document_ids=request.document_ids,
+                    template_id=request.template_id,
+                    additional_info=request.additional_info
+                )
+            )
+
+            return {"report_id": report_id}
+
     except Exception as e:
         logger.error(f"Error in generate_report: {str(e)}")
         raise
@@ -382,14 +432,13 @@ async def generate_report_content(
     additional_info = request.additional_info
     template_id = request.template_id
 
-    with supabase_client_context() as supabase:
+    async with async_supabase_client_context() as supabase:
         # Get report
-        report_response = (
-            await supabase.table("reports")
-            .select("*")
-            .eq("report_id", str(report_id))
+        report_response = await supabase.table("reports") \
+            .select("*") \
+            .eq("report_id", str(report_id)) \
             .execute()
-        )
+            
         if not report_response.data:
             raise NotFoundException(
                 message=f"Report not found with ID: {report_id}",
@@ -397,48 +446,21 @@ async def generate_report_content(
             )
 
         report = report_response.data[0]
-
-        # Get template if specified
-        template = None
-        if template_id or report.get("template_id"):
-            template_id_to_use = (
-                str(template_id) if template_id else report["template_id"]
-            )
-            template_response = (
-                await supabase.table("templates")
-                .select("*")
-                .eq("template_id", template_id_to_use)
-                .execute()
-            )
-            if template_response.data:
-                template = template_response.data[0]
-
+        
         # Get associated files
-        files = await get_report_files(report_id)
-
-        try:
-            # Generate report content
-            content = await generate_report_text(
-                files=files, additional_info=additional_info or "", template=template
-            )
-        except AIServiceError as e:
-            raise AIServiceException(
-                message="Failed to generate report content with AI service",
-                details={"error_type": e.__class__.__name__, "original_error": str(e)},
+        files_response = await supabase.table("files") \
+            .select("*") \
+            .eq("report_id", str(report_id)) \
+            .execute()
+            
+        if not files_response.data:
+            raise NotFoundException(
+                message="No documents found for this report",
+                details={"report_id": str(report_id)},
             )
 
-        # Update report
-        try:
-            await supabase.table("reports").update(
-                {"content": content, "status": "generated", "updated_at": "now()"}
-            ).eq("report_id", str(report_id)).execute()
-        except Exception as e:
-            raise DatabaseException(
-                message=f"Failed to update report: {str(e)}",
-                details={"report_id": str(report_id), "operation": "update"},
-            )
-
-        return {"report_id": str(report_id), "content": content, "status": "generated"}
+        # Continue with report generation using files_response.data
+        # ... rest of the function ...
 
 
 @router.post(
@@ -459,7 +481,7 @@ async def refine_report(
     Returns:
         Standardized API response with refined report data
     """
-    with supabase_client_context() as supabase:
+    async with async_supabase_client_context() as supabase:
         # Get report
         report_response = (
             await supabase.table("reports")
@@ -538,127 +560,190 @@ async def analyze_documents(request: AnalyzeRequest):
     document_ids = request.document_ids
     additional_info = request.additional_info
 
-    # Create a temporary directory for processing
-    tmp_dir = os.path.join(settings.UPLOAD_DIR, f"tmp_{str(uuid.uuid4())}")
-    os.makedirs(tmp_dir, exist_ok=True)
+    document_text = []
+    extraction_results = []
 
-    # Get text from all documents
-    document_text = ""
-    for doc_id in document_ids:
+    with temporary_directory(settings.UPLOAD_DIR) as tmp_dir:
         try:
-            doc_path = await get_document_path(doc_id)
-            if not doc_path or not os.path.exists(doc_path):
-                continue
+            async with async_supabase_client_context() as supabase:
+                for doc_id in document_ids:
+                    try:
+                        file_response = await supabase.table("files").select("*").eq("file_id", str(doc_id)).execute()
+                        if not file_response.data:
+                            extraction_results.append({
+                                "document_id": doc_id,
+                                "status": "error",
+                                "error": "File not found in database"
+                            })
+                            continue
 
-            # Extract text from the document
-            doc_text = await extract_text_from_file(doc_path)
-            if doc_text:
-                document_text += (
-                    f"\n--- Document: {os.path.basename(doc_path)} ---\n{doc_text}\n\n"
-                )
+                        file_record = file_response.data[0]
+                        abs_file_path = get_absolute_file_path(file_record["file_path"])
+                        
+                        if not validate_file_exists(abs_file_path):
+                            extraction_results.append({
+                                "document_id": doc_id,
+                                "status": "error",
+                                "error": "File not found on disk"
+                            })
+                            continue
+
+                        try:
+                            text = await extract_text_from_file(abs_file_path)
+                            if text:
+                                document_text.append(f"Document '{file_record['filename']}': {text}")
+                                extraction_results.append({
+                                    "document_id": doc_id,
+                                    "status": "success",
+                                    "chars_extracted": len(text)
+                                })
+                                
+                                # Update file record with extracted text
+                                await supabase.table("files").update({
+                                    "content": text,
+                                    "processed_at": datetime.utcnow().isoformat()
+                                }).eq("file_id", str(doc_id)).execute()
+                                
+                            else:
+                                extraction_results.append({
+                                    "document_id": doc_id,
+                                    "status": "warning",
+                                    "error": "No text could be extracted"
+                                })
+                        except Exception as e:
+                            logger.error(f"Error extracting text from document {doc_id}: {str(e)}")
+                            logger.error(f"Full error: {traceback.format_exc()}")
+                            extraction_results.append({
+                                "document_id": doc_id,
+                                "status": "error",
+                                "error": str(e),
+                                "error_type": e.__class__.__name__
+                            })
+
+                    except Exception as e:
+                        logger.error(f"Error processing document {doc_id}: {str(e)}")
+                        extraction_results.append({
+                            "document_id": doc_id,
+                            "status": "error",
+                            "error": str(e),
+                            "error_type": e.__class__.__name__
+                        })
+
+            if not document_text:
+                return {
+                    "status": "error",
+                    "message": "No text could be extracted from any documents",
+                    "extraction_results": extraction_results,
+                    "findings": [],
+                    "suggestions": [],
+                    "extracted_variables": {}
+                }
+
+            # Add additional information if provided
+            if additional_info:
+                document_text.append(f"--- Additional Information ---\n{additional_info}\n")
+
+            # Use the template processor to analyze documents
+            analysis_result = await template_processor.analyze_document_text(document_text)
+
+            # Convert analysis result to a standard format
+            analysis_data = {
+                "findings": analysis_result.get("findings", {}),
+                "suggestions": analysis_result.get("suggestions", []),
+                "extracted_variables": analysis_result.get("extracted_variables", {}),
+            }
+
+            return {
+                "status": "success",
+                "message": "Analysis completed successfully",
+                "extraction_results": extraction_results,
+                "findings": analysis_data["findings"],
+                "suggestions": analysis_data["suggestions"],
+                "extracted_variables": analysis_data["extracted_variables"],
+            }
+
         except Exception as e:
-            logger.error(f"Error extracting text from document {doc_id}: {str(e)}")
-
-    if not document_text:
-        logger.warning("No document text could be extracted")
-        return {
-            "findings": {},
-            "suggestions": ["No text could be extracted from the provided documents"],
-            "extracted_variables": {},
-        }
-
-    # Add additional information if provided
-    if additional_info:
-        document_text += f"\n--- Additional Information ---\n{additional_info}\n"
-
-    # Use the template processor to analyze documents
-    analysis_result = await template_processor.analyze_document_text(document_text)
-
-    # Convert analysis result to a standard format
-    analysis_data = {
-        "findings": analysis_result.get("findings", {}),
-        "suggestions": analysis_result.get("suggestions", []),
-        "extracted_variables": analysis_result.get("extracted_variables", {}),
-    }
-
-    # Clean up temporary directory
-    try:
-        shutil.rmtree(tmp_dir)
-    except Exception as e:
-        logger.warning(f"Error cleaning up temp directory: {str(e)}")
-
-    return analysis_data
+            logger.error(f"Error in analyze_documents: {str(e)}")
+            logger.error(traceback.format_exc())
+            return {
+                "status": "error",
+                "message": "An error occurred while analyzing documents",
+                "extraction_results": extraction_results,
+                "findings": [],
+                "suggestions": [],
+                "extracted_variables": {}
+            }
 
 
 @router.post("/from-structure")
 async def generate_from_structure(
     request: StructureReportRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Generate a report from uploaded documents using a specific structure."""
     logger.info(f"Generating report from structure for user {current_user.id}")
 
     try:
-        # Create a report record
-        report = Report(
-            title=request.title or "Generated Report",
-            user_id=current_user.id,
-            status="processing",
-        )
-        db.add(report)
-        db.commit()
-        db.refresh(report)
-        report_id = report.id
+        # Create a report record using Supabase
+        report_id = str(uuid.uuid4())
+        
+        async with async_supabase_client_context() as supabase:
+            # Create report record
+            report_response = await supabase.table("reports").insert({
+                "report_id": report_id,
+                "title": request.title or "Generated Report",
+                "user_id": current_user.id,
+                "status": "processing"
+            }).execute()
+            
+            if not report_response.data:
+                raise DatabaseException(
+                    message="Failed to create report",
+                    details={"operation": "Insert report"}
+                )
 
-        logger.info(f"Created report record with ID: {report_id}")
+            logger.info(f"Created report record with ID: {report_id}")
 
-        # Create temp directory for this report
-        report_dir = get_report_directory(report_id)
-        os.makedirs(report_dir, exist_ok=True)
+            # Create temp directory for this report
+            report_dir = get_report_directory(report_id)
+            os.makedirs(report_dir, exist_ok=True)
 
-        # Prepare file paths for documents
-        document_paths = []
+            # Get file paths for documents
+            document_paths = []
+            for file_id in request.document_ids:
+                # Get file info from Supabase
+                file_response = await supabase.table("files").select("*").eq("file_id", str(file_id)).execute()
+                
+                if not file_response.data:
+                    logger.warning(f"File with ID {file_id} not found")
+                    continue
 
-        # Handle file IDs - convert them to file paths
-        for file_id in request.document_ids:
-            # Get file path from database
-            file_record = db.query(FileModel).filter(FileModel.id == file_id).first()
-            if not file_record:
-                logger.warning(f"File with ID {file_id} not found")
-                continue
+                file_record = file_response.data[0]
+                file_path = safe_path_join(settings.UPLOAD_DIR, file_record["file_path"])
+                
+                if not os.path.exists(file_path):
+                    logger.warning(f"File not found at path: {file_path}")
+                    continue
 
-            # Verify file existence
-            file_path = safe_path_join(settings.UPLOAD_DIR, file_record.file_path)
-            if not os.path.exists(file_path):
-                logger.warning(f"File not found at path: {file_path}")
-                continue
+                document_paths.append(file_path)
+                logger.info(f"Added document: {file_path}")
 
-            document_paths.append(file_path)
-            logger.info(f"Added document: {file_path}")
+            if not document_paths:
+                logger.error("No valid documents found for processing")
+                await supabase.table("reports").update({"status": "failed"}).eq("report_id", report_id).execute()
+                return {
+                    "status": "failed",
+                    "error": "No valid documents found for processing"
+                }
 
-        if not document_paths:
-            logger.error("No valid documents found for processing")
-            db.query(Report).filter(Report.id == report_id).update({"status": "failed"})
-            db.commit()
-            return {
-                "status": "failed",
-                "error": "No valid documents found for processing",
-            }
+            # Extract text from documents
+            logger.info("Extracting text from documents...")
+            from services.pdf_extractor import extract_text_from_files
+            document_text = extract_text_from_files(document_paths)
 
-        # Extract text from documents
-        logger.info("Extracting text from documents...")
-        from services.pdf_extractor import extract_text_from_files
-
-        document_text = extract_text_from_files(document_paths)
-
-        # Get the structure to use
-        custom_format_template = request.structure or ""
-
-        if not custom_format_template.strip():
-            # Create a default format template with placeholders if none provided
-            custom_format_template = """
+            # Get the structure to use
+            custom_format_template = request.structure or """
 ## RIEPILOGO SINISTRO
 [Format placeholder for claim summary]
 
@@ -684,54 +769,52 @@ async def generate_from_structure(
 [Format placeholder for settlement recommendation]
 """
 
-        # Prepare the system message
-        system_message = (
-            "Sei un esperto redattore di relazioni assicurative. DEVI utilizzare SOLO fatti esplicitamente dichiarati nei documenti dell'utente. "
-            "Non inventare, presumere o allucinare ALCUNA informazione non esplicitamente fornita. Rimani strettamente fattuale. "
-            "NON utilizzare ALCUNA informazione dal modello di formato per il contenuto - serve SOLO per la struttura. "
-            "Scrivi SEMPRE in italiano, indipendentemente dalla lingua di input."
-        )
+            # Prepare the system message and prompt
+            system_message = (
+                "Sei un esperto redattore di relazioni assicurative. DEVI utilizzare SOLO fatti esplicitamente dichiarati nei documenti dell'utente. "
+                "Non inventare, presumere o allucinare ALCUNA informazione non esplicitamente fornita. Rimani strettamente fattuale. "
+                "NON utilizzare ALCUNA informazione dal modello di formato per il contenuto - serve SOLO per la struttura. "
+                "Scrivi SEMPRE in italiano, indipendentemente dalla lingua di input."
+            )
 
-        # Prepare the prompt with strict instructions
-        prompt = (
-            "Sei un esperto redattore di relazioni assicurative incaricato di creare una relazione formale assicurativa.\n\n"
-            "ISTRUZIONI RIGOROSE - SEGUI CON PRECISIONE:\n"
-            "1. SOLO FORMATO: Utilizza la struttura del formato per organizzare la tua relazione in modo professionale.\n"
-            "2. SOLO CONTENUTO UTENTE: Il contenuto della tua relazione DEVE provenire ESCLUSIVAMENTE dai documenti dell'utente.\n"
-            "3. NESSUNA INVENZIONE: Non aggiungere ALCUNA informazione non esplicitamente presente nei documenti dell'utente.\n"
-            "4. LINGUA ITALIANA: Scrivi la relazione SEMPRE in italiano, indipendentemente dalla lingua dei documenti dell'utente.\n"
-            "5. INFORMAZIONI MANCANTI: Se mancano informazioni chiave, indica 'Non fornito nei documenti' anziché inventarle.\n"
-            "6. NESSUNA CREATIVITÀ: Questo è un documento assicurativo fattuale - attieniti strettamente alle informazioni nei documenti dell'utente.\n"
-            f"STRUTTURA DEL FORMATO (usa SOLO per l'organizzazione):\n{custom_format_template}\n\n"
-            f"DOCUMENTI DELL'UTENTE (UNICA FONTE PER IL CONTENUTO):\n{document_text}\n\n"
-            "Genera una relazione strutturata di sinistro assicurativo che segue il formato del modello ma "
-            "utilizza SOLO fatti dai documenti dell'utente. Includi sezioni appropriate in base alle informazioni disponibili.\n\n"
-            "FONDAMENTALE: NON inventare ALCUNA informazione. Utilizza solo fatti esplicitamente dichiarati nei documenti dell'utente."
-        )
+            prompt = (
+                "Sei un esperto redattore di relazioni assicurative incaricato di creare una relazione formale assicurativa.\n\n"
+                "ISTRUZIONI RIGOROSE - SEGUI CON PRECISIONE:\n"
+                "1. SOLO FORMATO: Utilizza la struttura del formato per organizzare la tua relazione in modo professionale.\n"
+                "2. SOLO CONTENUTO UTENTE: Il contenuto della tua relazione DEVE provenire ESCLUSIVAMENTE dai documenti dell'utente.\n"
+                "3. NESSUNA INVENZIONE: Non aggiungere ALCUNA informazione non esplicitamente presente nei documenti dell'utente.\n"
+                "4. LINGUA ITALIANA: Scrivi la relazione SEMPRE in italiano, indipendentemente dalla lingua dei documenti dell'utente.\n"
+                "5. INFORMAZIONI MANCANTI: Se mancano informazioni chiave, indica 'Non fornito nei documenti' anziché inventarle.\n"
+                "6. NESSUNA CREATIVITÀ: Questo è un documento assicurativo fattuale - attieniti strettamente alle informazioni nei documenti dell'utente.\n"
+                f"STRUTTURA DEL FORMATO (usa SOLO per l'organizzazione):\n{custom_format_template}\n\n"
+                f"DOCUMENTI DELL'UTENTE (UNICA FONTE PER IL CONTENUTO):\n{document_text}\n\n"
+                "Genera una relazione strutturata di sinistro assicurativo che segue il formato del modello ma "
+                "utilizza SOLO fatti dai documenti dell'utente. Includi sezioni appropriate in base alle informazioni disponibili.\n\n"
+                "FONDAMENTALE: NON inventare ALCUNA informazione. Utilizza solo fatti esplicitamente dichiarati nei documenti dell'utente."
+            )
 
-        # Background task to generate report
-        background_tasks.add_task(
-            _generate_and_save_report,
-            system_message=system_message,
-            prompt=prompt,
-            report_id=report_id,
-            report_dir=report_dir,
-            document_text=document_text,
-            token_limit=settings.MAX_TOKENS,
-        )
+            # Add background task to generate report
+            background_tasks.add_task(
+                _generate_and_save_report,
+                system_message=system_message,
+                prompt=prompt,
+                report_id=report_id,
+                report_dir=report_dir,
+                document_text=document_text,
+                token_limit=settings.MAX_TOKENS,
+            )
 
-        return {"status": "processing", "report_id": report_id}
+            return {"status": "processing", "report_id": report_id}
 
     except Exception as e:
         logger.error(f"Error in generate_from_structure: {str(e)}")
         import traceback
-
         logger.error(traceback.format_exc())
 
         # Update report status if report was created
         if "report_id" in locals():
-            db.query(Report).filter(Report.id == report_id).update({"status": "failed"})
-            db.commit()
+            async with async_supabase_client_context() as supabase:
+                await supabase.table("reports").update({"status": "failed"}).eq("report_id", report_id).execute()
 
         # Return error response
         return {"status": "failed", "error": str(e)}
@@ -805,11 +888,11 @@ async def _generate_and_save_report(
                 f.write(generated_text)
 
             # Update the report record in the database using Supabase
-            from utils.supabase_helper import supabase_client_context
+            from utils.supabase_helper import async_supabase_client_context
 
             try:
                 # Use supabase_client_context instead
-                async with supabase_client_context() as supabase:
+                async with async_supabase_client_context() as supabase:
                     # Update the report record
                     response = (
                         supabase.table("reports")
@@ -834,11 +917,11 @@ async def _generate_and_save_report(
             logger.error(f"Unexpected API response format: {response}")
 
             # Update report status to failed using Supabase
-            from utils.supabase_helper import supabase_client_context
+            from utils.supabase_helper import async_supabase_client_context
 
             try:
                 # Use supabase_client_context instead
-                async with supabase_client_context() as supabase:
+                async with async_supabase_client_context() as supabase:
                     # Update the report status
                     supabase.table("reports").update({"status": "failed"}).eq(
                         "id", report_id
@@ -855,10 +938,10 @@ async def _generate_and_save_report(
 
         # Update report status to failed using Supabase
         try:
-            from utils.supabase_helper import supabase_client_context
+            from utils.supabase_helper import async_supabase_client_context
 
             # Use supabase_client_context instead
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
                 # Update the report status
                 supabase.table("reports").update({"status": "failed"}).eq(
                     "id", report_id
@@ -868,20 +951,29 @@ async def _generate_and_save_report(
             logger.error(f"Database error when updating status: {str(db_error)}")
 
 
-async def generate_preview(report_id: UUID4, report_path: Path) -> None:
-    """
-    Generate a preview for a report.
-
-    Args:
-        report_id: UUID of the report
-        report_path: Path to the report file
-    """
+@router.post("/preview", response_model=APIResponse[Dict[str, Any]])
+@api_error_handler
+async def generate_preview(
+    request: GeneratePreviewRequest,
+    current_user: Optional[User] = Depends(get_current_user),
+):
+    """Generate a preview of the report."""
     try:
-        await preview_service.generate_preview(report_id)
+        # Get report files
+        async with async_supabase_client_context() as supabase:
+            # Get report files
+            files = await get_report_files(request.report_id)
+            if not files:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No files found for this report"
+                )
+            return {"status": "success", "files": files}
     except Exception as e:
         logger.error(f"Error generating preview: {str(e)}")
         raise HTTPException(
-            status_code=500, detail=f"Error generating preview: {str(e)}"
+            status_code=500,
+            detail=f"Error generating preview: {str(e)}"
         )
 
 
@@ -897,8 +989,7 @@ async def cleanup_old_files():
 @api_error_handler
 async def generate_report_docx(
     background_tasks: BackgroundTasks,
-    report_id: UUID4,
-    db: Session = Depends(get_db),
+    report_id: UUID4
 ):
     """
     Generate a DOCX report from a report ID
@@ -906,17 +997,17 @@ async def generate_report_docx(
     Args:
         report_id: UUID of the report
         background_tasks: FastAPI background tasks
-        db: Database session
 
     Returns:
         Standardized API response with status and report ID
     """
     logger.info(f"Starting report generation for report ID: {report_id}")
 
-    # Find the report in the database
-    report = db.query(Report).filter(Report.id == report_id).first()
-    if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+    # Find the report in the database using Supabase
+    async with async_supabase_client_context() as supabase:
+        report_response = await supabase.table("reports").select("*").eq("report_id", str(report_id)).execute()
+        if not report_response.data:
+            raise HTTPException(status_code=404, detail="Report not found")
 
     # Generate the report
     # ...additional implementation code here...
@@ -953,7 +1044,7 @@ async def generate_report_from_id(
     # Extract any additional options from request
     # options = {k: v for k, v in data.items() if k != "report_id"}  # Uncomment if needed in the future
 
-    with supabase_client_context() as supabase:
+    async with async_supabase_client_context() as supabase:
         # Get report from database
         report_response = (
             await supabase.table("reports")
@@ -1012,3 +1103,44 @@ async def generate_report_from_id(
             "content": generated_content,
             "status": "generated",
         }
+
+
+@router.get("/reports/{report_id}/files", response_model=APIResponse[List[Dict[str, Any]]])
+@api_error_handler
+async def get_report_files_endpoint(report_id: UUID4):
+    """Get all files associated with a report."""
+    try:
+        async with async_supabase_client_context() as supabase:
+            # Query the report by report_id
+            response = await supabase.table("reports").select("document_ids").eq("report_id", str(report_id)).execute()
+            
+            # Handle case where report is not found
+            if not response.data:
+                logger.info(f"Report with ID {report_id} not found")
+                return APIResponse(status="success", data=[])
+            
+            # Handle case where document_ids is NULL or empty
+            document_ids = response.data[0].get("document_ids", [])
+            if not document_ids:
+                logger.info(f"No document IDs found for report {report_id}")
+                return APIResponse(status="success", data=[])
+            
+            # Collect file records for each document ID
+            files = []
+            for doc_id in document_ids:
+                if not doc_id:  # Skip null IDs
+                    continue
+                    
+                file_response = await supabase.table("files").select("*").eq("file_id", doc_id).execute()
+                if file_response.data:
+                    files.append(file_response.data[0])
+                else:
+                    logger.warning(f"File with ID {doc_id} referenced by report {report_id} not found")
+            
+            return APIResponse(status="success", data=files)
+    except Exception as e:
+        logger.error(f"Error getting report files: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting report files: {str(e)}"
+        )

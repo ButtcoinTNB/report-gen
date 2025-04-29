@@ -19,12 +19,8 @@ class DocxService:
         self.templates_dirs = [
             Path("reference_reports"),  # Direct reference_reports folder
             Path("templates"),  # Direct templates folder
-            Path(
-                safe_path_join(cwd, "reference_reports")
-            ),  # Absolute path using current working directory
-            Path(
-                safe_path_join(cwd, "backend", "reference_reports")
-            ),  # Absolute path to backend/reference_reports
+            Path(safe_path_join(cwd, "reference_reports")),  # Absolute path using current working directory
+            Path(safe_path_join(safe_path_join(cwd, "backend"), "reference_reports"))  # Absolute path to backend/reference_reports
         ]
 
         # Define output directories

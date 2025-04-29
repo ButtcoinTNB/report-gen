@@ -3,10 +3,10 @@ Service for managing share links.
 """
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, cast
 
-from supabase._async.client import AsyncClient as SupabaseClient
+from supabase._async.client import AsyncClient
 
 # Use imports with fallbacks for better compatibility across environments
 try:
@@ -14,13 +14,13 @@ try:
     from config import get_settings
     from models import ShareLink, ShareLinkResponse
     from app_types.supabase import APIResponse, SingleAPIResponse
-    from utils.supabase_helper import create_supabase_client, supabase_client_context
+    from utils.supabase_helper import async_supabase_client_context
 except ImportError:
     # Fallback to imports with 'backend.' prefix (for local dev)
     from backend.config import get_settings
     from backend.models import ShareLink, ShareLinkResponse
     from backend.app_types.supabase import APIResponse, SingleAPIResponse
-    from backend.utils.supabase_helper import create_supabase_client, supabase_client_context
+    from backend.utils.supabase_helper import async_supabase_client_context
 
 
 class ShareService:
@@ -43,7 +43,7 @@ class ShareService:
         """
         try:
             token = secrets.token_urlsafe(32)
-            expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
             share_link = ShareLink(
                 token=token,
@@ -51,14 +51,15 @@ class ShareService:
                 expires_at=expires_at,
                 max_downloads=max_downloads,
                 remaining_downloads=max_downloads,
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
             )
 
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
+                client: AsyncClient = cast(AsyncClient, supabase)
                 response: APIResponse[Dict[str, Any]] = cast(
                     APIResponse[Dict[str, Any]],
-                    await supabase.table("share_links")
-                    .insert(share_link.dict(exclude_none=True))
+                    await client.table("share_links")
+                    .insert(share_link.model_dump(exclude_none=True))
                     .execute(),
                 )
 
@@ -90,7 +91,7 @@ class ShareService:
             ShareLink object if found, None otherwise
         """
         try:
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
                 response: SingleAPIResponse[Dict[str, Any]] = cast(
                     SingleAPIResponse[Dict[str, Any]],
                     await supabase.table("share_links")
@@ -122,7 +123,7 @@ class ShareService:
             remaining_downloads: New remaining downloads value
         """
         try:
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
                 response: APIResponse[Dict[str, Any]] = cast(
                     APIResponse[Dict[str, Any]],
                     await supabase.table("share_links")
@@ -148,7 +149,7 @@ class ShareService:
             List of ShareLink objects
         """
         try:
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
                 response: APIResponse[Dict[str, Any]] = cast(
                     APIResponse[Dict[str, Any]],
                     await supabase.table("share_links")
@@ -173,7 +174,7 @@ class ShareService:
             token: The share link token
         """
         try:
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
                 response: APIResponse[Dict[str, Any]] = cast(
                     APIResponse[Dict[str, Any]],
                     await supabase.table("share_links")
@@ -191,7 +192,7 @@ class ShareService:
     async def cleanup_expired_links(self) -> None:
         """Delete all expired share links."""
         try:
-            async with supabase_client_context() as supabase:
+            async with async_supabase_client_context() as supabase:
                 response: APIResponse[Dict[str, Any]] = cast(
                     APIResponse[Dict[str, Any]],
                     await supabase.table("share_links")
@@ -205,3 +206,130 @@ class ShareService:
 
         except Exception as e:
             raise Exception(f"Failed to cleanup expired links: {str(e)}")
+
+    async def share_report(self, report_id: str, user_id: str) -> Dict[str, Any]:
+        """
+        Share a report with another user.
+        """
+        try:
+            async with async_supabase_client_context() as supabase:
+                # Check if report exists
+                report_response = await supabase.table("reports") \
+                    .select("*") \
+                    .eq("report_id", report_id) \
+                    .execute()
+
+                if not report_response.data:
+                    raise ValueError(f"Report not found: {report_id}")
+
+                # Create share record
+                share_response = await supabase.table("report_shares").insert({
+                    "report_id": report_id,
+                    "shared_with": user_id,
+                    "created_at": datetime.now().isoformat()
+                }).execute()
+
+                return share_response.data[0]
+
+        except Exception as e:
+            raise Exception(f"Error sharing report: {str(e)}")
+
+    async def get_shared_reports(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all reports shared with a user.
+        """
+        try:
+            async with async_supabase_client_context() as supabase:
+                response = await supabase.table("report_shares") \
+                    .select("*, reports(*)") \
+                    .eq("shared_with", user_id) \
+                    .execute()
+
+                return response.data if response.data else []
+
+        except Exception as e:
+            raise Exception(f"Error getting shared reports: {str(e)}")
+
+    async def remove_share(self, report_id: str, user_id: str) -> bool:
+        """
+        Remove a report share.
+        """
+        try:
+            async with async_supabase_client_context() as supabase:
+                response = await supabase.table("report_shares") \
+                    .delete() \
+                    .eq("report_id", report_id) \
+                    .eq("shared_with", user_id) \
+                    .execute()
+
+                return bool(response.data)
+
+        except Exception as e:
+            raise Exception(f"Error removing share: {str(e)}")
+
+    async def get_share_info(self, report_id: str) -> List[Dict[str, Any]]:
+        """
+        Get sharing information for a report.
+        """
+        try:
+            async with async_supabase_client_context() as supabase:
+                response = await supabase.table("report_shares") \
+                    .select("*, users(*)") \
+                    .eq("report_id", report_id) \
+                    .execute()
+
+                return response.data if response.data else []
+
+        except Exception as e:
+            raise Exception(f"Error getting share info: {str(e)}")
+
+    async def check_share_exists(self, report_id: str, user_id: str) -> bool:
+        """
+        Check if a report is shared with a user.
+        """
+        try:
+            async with async_supabase_client_context() as supabase:
+                response = await supabase.table("report_shares") \
+                    .select("*") \
+                    .eq("report_id", report_id) \
+                    .eq("shared_with", user_id) \
+                    .execute()
+
+                return bool(response.data)
+
+        except Exception as e:
+            raise Exception(f"Error checking share: {str(e)}")
+
+    async def get_report_permissions(self, report_id: str, user_id: str) -> Dict[str, bool]:
+        """
+        Get permissions for a user on a report.
+        """
+        try:
+            async with async_supabase_client_context() as supabase:
+                # Check if user owns the report
+                owner_response = await supabase.table("reports") \
+                    .select("*") \
+                    .eq("report_id", report_id) \
+                    .eq("created_by", user_id) \
+                    .execute()
+
+                is_owner = bool(owner_response.data)
+
+                # Check if report is shared with user
+                share_response = await supabase.table("report_shares") \
+                    .select("*") \
+                    .eq("report_id", report_id) \
+                    .eq("shared_with", user_id) \
+                    .execute()
+
+                is_shared = bool(share_response.data)
+
+                return {
+                    "can_view": is_owner or is_shared,
+                    "can_edit": is_owner,
+                    "can_delete": is_owner,
+                    "can_share": is_owner
+                }
+
+        except Exception as e:
+            raise Exception(f"Error getting permissions: {str(e)}")

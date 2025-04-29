@@ -34,7 +34,7 @@ The backend implementation is managed by the `FileProcessor` class, which handle
 
 The implementation exposes three main API endpoints:
 
-1. **`/api/upload/chunked/init`**: Initializes a chunked upload session
+1. **`/api/uploads/initialize`**: Initializes a chunked upload session
    - Input: Filename, file size, total chunks, MIME type
    - Output: Upload ID, status information
    

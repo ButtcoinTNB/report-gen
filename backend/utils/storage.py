@@ -142,3 +142,60 @@ def get_safe_file_path(base_dir: str, file_path: str) -> Optional[str]:
         return str(safe_path_join(base_dir, file_path))
     except ValueError:
         return None
+
+
+def get_absolute_file_path(relative_path: str) -> str:
+    """
+    Convert a relative file path to an absolute path within the uploads directory.
+
+    Args:
+        relative_path: The relative path to convert
+
+    Returns:
+        str: The absolute path within the uploads directory
+    """
+    if os.path.isabs(relative_path):
+        # If it's already absolute, validate it's within UPLOAD_DIR
+        abs_upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+        abs_path = os.path.abspath(relative_path)
+        if not abs_path.startswith(abs_upload_dir):
+            raise ValueError(f"Path {relative_path} is outside upload directory")
+        return abs_path
+    
+    return str(safe_path_join(settings.UPLOAD_DIR, relative_path))
+
+
+def get_relative_file_path(absolute_path: str) -> str:
+    """
+    Convert an absolute file path to a path relative to the uploads directory.
+
+    Args:
+        absolute_path: The absolute path to convert
+
+    Returns:
+        str: The path relative to the uploads directory
+    """
+    abs_upload_dir = os.path.abspath(settings.UPLOAD_DIR)
+    abs_path = os.path.abspath(absolute_path)
+    
+    if not abs_path.startswith(abs_upload_dir):
+        raise ValueError(f"Path {absolute_path} is outside upload directory")
+    
+    return os.path.relpath(abs_path, abs_upload_dir)
+
+
+def validate_file_exists(file_path: str) -> bool:
+    """
+    Validate that a file exists and is within the uploads directory.
+
+    Args:
+        file_path: The path to validate (can be relative or absolute)
+
+    Returns:
+        bool: True if the file exists and is valid, False otherwise
+    """
+    try:
+        abs_path = get_absolute_file_path(file_path)
+        return os.path.exists(abs_path) and os.path.isfile(abs_path)
+    except ValueError:
+        return False

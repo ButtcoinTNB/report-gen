@@ -4,7 +4,6 @@ from typing import Any, Dict, Optional
 from fastapi import (
     APIRouter,
     BackgroundTasks,
-    Body,
     Depends,
     HTTPException,
     Path,
@@ -22,7 +21,6 @@ from models.task import (
 )
 from services.task_service import TaskService, get_task_service
 from utils.logger import get_logger
-from utils.validation import validate_object_id
 
 logger = get_logger(__name__)
 

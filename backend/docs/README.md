@@ -86,7 +86,7 @@ const initUpload = async (file) => {
   const chunkSize = 1024 * 1024; // 1MB chunks
   const totalChunks = Math.ceil(file.size / chunkSize);
   
-  const response = await fetch('/api/upload/chunked/init', {
+  const response = await fetch('/api/uploads/initialize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

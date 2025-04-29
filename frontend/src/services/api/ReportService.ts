@@ -95,8 +95,13 @@ export interface EditReportResponseCamel {
 /**
  * Interface for the report generation request
  */
-export interface GenerateReportRequest {
-  text: string;
+interface GenerateReportRequest {
+  text?: string;
+}
+
+interface FileResponse {
+  file_id: string;
+  file_path: string;
 }
 
 /**
@@ -202,15 +207,22 @@ export class ReportService extends ApiService {
   async generateReport(
     reportId: string, 
     requestData: GenerateReportRequest
-  ): Promise<ReportPreviewCamel> {
+  ): Promise<void> {
     try {
-      logger.info(`Generating report for ${reportId}`);
-      
-      const response = await this.post<ReportPreviewCamel>(`/api/reports/generate/${reportId}`, requestData);
-      
-      logger.info('Generation response:', response.data);
-      
-      return response.data;
+      // First get document IDs associated with the report
+      const response = await this.get<{data: FileResponse[]}>(`/api/reports/${reportId}/files`);
+      if (!response.data?.data || response.data.data.length === 0) {
+        throw new Error('No documents found for this report');
+      }
+
+      // Extract document IDs from the response
+      const documentIds = response.data.data.map(file => file.file_id);
+
+      // Generate report with document IDs
+      await this.post('/api/agent-loop/generate-report', {
+        document_ids: documentIds,
+        additional_info: requestData.text || '',
+      });
     } catch (error) {
       logger.error('Error generating report:', error);
       throw error;

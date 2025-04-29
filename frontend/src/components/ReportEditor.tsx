@@ -59,7 +59,7 @@ const ReportEditor: React.FC = () => {
       }));
       
       // Call the API to save edits
-      const response = await fetch(`/api/edit/${reportId}`, {
+      const response = await fetch(`/api/agent-loop/refine-report`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'

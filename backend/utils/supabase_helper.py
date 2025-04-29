@@ -21,7 +21,10 @@ from typing import (
     AsyncIterator,
 )
 
-from supabase._async.client import AsyncClient as Client, create_client
+from supabase import create_client
+from supabase.client import Client, ClientOptions
+from postgrest.base_request_builder import APIResponse
+from supabase.lib.auth_client import SupabaseAuthClient
 
 # Import only one version of APIResponse to avoid conflicts
 try:
@@ -44,6 +47,11 @@ except ImportError:
 # Configure logger
 logger = logging.getLogger(__name__)
 
+import asyncio
+import time
+from postgrest.deprecated_client import Client
+from postgrest.types import APIResponse
+
 
 # Define specific exceptions for better error handling
 class SupabaseConnectionError(Exception):
@@ -61,36 +69,60 @@ class SupabaseConfigError(Exception):
 # Connection pool settings
 MAX_CONNECTIONS = 10
 MAX_RETRIES = 3
-RETRY_DELAY = 1.0
-CONNECTION_TIMEOUT = 30.0
-CONNECTION_EXPIRY_SECONDS = 300  # 5 minutes
+RETRY_DELAY = 1.0  # Base delay between retries in seconds
+CONNECTION_TIMEOUT = 3600  # 1 hour in seconds
+CONNECTION_EXPIRY_SECONDS = 300
+POOL_CLEANUP_INTERVAL = 60  # Cleanup interval in seconds
 
 
 # Thread-safe connection pool with LRU eviction and expiration
 class SupabaseConnectionPool:
-    """Thread-safe connection pool for Supabase clients with LRU eviction and expiration"""
+    """A thread-safe connection pool for Supabase clients."""
 
-    def __init__(
-        self,
-        max_size: int = MAX_CONNECTIONS,
-        expiry_seconds: int = CONNECTION_EXPIRY_SECONDS,
-    ) -> None:
-        """
-        Initialize the connection pool.
+    def __init__(self, url: str, key: str, options: Optional[ClientOptions] = None):
+        self.url = url
+        self.key = key
+        self.options = options
+        self.pool: Dict[str, Tuple[Client, float]] = {}
+        self.lock = asyncio.Lock()
+        self._cleanup_task = None
+        self._start_cleanup_task()
 
-        Args:
-            max_size: Maximum number of connections to keep in the pool
-            expiry_seconds: Time in seconds after which a connection is considered stale
-        """
-        self._lock = threading.RLock()
-        self._pool: Dict[str, Tuple[Client, datetime]] = {}
-        self._max_size = max_size
-        self._expiry_seconds = expiry_seconds
-        logger.info(
-            f"Initialized Supabase connection pool: max_size={max_size}, expiry={expiry_seconds}s"
-        )
+    def _start_cleanup_task(self):
+        """Start the periodic cleanup task if not already running."""
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
 
-    def get(self, key: str) -> Optional[Client]:
+    async def _periodic_cleanup(self):
+        """Periodically clean up expired connections."""
+        while True:
+            try:
+                await asyncio.sleep(POOL_CLEANUP_INTERVAL)
+                await self.cleanup_expired()
+            except Exception as e:
+                logger.error(f"Error during connection pool cleanup: {str(e)}")
+
+    async def cleanup_expired(self) -> None:
+        """Clean up expired connections from the pool"""
+        async with self.lock:
+            current_time = time.time()
+            expired_keys: List[str] = []
+
+            for key, (client, last_used) in self.pool.items():
+                if current_time - last_used > CONNECTION_TIMEOUT:
+                    expired_keys.append(key)
+                    try:
+                        await client.auth.sign_out()
+                    except Exception as e:
+                        logger.warning(f"Error signing out expired client: {str(e)}")
+
+            for key in expired_keys:
+                del self.pool[key]
+
+            if expired_keys:
+                logger.info(f"Cleaned up {len(expired_keys)} expired connections")
+
+    async def get(self, key: str) -> Optional[Client]:
         """
         Get a client from the pool.
 
@@ -100,15 +132,15 @@ class SupabaseConnectionPool:
         Returns:
             The client if found in the pool, None otherwise
         """
-        with self._lock:
-            if key in self._pool:
-                client, _ = self._pool[key]
+        async with self.lock:
+            if key in self.pool:
+                client, _ = self.pool[key]
                 # Update last used time
-                self._pool[key] = (client, datetime.now())
+                self.pool[key] = (client, time.time())
                 return client
             return None
 
-    def put(self, key: str, client: Client) -> None:
+    async def put(self, key: str, client: Client) -> None:
         """
         Add a client to the pool, evicting the least recently used client if necessary.
 
@@ -116,22 +148,22 @@ class SupabaseConnectionPool:
             key: The unique key for the client
             client: The Supabase client to add to the pool
         """
-        with self._lock:
+        async with self.lock:
             # Check if we need to evict
-            if len(self._pool) >= self._max_size and key not in self._pool:
-                self._evict_oldest()
+            if len(self.pool) >= MAX_CONNECTIONS and key not in self.pool:
+                await self.evict_oldest()
 
-            self._pool[key] = (client, datetime.now())
+            self.pool[key] = (client, time.time())
 
-    def _evict_oldest(self) -> None:
+    async def evict_oldest(self) -> None:
         """Evict the least recently used client from the pool"""
-        if not self._pool:
+        if not self.pool:
             return
 
         oldest_key = None
         oldest_time = None
 
-        for key, (_, last_used) in self._pool.items():
+        for key, (client, last_used) in self.pool.items():
             if oldest_time is None or last_used < oldest_time:
                 oldest_key = key
                 oldest_time = last_used
@@ -140,44 +172,30 @@ class SupabaseConnectionPool:
             logger.debug(
                 f"Evicting oldest Supabase connection: last used {oldest_time}"
             )
-            del self._pool[oldest_key]
+            client, _ = self.pool[oldest_key]
+            try:
+                await client.auth.sign_out()
+            except Exception as e:
+                logger.warning(f"Error signing out client during eviction: {str(e)}")
+            del self.pool[oldest_key]
 
-    def cleanup_expired(self) -> int:
-        """
-        Remove expired connections from the pool.
-
-        Returns:
-            Number of connections removed
-        """
-        with self._lock:
-            now = datetime.now()
-            expiration = timedelta(seconds=self._expiry_seconds)
-
-            expired_keys = [
-                key
-                for key, (_, last_used) in self._pool.items()
-                if now - last_used > expiration
-            ]
-
-            for key in expired_keys:
-                logger.debug(f"Removing expired Supabase connection: {key}")
-                del self._pool[key]
-
-            return len(expired_keys)
-
-    def clear(self) -> None:
-        """Remove all connections from the pool"""
-        with self._lock:
-            self._pool.clear()
-
-    def size(self) -> int:
+    async def size(self) -> int:
         """Get the current size of the pool"""
-        with self._lock:
-            return len(self._pool)
+        async with self.lock:
+            return len(self.pool)
+
+    async def get_session(self, client: Client) -> Optional[Dict[str, Any]]:
+        """Get the current session from the client"""
+        try:
+            session = await client.auth.get_session()
+            return session.model_dump() if session else None
+        except Exception as e:
+            logger.error(f"Error getting session: {str(e)}")
+            return None
 
 
 # Initialize the global connection pool
-_connection_pool = SupabaseConnectionPool()
+_connection_pool = SupabaseConnectionPool(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
 
 async def create_supabase_client() -> Client:
@@ -260,18 +278,51 @@ def supabase_client_context():
 async def async_supabase_client_context() -> AsyncIterator[Client]:
     """
     Async context manager for Supabase client access.
+    Ensures connections are properly managed and includes retry logic.
 
     Usage:
         async with async_supabase_client_context() as supabase:
             response = await supabase.table("reports").select("*").execute()
+
+    Raises:
+        SupabaseConnectionError: If unable to establish connection after retries
+        SupabaseConfigError: If Supabase configuration is invalid
     """
     client = None
+    attempt = 0
+    last_error = None
+
+    while attempt < MAX_RETRIES:
+        try:
+            client = await create_supabase_client()
+            # Test the connection
+            await client.auth.get_session()
+            break
+        except Exception as e:
+            attempt += 1
+            last_error = e
+            logger.warning(
+                f"Failed to create Supabase client (attempt {attempt}/{MAX_RETRIES}): {str(e)}"
+            )
+            if attempt < MAX_RETRIES:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY * attempt)  # Exponential backoff
+            continue
+
+    if client is None:
+        raise SupabaseConnectionError(
+            f"Failed to establish Supabase connection after {MAX_RETRIES} attempts. "
+            f"Last error: {str(last_error)}"
+        )
+
     try:
-        client = await create_supabase_client()
         yield client
     finally:
         if client:
-            await client.auth.sign_out()
+            try:
+                await client.auth.sign_out()
+            except Exception as e:
+                logger.warning(f"Error during Supabase client sign out: {str(e)}")
 
 
 def get_supabase_storage_url(bucket: str, path: str) -> Optional[str]:
@@ -530,3 +581,13 @@ async def call_function(
         )
 
     return cast(Dict[str, Any], result.data)
+
+
+async def get_connection(self) -> Tuple[Client, int]:
+    async with self._lock:
+        current_time = time.time()
+        
+
+async def add_connection(self, client: Client) -> int:
+    async with self._lock:
+        connection_id = self._next_connection_id
